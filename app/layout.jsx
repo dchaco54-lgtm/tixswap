@@ -1,12 +1,12 @@
 export const metadata = {
   title: "TixSwap",
-  description: "Compra y vende entradas de forma segura",
+  description: "Compra y vende entradas con seguridad",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body className="bg-gray-50 text-gray-900">
+      <body className="">
         {children}
       </body>
     </html>
