@@ -2,34 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Estilo Global */
+/* ------- ESTILOS PERSONALIZADOS -------- */
+
 body {
-  background: #f5f8ff;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  color: #111;
+  font-family: 'Inter', sans-serif;
 }
 
-/* Gradiente del hero */
+/* Fondo del Hero */
 .gradient-hero {
-  background: linear-gradient(180deg, #dce9ff 0%, #eaf0ff 100%);
-}
-
-/* Gradiente de tarjetas */
-.card-gradient {
-  background: linear-gradient(135deg, #7aa5ff 0%, #b877ff 100%);
+  background: linear-gradient(to bottom, #e8f0ff, #ffffff);
 }
 
 /* Sombra suave */
 .shadow-soft {
-  box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.08);
-}
-
-/* Hover elegante */
-.hover-pop {
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
-}
-
-.hover-pop:hover {
-  transform: translateY(-3px) scale(1.02);
-  box-shadow: 0px 12px 32px rgba(0, 0, 0, 0.15);
+  box-shadow: 0px 4px 10px rgba(0,0,0,0.08);
 }
