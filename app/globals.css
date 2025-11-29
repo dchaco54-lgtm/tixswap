@@ -15,5 +15,31 @@ body {
 
 /* Sombra suave */
 .shadow-soft {
-  box-shadow: 0px 4px 10px rgba(0,0,0,0.08);
+  box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.08);
+}
+
+/* Animación fade + slide */
+@keyframes fadeSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-slide-up {
+  animation: fadeSlideUp 0.8s ease-out forwards;
+}
+
+/* Hover animado */
+.hover-pop {
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.hover-pop:hover {
+  transform: translateY(-6px) scale(1.02);
+  box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.15);
 }
