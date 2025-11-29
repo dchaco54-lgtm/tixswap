@@ -12,9 +12,10 @@ export default function RootLayout({ children }) {
     <html lang="es">
       <body className="bg-white text-gray-900">
         <Header />
-        {children}
+        <main className="max-w-7xl mx-auto px-4">{children}</main>
         <Footer />
       </body>
     </html>
   );
 }
+
