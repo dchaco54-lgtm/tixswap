@@ -1,23 +1,34 @@
+"use client";
+
+import Link from "next/link";
+import Image from "next/image";
+
 export default function Header() {
   return (
-    <header className="w-full py-4 px-6 flex items-center justify-between bg-white shadow-sm fixed top-0 left-0 z-50">
-      <div className="flex items-center gap-2">
-        <div className="h-8 w-8 bg-blue-600 rounded-lg" />
-        <div className="font-bold text-xl">TixSwap</div>
+    <header className="w-full px-6 py-4 flex items-center justify-between bg-white shadow-sm">
+      {/* LOGO SOLO TEXTO */}
+      <div className="flex flex-col">
+        <span className="text-2xl font-bold text-[#2563eb]">TixSwap</span>
+        <span className="text-sm text-gray-500 -mt-1">
+          Reventa segura, en un clic
+        </span>
       </div>
 
-      <nav className="hidden md:flex gap-8 text-gray-700">
-        <a href="#">Comprar</a>
-        <a href="#">Vender</a>
-        <a href="#">Cómo funciona</a>
+      {/* MENU */}
+      <nav className="hidden md:flex items-center space-x-10 text-gray-700 font-medium">
+        <Link href="#">Comprar</Link>
+        <Link href="#">Vender</Link>
+        <Link href="#">Cómo funciona</Link>
       </nav>
 
-      <div className="flex gap-4">
-        <button className="text-sm">Iniciar sesión</button>
-        <button className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm shadow-soft">
+      {/* BOTONES */}
+      <div className="flex items-center space-x-3">
+        <button className="text-gray-700 hover:text-black">Iniciar sesión</button>
+        <button className="bg-[#2563eb] text-white px-4 py-2 rounded-lg hover:bg-[#1e4ecb]">
           Registrarse
         </button>
       </div>
     </header>
   );
 }
+
