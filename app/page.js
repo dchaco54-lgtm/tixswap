@@ -1,24 +1,45 @@
+export const dynamic = "force-dynamic";
+
+import Header from "./components/Header";
 import Hero from "./components/Hero";
 import Categories from "./components/Categories";
 import EventGrid from "./components/EventGrid";
 import CTA from "./components/CTA";
-import { events } from "./data/events";
+import Footer from "./components/Footer";
 
 export default function Home() {
+  const featuredEvents = [
+    {
+      id: 1,
+      title: "My Chemical Romance",
+      category: "Rock",
+      date: "29 de enero de 2026",
+      location: "Estadio Bicentenario La Florida",
+    },
+    {
+      id: 2,
+      title: "Chayanne",
+      category: "Pop Latino",
+      date: "7 de febrero de 2026",
+      location: "Concepción",
+    },
+    {
+      id: 3,
+      title: "Doja Cat",
+      category: "Hip Hop",
+      date: "10 de febrero de 2026",
+      location: "Movistar Arena",
+    },
+  ];
+
   return (
-    <div className="space-y-20">
+    <main>
+      <Header />
       <Hero />
-
-      {/* Categorías */}
       <Categories />
-
-      {/* Eventos Destacados */}
-      <section className="py-16">
-        <h2 className="text-3xl font-bold mb-8">Eventos destacados de Chile</h2>
-        <EventGrid events={events} />
-      </section>
-
+      <EventGrid events={featuredEvents} />
       <CTA />
-    </div>
+      <Footer />
+    </main>
   );
 }
