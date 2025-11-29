@@ -2,9 +2,9 @@
 module.exports = {
   content: [
     "./app/**/*.{js,jsx,ts,tsx,mdx}",
-    "./app/components/**/*.{js,jsx,ts,tsx,mdx}",
-    "./app/events/**/*.{js,jsx,ts,tsx,mdx}",
-    "./app/[id]/**/*.{js,jsx,ts,tsx,mdx}",
+    "./components/**/*.{js,jsx,ts,tsx,mdx}",
+    "./events/**/*.{js,jsx,ts,tsx,mdx}",
+    "./data/**/*.{js,jsx,ts,tsx,mdx}",
   ],
   theme: {
     extend: {},
