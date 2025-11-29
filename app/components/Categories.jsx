@@ -2,7 +2,7 @@ export default function Categories() {
   const steps = [
     {
       title: "Pago Protegido",
-      desc: "Compra con confianza. Retenemos tu dinero hasta que confirmes que recibiste tu entrada válida. Si hay problemas, te devolvemos el 100%.",
+      desc: "Compra con confianza. Retenemos tu dinero hasta que confirmes que recibiste tu entrada. Si hay problemas, te devolvemos el 100%",
       icon: "🛡️",
     },
     {
