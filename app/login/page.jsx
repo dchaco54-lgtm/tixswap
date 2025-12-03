@@ -107,7 +107,7 @@ export default function RegisterPage() {
               placeholder="Tu nombre completo"
               value={form.name}
               onChange={handleChange("name")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
             />
           </div>
 
@@ -122,7 +122,7 @@ export default function RegisterPage() {
               placeholder="12.345.678-9"
               value={form.rut}
               onChange={handleChange("rut")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
             />
           </div>
 
@@ -137,7 +137,7 @@ export default function RegisterPage() {
               placeholder="tu@email.com"
               value={form.email}
               onChange={handleChange("email")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
             />
           </div>
 
@@ -152,7 +152,7 @@ export default function RegisterPage() {
               placeholder="+56987654321"
               value={form.phone}
               onChange={handleChange("phone")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
             />
           </div>
 
@@ -164,7 +164,7 @@ export default function RegisterPage() {
             <select
               value={form.userType}
               onChange={handleChange("userType")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none"
             >
               <option>Usuario general</option>
               <option>Comprador frecuente</option>
@@ -185,7 +185,7 @@ export default function RegisterPage() {
               required
               value={form.password}
               onChange={handleChange("password")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
               placeholder="••••••••"
             />
           </div>
@@ -200,7 +200,7 @@ export default function RegisterPage() {
               required
               value={form.confirmPassword}
               onChange={handleChange("confirmPassword")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
               placeholder="••••••••"
             />
           </div>
@@ -263,5 +263,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-
-
