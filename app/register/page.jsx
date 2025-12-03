@@ -1,10 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 
 export default function RegisterPage() {
+  const router = useRouter();
+
   const [form, setForm] = useState({
     name: "",
     rut: "",
@@ -49,7 +52,6 @@ export default function RegisterPage() {
 
     setLoading(true);
 
-    // Si Supabase no está configurado, no intentamos registrar
     if (!supabase) {
       setLoading(false);
       setErrorMsg("El servicio de registro aún no está configurado.");
@@ -79,6 +81,11 @@ export default function RegisterPage() {
     setSuccessMsg(
       "Cuenta creada correctamente. Revisa tu correo para confirmar la cuenta."
     );
+
+    // Después de 1.5s te mandamos al login
+    setTimeout(() => {
+      router.push("/login");
+    }, 1500);
   };
 
   return (
@@ -101,7 +108,7 @@ export default function RegisterPage() {
               placeholder="Tu nombre completo"
               value={form.name}
               onChange={handleChange("name")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
             />
           </div>
 
@@ -116,7 +123,7 @@ export default function RegisterPage() {
               placeholder="12.345.678-9"
               value={form.rut}
               onChange={handleChange("rut")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
             />
           </div>
 
@@ -131,14 +138,14 @@ export default function RegisterPage() {
               placeholder="tu@email.com"
               value={form.email}
               onChange={handleChange("email")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
             />
           </div>
 
           {/* Teléfono */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Teléfono (para validación SMS)
+              Teléfono (contacto)
             </label>
             <input
               type="tel"
@@ -146,7 +153,7 @@ export default function RegisterPage() {
               placeholder="+56987654321"
               value={form.phone}
               onChange={handleChange("phone")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
             />
           </div>
 
@@ -158,7 +165,7 @@ export default function RegisterPage() {
             <select
               value={form.userType}
               onChange={handleChange("userType")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2"
             >
               <option>Usuario general</option>
               <option>Comprador frecuente</option>
@@ -179,7 +186,7 @@ export default function RegisterPage() {
               required
               value={form.password}
               onChange={handleChange("password")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
               placeholder="••••••••"
             />
           </div>
@@ -194,7 +201,7 @@ export default function RegisterPage() {
               required
               value={form.confirmPassword}
               onChange={handleChange("confirmPassword")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-[#2563eb]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
               placeholder="••••••••"
             />
           </div>
@@ -224,7 +231,6 @@ export default function RegisterPage() {
             </label>
           </div>
 
-          {/* Mensajes */}
           {errorMsg && (
             <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
               {errorMsg}
@@ -237,7 +243,6 @@ export default function RegisterPage() {
             </p>
           )}
 
-          {/* Botón crear cuenta */}
           <button
             type="submit"
             disabled={loading}
@@ -257,3 +262,4 @@ export default function RegisterPage() {
     </div>
   );
 }
+
