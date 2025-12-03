@@ -18,8 +18,6 @@ export default function LoginPage() {
     setErrorMsg("");
     setLoading(true);
 
-    // Si Supabase no está configurado (variables de entorno vacías),
-    // mostramos un mensaje en vez de reventar.
     if (!supabase) {
       setLoading(false);
       setErrorMsg("El servicio de autenticación aún no está configurado.");
@@ -38,7 +36,8 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/");
+    // Después de loguear, vamos al dashboard
+    router.push("/dashboard");
   };
 
   return (
@@ -84,14 +83,12 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Mensaje de error */}
           {errorMsg && (
             <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
               {errorMsg}
             </p>
           )}
 
-          {/* Botón */}
           <button
             type="submit"
             disabled={loading}
