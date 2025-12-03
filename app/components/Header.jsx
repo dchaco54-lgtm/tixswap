@@ -23,10 +23,18 @@ export default function Header() {
 
       {/* BOTONES */}
       <div className="flex items-center space-x-3">
-        <button className="text-gray-700 hover:text-black">Iniciar sesión</button>
-        <button className="bg-[#2563eb] text-white px-4 py-2 rounded-lg hover:bg-[#1e4ecb]">
+        <Link
+          href="/login"
+          className="text-gray-700 hover:text-black text-sm md:text-base"
+        >
+          Iniciar sesión
+        </Link>
+        <Link
+          href="/register"
+          className="bg-[#2563eb] text-white px-4 py-2 rounded-lg hover:bg-[#1e4ecb] text-sm md:text-base"
+        >
           Registrarse
-        </button>
+        </Link>
       </div>
     </header>
   );
