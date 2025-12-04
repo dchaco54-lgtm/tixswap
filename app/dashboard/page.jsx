@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 
 const SECTIONS = [
@@ -423,6 +424,8 @@ export default function DashboardPage() {
     }
 
     if (currentSection === "support") {
+      const recentTickets = tickets.slice(0, 3);
+
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)]">
           {/* Formulario */}
@@ -446,7 +449,16 @@ export default function DashboardPage() {
                   onChange={handleTicketChange("category")}
                 >
                   <option value="soporte">Soporte general</option>
-                  <option value="disputa">Disputa por compra/venta</option>
+                  <option value="disputa_compra">
+                    Disputa por compra
+                  </option>
+                  <option value="disputa_venta">
+                    Disputa por venta
+                  </option>
+                  <option value="sugerencia">
+                    Sugerencia para TixSwap
+                  </option>
+                  <option value="reclamo">Reclamo para TixSwap</option>
                   <option value="otro">Otro</option>
                 </select>
               </div>
@@ -498,9 +510,9 @@ export default function DashboardPage() {
             </form>
           </div>
 
-          {/* Lista de tickets */}
+          {/* Lista de tickets (solo últimos 3) */}
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-2">
               <h2 className="text-lg font-semibold">Mis tickets</h2>
               {loadingTickets ? (
                 <span className="text-xs text-slate-400">Cargando…</span>
@@ -512,6 +524,12 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {!loadingTickets && tickets.length > 0 && (
+              <p className="text-xs text-slate-400 mb-3">
+                Mostrando tus últimos {Math.min(3, tickets.length)} tickets.
+              </p>
+            )}
+
             {loadingTickets ? (
               <p className="text-sm text-slate-500">
                 Cargando tus solicitudes de soporte…
@@ -522,31 +540,44 @@ export default function DashboardPage() {
                 vas a ver aquí con su estado.
               </p>
             ) : (
-              <ul className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-                {tickets.map((t) => (
-                  <li
-                    key={t.id}
-                    className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="font-medium text-slate-800 truncate">
-                        {t.subject}
+              <>
+                <ul className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                  {recentTickets.map((t) => (
+                    <li
+                      key={t.id}
+                      className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="font-medium text-slate-800 truncate">
+                          {t.subject}
+                        </p>
+                        <StatusPill status={t.status} />
+                      </div>
+                      <p className="text-xs text-slate-500 mb-1">
+                        {formatCategory(t.category)} ·{" "}
+                        {new Date(t.created_at).toLocaleString("es-CL", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
                       </p>
-                      <StatusPill status={t.status} />
-                    </div>
-                    <p className="text-xs text-slate-500 mb-1">
-                      {formatCategory(t.category)} ·{" "}
-                      {new Date(t.created_at).toLocaleString("es-CL", {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
-                    </p>
-                    <p className="text-xs text-slate-600 line-clamp-2">
-                      {t.message}
-                    </p>
-                  </li>
-                ))}
-              </ul>
+                      <p className="text-xs text-slate-600 line-clamp-2">
+                        {t.message}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+
+                {tickets.length > 3 && (
+                  <div className="mt-4">
+                    <Link
+                      href="/dashboard/tickets"
+                      className="text-xs text-blue-600 hover:underline font-medium"
+                    >
+                      Ver todos mis tickets de soporte
+                    </Link>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -659,7 +690,11 @@ function formatStatus(status) {
 
 function formatCategory(category) {
   if (category === "soporte") return "Soporte general";
-  if (category === "disputa") return "Disputa";
+  if (category === "disputa_compra") return "Disputa por compra";
+  if (category === "disputa_venta") return "Disputa por venta";
+  if (category === "sugerencia") return "Sugerencia para TixSwap";
+  if (category === "reclamo") return "Reclamo para TixSwap";
+  if (category === "disputa") return "Disputa"; // por compatibilidad con tickets antiguos
   if (category === "otro") return "Otro";
   return category || "—";
 }
