@@ -2,37 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
-
-// Helpers para RUT
-function cleanRut(rut) {
-  return rut.replace(/[^0-9kK]/g, "");
-}
-
-function isValidRut(rut) {
-  const clean = cleanRut(rut);
-  if (clean.length < 2) return false;
-
-  const body = clean.slice(0, -1);
-  const dv = clean.slice(-1).toUpperCase();
-
-  let sum = 0;
-  let multiplier = 2;
-
-  for (let i = body.length - 1; i >= 0; i--) {
-    sum += parseInt(body[i], 10) * multiplier;
-    multiplier = multiplier === 7 ? 2 : multiplier + 1;
-  }
-
-  const mod = 11 - (sum % 11);
-  let dvCalc;
-  if (mod === 11) dvCalc = "0";
-  else if (mod === 10) dvCalc = "K";
-  else dvCalc = String(mod);
-
-  return dvCalc === dv;
-}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -50,7 +20,6 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [showResetLink, setShowResetLink] = useState(false);
 
   const handleChange = (field) => (e) => {
     setForm((prev) => ({
@@ -63,28 +32,19 @@ export default function RegisterPage() {
     e.preventDefault();
     setErrorMessage("");
     setSuccessMessage("");
-    setShowResetLink(false);
 
-    const { fullName, rut, email, phone, userType, password, passwordConfirm } =
-      form;
+    const {
+      fullName,
+      rut,
+      email,
+      phone,
+      userType,
+      password,
+      passwordConfirm,
+    } = form;
 
-    if (!fullName.trim()) {
-      setErrorMessage("Debes ingresar tu nombre completo.");
-      return;
-    }
-
-    if (!rut.trim() || !isValidRut(rut)) {
-      setErrorMessage("El RUT ingresado no es válido.");
-      return;
-    }
-
-    if (!email.trim()) {
-      setErrorMessage("Debes ingresar un correo electrónico.");
-      return;
-    }
-
-    if (password.length < 6) {
-      setErrorMessage("La contraseña debe tener al menos 6 caracteres.");
+    if (!fullName.trim() || !rut.trim() || !email.trim() || !password) {
+      setErrorMessage("Completa todos los campos obligatorios.");
       return;
     }
 
@@ -96,13 +56,39 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
+      // 1) Revisar si el RUT ya existe usando la función rut_exists
+      const {
+        data: rutExists,
+        error: rutCheckError,
+      } = await supabase.rpc("rut_exists", {
+        rut_input: rut.trim(),
+      });
+
+      if (rutCheckError) {
+        console.error("Error revisando RUT:", rutCheckError);
+        setErrorMessage(
+          "Ocurrió un problema al validar el RUT. Intenta nuevamente en unos minutos."
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (rutExists) {
+        setErrorMessage(
+          "Este RUT ya tiene una cuenta en TixSwap. Si olvidaste tu contraseña, recupérala en “¿Olvidaste tu contraseña?” al iniciar sesión."
+        );
+        setLoading(false);
+        return;
+      }
+
+      // 2) Si el RUT no existe, seguimos con el registro normal
       const { error } = await supabase.auth.signUp({
-        email: email.trim(),
+        email,
         password,
         options: {
           data: {
-            full_name: fullName.trim(),
             name: fullName.trim(),
+            full_name: fullName.trim(),
             rut: rut.trim(),
             phone: phone.trim(),
             userType,
@@ -111,25 +97,19 @@ export default function RegisterPage() {
       });
 
       if (error) {
-        console.error(error);
         const msg = (error.message || "").toLowerCase();
 
-        // Usuario ya existe (por correo)
-        if (
-          msg.includes("already registered") ||
-          msg.includes("user already registered") ||
-          msg.includes("duplicate")
-        ) {
+        if (msg.includes("email") && msg.includes("already")) {
           setErrorMessage(
-            "Este RUT o correo ya tiene una cuenta en TixSwap."
+            "Este correo ya está registrado en TixSwap. Intenta iniciar sesión o recuperar tu contraseña."
           );
-          setShowResetLink(true);
-          return;
+        } else {
+          setErrorMessage(
+            "Ocurrió un problema al crear tu cuenta. Intenta nuevamente en unos minutos."
+          );
         }
 
-        setErrorMessage(
-          "Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente."
-        );
+        setLoading(false);
         return;
       }
 
@@ -137,18 +117,22 @@ export default function RegisterPage() {
         "Cuenta creada correctamente. Revisa tu correo para confirmar tu cuenta antes de iniciar sesión."
       );
 
-      // Redirigimos al login después de unos segundos
       setTimeout(() => {
         router.push("/login");
-      }, 3000);
+      }, 2500);
+    } catch (err) {
+      console.error(err);
+      setErrorMessage(
+        "Ocurrió un problema al crear tu cuenta. Intenta nuevamente."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+    <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">
           Crear cuenta
         </h1>
@@ -157,22 +141,9 @@ export default function RegisterPage() {
         </p>
 
         {errorMessage && (
-          <div className="mb-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
             {errorMessage}
           </div>
-        )}
-
-        {showResetLink && (
-          <p className="mb-4 text-xs text-gray-500 text-center">
-            Si olvidaste tu contraseña,{" "}
-            <Link
-              href="/forgot-password"
-              className="text-blue-600 hover:text-blue-700 font-medium"
-            >
-              recupérala aquí
-            </Link>
-            .
-          </p>
         )}
 
         {successMessage && (
@@ -189,7 +160,7 @@ export default function RegisterPage() {
             <input
               type="text"
               required
-              placeholder="Ej: Juan Pérez"
+              placeholder="Ej: Juan Pérez González"
               value={form.fullName}
               onChange={handleChange("fullName")}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -248,12 +219,11 @@ export default function RegisterPage() {
             <select
               value={form.userType}
               onChange={handleChange("userType")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
             >
               <option value="Usuario general">Usuario general</option>
-              <option value="Comprador frecuente">Comprador frecuente</option>
-              <option value="Vendedor frecuente">Vendedor frecuente</option>
-              <option value="Promotor de eventos">Promotor de eventos</option>
+              <option value="Promotor">Promotor</option>
+              <option value="Ticket broker">Ticket broker</option>
             </select>
           </div>
 
@@ -293,17 +263,7 @@ export default function RegisterPage() {
             {loading ? "Creando cuenta..." : "Crear cuenta"}
           </button>
         </form>
-
-        <p className="mt-6 text-center text-sm text-gray-500">
-          ¿Ya tienes cuenta?{" "}
-          <Link
-            href="/login"
-            className="text-blue-600 hover:text-blue-700 font-medium"
-          >
-            Iniciar sesión
-          </Link>
-        </p>
       </div>
-    </div>
+    </main>
   );
 }
