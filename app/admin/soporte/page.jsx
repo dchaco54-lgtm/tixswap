@@ -19,7 +19,6 @@ export default function AdminSupportPage() {
   const [savingId, setSavingId] = useState(null);
   const [error, setError] = useState("");
 
-  // En un futuro aquí podríamos validar que el usuario sea admin.
   useEffect(() => {
     const init = async () => {
       const {
@@ -247,4 +246,3 @@ function formatCategory(category) {
   if (category === "otro") return "Otro";
   return category || "—";
 }
-
