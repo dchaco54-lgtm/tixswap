@@ -1,21 +1,26 @@
 // app/components/Header.jsx
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
 export default function Header() {
+  const router = useRouter();
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
     const loadUser = async () => {
       const {
         data: { user },
+        error,
       } = await supabase.auth.getUser();
+
+      if (error) {
+        console.error("Error getUser:", error);
+      }
       setUser(user || null);
       setLoadingUser(false);
     };
@@ -25,85 +30,77 @@ export default function Header() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    setUser(null);
     router.push("/");
-    router.refresh();
   };
 
-  const userName =
-    user?.user_metadata?.name || user?.user_metadata?.full_name || "Usuario";
+  const firstName =
+    user?.user_metadata?.name?.split(" ")[0] ||
+    user?.user_metadata?.full_name?.split(" ")[0] ||
+    "Usuario";
 
   return (
-    <header className="border-b bg-white">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
+    <header className="border-b bg-white/80 backdrop-blur">
+      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
         {/* Logo */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Link
-            href="/"
-            className="text-xl font-semibold text-blue-600 tracking-tight"
-          >
-            TixSwap
+        <div className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
+            <span className="text-xl font-semibold text-blue-600">TixSwap</span>
           </Link>
           <span className="hidden sm:inline text-xs text-slate-500">
             Reventa segura, en un clic
           </span>
         </div>
 
-        {/* Menú centro (se oculta en móviles para no chocar) */}
-        <nav className="hidden md:flex items-center gap-6 mx-auto text-sm text-slate-700">
-          <Link href="/#comprar" className="hover:text-blue-600">
-            Comprar
-          </Link>
-          <Link href="/#vender" className="hover:text-blue-600">
-            Vender
-          </Link>
-          <Link href="/#como-funciona" className="hover:text-blue-600">
-            Cómo funciona
-          </Link>
+        {/* Navegación principal */}
+        <nav className="hidden md:flex items-center gap-6 text-sm text-slate-700">
+          <button className="hover:text-blue-600">Comprar</button>
+          <button className="hover:text-blue-600">Vender</button>
+          <button className="hover:text-blue-600">Cómo funciona</button>
         </nav>
 
-        {/* Zona derecha: login / cuenta */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {!loadingUser && !user && (
-            <>
-              <Link
-                href="/login"
-                className="text-sm px-3 py-1.5 rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50"
-              >
-                Iniciar sesión
-              </Link>
-              <Link
-                href="/register"
-                className="text-sm px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700"
-              >
-                Crear cuenta
-              </Link>
-            </>
-          )}
-
-          {!loadingUser && user && (
-            <>
-              <span className="hidden sm:inline text-sm text-slate-700">
-                Hola, {userName}
-              </span>
-              <Link
-                href="/dashboard"
-                className="text-sm px-3 py-1.5 rounded-full border border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
-              >
-                Ver mi cuenta
-              </Link>
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="text-sm px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700"
-              >
-                Cerrar sesión
-              </button>
-            </>
-          )}
-        </div>
+        {/* Botones de auth: SOLO UNO DE LOS DOS BLOQUES SEGÚN ESTADO */}
+        {!loadingUser && (
+          <>
+            {user ? (
+              // Usuario logeado
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline text-sm text-slate-600">
+                  Hola, {firstName}
+                </span>
+                <Link
+                  href="/dashboard"
+                  className="text-sm px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50"
+                >
+                  Ver mi cuenta
+                </Link>
+                <button
+                  onClick={handleLogout}
+                  className="text-sm px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            ) : (
+              // Usuario NO logeado
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/login"
+                  className="text-sm px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50"
+                >
+                  Iniciar sesión
+                </Link>
+                <Link
+                  href="/register"
+                  className="text-sm px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  Crear cuenta
+                </Link>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </header>
   );
 }
-
-
