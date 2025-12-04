@@ -39,23 +39,31 @@ export default function LoginPage() {
       if (error) {
         const msg = (error.message || "").toLowerCase();
 
-        // Si Supabase pide confirmación de correo
-        if (msg.includes("email not confirmed") || msg.includes("confirm")) {
+        // Caso: correo no confirmado
+        if (msg.includes("email not confirmed")) {
           setErrorMessage(
             "Debes confirmar tu correo antes de iniciar sesión. Revisa tu bandeja de entrada o spam."
           );
-        } else {
+        } else if (msg.includes("invalid login credentials")) {
+          // Credenciales malas
           setErrorMessage("Correo o contraseña incorrectos.");
+        } else {
+          // Cualquier otro error
+          setErrorMessage(
+            "Ocurrió un problema al iniciar sesión. Inténtalo de nuevo."
+          );
         }
 
         return;
       }
 
-      // Login ok → enviar al dashboard
+      // Login correcto → dashboard
       router.push("/dashboard");
     } catch (err) {
       console.error(err);
-      setErrorMessage("Ocurrió un problema al iniciar sesión. Inténtalo de nuevo.");
+      setErrorMessage(
+        "Ocurrió un problema al iniciar sesión. Inténtalo de nuevo."
+      );
     } finally {
       setLoading(false);
     }
@@ -65,10 +73,10 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-          Inicia sesión en TixSwap
+          Iniciar sesión
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          Accede a tu cuenta para ver tus compras, ventas y tu estado de cuenta.
+          Accede a tu cuenta de TixSwap
         </p>
 
         {errorMessage && (
@@ -116,7 +124,7 @@ export default function LoginPage() {
         </form>
 
         <p className="mt-6 text-center text-sm text-gray-500">
-          ¿No tienes cuenta?{" "}
+          ¿Todavía no tienes cuenta?{" "}
           <Link
             href="/register"
             className="text-blue-600 hover:text-blue-700 font-medium"
