@@ -22,6 +22,16 @@ export default function DashboardPage() {
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
+  // Perfil editable
+  const [profileForm, setProfileForm] = useState({
+    email: "",
+    phone: "",
+    userType: "Usuario general",
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
+
   // Soporte
   const [tickets, setTickets] = useState([]);
   const [loadingTickets, setLoadingTickets] = useState(true);
@@ -52,9 +62,17 @@ export default function DashboardPage() {
       }
 
       setUser(user);
+
+      // Inicializar formulario de perfil
+      setProfileForm({
+        email: user.email ?? "",
+        phone: user.user_metadata?.phone ?? "",
+        userType: user.user_metadata?.userType ?? "Usuario general",
+      });
+
       setLoadingUser(false);
 
-      // Cargar todos los tickets del usuario (RLS filtra por user_id)
+      // Cargar tickets del usuario
       const { data: ticketsData, error: ticketsError } = await supabase
         .from("support_tickets")
         .select("*")
@@ -83,6 +101,58 @@ export default function DashboardPage() {
   const phone = user?.user_metadata?.phone || "—";
   const userType = user?.user_metadata?.userType || "Usuario general";
   const email = user?.email || "—";
+
+  // --- Perfil: editar datos ---
+  const handleProfileChange = (field) => (e) => {
+    setProfileForm((prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
+    setProfileError("");
+    setProfileSuccess("");
+
+    if (!user) return;
+
+    if (!profileForm.email.trim()) {
+      setProfileError("El correo no puede estar vacío.");
+      return;
+    }
+
+    setProfileSaving(true);
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        email: profileForm.email.trim(),
+        data: {
+          // mantenemos el resto de metadatos
+          ...user.user_metadata,
+          phone: profileForm.phone.trim(),
+          userType: profileForm.userType,
+        },
+      });
+
+      if (error) {
+        console.error(error);
+        setProfileError(
+          "Ocurrió un problema al guardar tus datos. Inténtalo de nuevo."
+        );
+        return;
+      }
+
+      if (data?.user) {
+        setUser(data.user);
+        setProfileForm({
+          email: data.user.email ?? "",
+          phone: data.user.user_metadata?.phone ?? "",
+          userType: data.user.user_metadata?.userType ?? "Usuario general",
+        });
+      }
+
+      setProfileSuccess("Tus datos se actualizaron correctamente.");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   // --- Soporte: crear ticket ---
   const handleTicketChange = (field) => (e) => {
@@ -113,7 +183,6 @@ export default function DashboardPage() {
           category: ticketForm.category,
           subject: ticketForm.subject.trim(),
           message: ticketForm.message.trim(),
-          // status se va por defecto en 'open'
         },
       ]);
 
@@ -125,7 +194,6 @@ export default function DashboardPage() {
         return;
       }
 
-      // Recargar lista de tickets
       const { data: ticketsData, error: ticketsError } = await supabase
         .from("support_tickets")
         .select("*")
@@ -135,7 +203,6 @@ export default function DashboardPage() {
         setTickets(ticketsData);
       }
 
-      // Limpiar formulario
       setTicketForm({
         category: "soporte",
         subject: "",
@@ -186,11 +253,11 @@ export default function DashboardPage() {
 
     if (currentSection === "profile") {
       return (
-        <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+        <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100 max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Mis datos</h2>
           <p className="text-sm text-slate-500 mb-4">
-            Por seguridad, el nombre y el RUT no se pueden modificar desde el
-            panel. Si necesitas actualizar algún dato, escríbenos a{" "}
+            El nombre y el RUT no se pueden modificar desde el panel. Si
+            necesitas actualizar alguno de esos datos, escríbenos a{" "}
             <a
               href="mailto:soporte@tixswap.cl"
               className="text-blue-600 hover:underline"
@@ -199,23 +266,96 @@ export default function DashboardPage() {
             </a>
             .
           </p>
-          <div className="space-y-2 text-sm text-slate-700">
-            <p>
-              <span className="font-medium">Nombre completo:</span> {fullName}
-            </p>
-            <p>
-              <span className="font-medium">RUT:</span> {rut}
-            </p>
-            <p>
-              <span className="font-medium">Correo:</span> {email}
-            </p>
-            <p>
-              <span className="font-medium">Teléfono:</span> {phone}
-            </p>
-            <p>
-              <span className="font-medium">Tipo de usuario:</span> {userType}
-            </p>
-          </div>
+
+          <form onSubmit={handleProfileSubmit} className="space-y-4">
+            {/* Nombre (solo lectura) */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Nombre completo
+              </label>
+              <p className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                {fullName}
+              </p>
+            </div>
+
+            {/* RUT (solo lectura) */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                RUT
+              </label>
+              <p className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                {rut}
+              </p>
+            </div>
+
+            {/* Correo editable */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Correo electrónico
+              </label>
+              <input
+                type="email"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={profileForm.email}
+                onChange={handleProfileChange("email")}
+                placeholder="tu@email.com"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Si cambias el correo, podríamos pedirte confirmarlo nuevamente.
+              </p>
+            </div>
+
+            {/* Teléfono editable */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Teléfono
+              </label>
+              <input
+                type="tel"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={profileForm.phone}
+                onChange={handleProfileChange("phone")}
+                placeholder="+569..."
+              />
+            </div>
+
+            {/* Tipo de usuario editable */}
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Tipo de usuario
+              </label>
+              <select
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={profileForm.userType}
+                onChange={handleProfileChange("userType")}
+              >
+                <option value="Usuario general">Usuario general</option>
+                <option value="Comprador frecuente">Comprador frecuente</option>
+                <option value="Vendedor frecuente">Vendedor frecuente</option>
+                <option value="Promotor de eventos">Promotor de eventos</option>
+              </select>
+            </div>
+
+            {profileError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {profileError}
+              </p>
+            )}
+
+            {profileSuccess && (
+              <p className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+                {profileSuccess}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={profileSaving}
+              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {profileSaving ? "Guardando..." : "Guardar cambios"}
+            </button>
+          </form>
         </div>
       );
     }
@@ -539,4 +679,3 @@ function formatCategory(category) {
   if (category === "otro") return "Otro";
   return category || "—";
 }
-
