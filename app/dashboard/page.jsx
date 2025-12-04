@@ -18,22 +18,11 @@ const SECTIONS = [
 
 export default function DashboardPage() {
   const router = useRouter();
-
   const [currentSection, setCurrentSection] = useState("overview");
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
-  // ---- Perfil editable ----
-  const [profileForm, setProfileForm] = useState({
-    email: "",
-    phone: "",
-    userType: "",
-  });
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [profileError, setProfileError] = useState("");
-  const [profileSuccess, setProfileSuccess] = useState("");
-
-  // ---- Soporte ----
+  // Soporte
   const [tickets, setTickets] = useState([]);
   const [loadingTickets, setLoadingTickets] = useState(true);
   const [ticketForm, setTicketForm] = useState({
@@ -63,15 +52,9 @@ export default function DashboardPage() {
       }
 
       setUser(user);
+      setLoadingUser(false);
 
-      // setear formulario de perfil con lo que viene de Supabase
-      setProfileForm({
-        email: user.email || "",
-        phone: user.user_metadata?.phone || "",
-        userType: user.user_metadata?.userType || "Usuario general",
-      });
-
-      // Cargar tickets (RLS ya filtra por usuario)
+      // Cargar todos los tickets del usuario (RLS filtra por user_id)
       const { data: ticketsData, error: ticketsError } = await supabase
         .from("support_tickets")
         .select("*")
@@ -83,9 +66,7 @@ export default function DashboardPage() {
       } else {
         setTickets(ticketsData || []);
       }
-
       setLoadingTickets(false);
-      setLoadingUser(false);
     };
 
     load();
@@ -93,90 +74,17 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push("/login");
-  };
-
-  const goHome = () => {
     router.push("/");
   };
 
   const fullName =
-    user?.user_metadata?.name ||
-    user?.user_metadata?.full_name ||
-    "Usuario";
+    user?.user_metadata?.name || user?.user_metadata?.full_name || "Usuario";
   const rut = user?.user_metadata?.rut || "—";
   const phone = user?.user_metadata?.phone || "—";
   const userType = user?.user_metadata?.userType || "Usuario general";
   const email = user?.email || "—";
 
-  // ---- Perfil: handlers ----
-  const handleProfileChange = (field) => (e) => {
-    const value = e.target.value;
-    setProfileForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleSaveProfile = async (e) => {
-    e.preventDefault();
-    if (!user) return;
-
-    setProfileError("");
-    setProfileSuccess("");
-
-    const trimmedEmail = profileForm.email.trim();
-    const trimmedPhone = profileForm.phone.trim();
-    const trimmedUserType = profileForm.userType.trim();
-
-    if (!trimmedEmail) {
-      setProfileError("El correo no puede estar vacío.");
-      return;
-    }
-
-    try {
-      setSavingProfile(true);
-
-      const emailChanged = trimmedEmail !== user.email;
-
-      const updates = {
-        data: {
-          phone: trimmedPhone,
-          userType: trimmedUserType || "Usuario general",
-        },
-      };
-
-      if (emailChanged) {
-        updates.email = trimmedEmail;
-      }
-
-      const { data, error } = await supabase.auth.updateUser(updates);
-
-      if (error) {
-        console.error(error);
-        setProfileError(
-          "No pudimos actualizar tus datos. Intenta nuevamente en unos minutos."
-        );
-        return;
-      }
-
-      if (data?.user) {
-        setUser(data.user);
-      }
-
-      setProfileSuccess(
-        emailChanged
-          ? "Datos actualizados. Si cambiaste tu correo, revisa tu bandeja de entrada para confirmar el nuevo email."
-          : "Tus datos fueron actualizados correctamente."
-      );
-    } catch (err) {
-      console.error(err);
-      setProfileError(
-        "Ocurrió un error inesperado al actualizar tus datos."
-      );
-    } finally {
-      setSavingProfile(false);
-    }
-  };
-
-  // ---- Soporte: crear ticket ----
+  // --- Soporte: crear ticket ---
   const handleTicketChange = (field) => (e) => {
     setTicketForm((prev) => ({ ...prev, [field]: e.target.value }));
   };
@@ -205,7 +113,7 @@ export default function DashboardPage() {
           category: ticketForm.category,
           subject: ticketForm.subject.trim(),
           message: ticketForm.message.trim(),
-          // status = 'open' por defecto
+          // status se va por defecto en 'open'
         },
       ]);
 
@@ -217,7 +125,7 @@ export default function DashboardPage() {
         return;
       }
 
-      // Recargar tickets
+      // Recargar lista de tickets
       const { data: ticketsData, error: ticketsError } = await supabase
         .from("support_tickets")
         .select("*")
@@ -227,6 +135,7 @@ export default function DashboardPage() {
         setTickets(ticketsData);
       }
 
+      // Limpiar formulario
       setTicketForm({
         category: "soporte",
         subject: "",
@@ -239,7 +148,6 @@ export default function DashboardPage() {
     }
   };
 
-  // ---- Render secciones ----
   const renderSection = () => {
     if (currentSection === "overview") {
       return (
@@ -282,7 +190,7 @@ export default function DashboardPage() {
           <h2 className="text-lg font-semibold mb-4">Mis datos</h2>
           <p className="text-sm text-slate-500 mb-4">
             Por seguridad, el nombre y el RUT no se pueden modificar desde el
-            panel. Si necesitas actualizar alguno de esos datos, escríbenos a{" "}
+            panel. Si necesitas actualizar algún dato, escríbenos a{" "}
             <a
               href="mailto:soporte@tixswap.cl"
               className="text-blue-600 hover:underline"
@@ -291,97 +199,23 @@ export default function DashboardPage() {
             </a>
             .
           </p>
-
-          <form onSubmit={handleSaveProfile} className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Nombre completo
-                </label>
-                <input
-                  type="text"
-                  value={fullName}
-                  disabled
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  RUT
-                </label>
-                <input
-                  type="text"
-                  value={rut}
-                  disabled
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Correo electrónico
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={profileForm.email}
-                  onChange={handleProfileChange("email")}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="tu@correo.com"
-                />
-                <p className="mt-1 text-xs text-slate-400">
-                  Este será el correo para iniciar sesión y recibir avisos.
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Teléfono
-                </label>
-                <input
-                  type="text"
-                  value={profileForm.phone}
-                  onChange={handleProfileChange("phone")}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="+569..."
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Tipo de usuario
-              </label>
-              <input
-                type="text"
-                value={profileForm.userType}
-                onChange={handleProfileChange("userType")}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Ej: Comprador frecuente"
-              />
-            </div>
-
-            {profileError && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                {profileError}
-              </p>
-            )}
-
-            {profileSuccess && (
-              <p className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
-                {profileSuccess}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={savingProfile}
-              className="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {savingProfile ? "Guardando..." : "Guardar cambios"}
-            </button>
-          </form>
+          <div className="space-y-2 text-sm text-slate-700">
+            <p>
+              <span className="font-medium">Nombre completo:</span> {fullName}
+            </p>
+            <p>
+              <span className="font-medium">RUT:</span> {rut}
+            </p>
+            <p>
+              <span className="font-medium">Correo:</span> {email}
+            </p>
+            <p>
+              <span className="font-medium">Teléfono:</span> {phone}
+            </p>
+            <p>
+              <span className="font-medium">Tipo de usuario:</span> {userType}
+            </p>
+          </div>
         </div>
       );
     }
@@ -424,7 +258,8 @@ export default function DashboardPage() {
     }
 
     if (currentSection === "support") {
-      const recentTickets = tickets.slice(0, 3);
+      const MAX_TICKETS_PREVIEW = 3;
+      const ticketsPreview = tickets.slice(0, MAX_TICKETS_PREVIEW);
 
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)]">
@@ -450,14 +285,12 @@ export default function DashboardPage() {
                 >
                   <option value="soporte">Soporte general</option>
                   <option value="disputa_compra">
-                    Disputa por compra
+                    Disputa por compra de entrada
                   </option>
                   <option value="disputa_venta">
-                    Disputa por venta
+                    Disputa por venta de entrada
                   </option>
-                  <option value="sugerencia">
-                    Sugerencia para TixSwap
-                  </option>
+                  <option value="sugerencia">Sugerencia para TixSwap</option>
                   <option value="reclamo">Reclamo para TixSwap</option>
                   <option value="otro">Otro</option>
                 </select>
@@ -510,9 +343,9 @@ export default function DashboardPage() {
             </form>
           </div>
 
-          {/* Lista de tickets (solo últimos 3) */}
+          {/* Lista de tickets */}
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-1">
               <h2 className="text-lg font-semibold">Mis tickets</h2>
               {loadingTickets ? (
                 <span className="text-xs text-slate-400">Cargando…</span>
@@ -525,8 +358,9 @@ export default function DashboardPage() {
             </div>
 
             {!loadingTickets && tickets.length > 0 && (
-              <p className="text-xs text-slate-400 mb-3">
-                Mostrando tus últimos {Math.min(3, tickets.length)} tickets.
+              <p className="text-xs text-slate-400 mb-4">
+                Mostrando tus últimos{" "}
+                {Math.min(tickets.length, MAX_TICKETS_PREVIEW)} tickets.
               </p>
             )}
 
@@ -542,7 +376,7 @@ export default function DashboardPage() {
             ) : (
               <>
                 <ul className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-                  {recentTickets.map((t) => (
+                  {ticketsPreview.map((t) => (
                     <li
                       key={t.id}
                       className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
@@ -563,11 +397,19 @@ export default function DashboardPage() {
                       <p className="text-xs text-slate-600 line-clamp-2">
                         {t.message}
                       </p>
+                      {t.admin_response && (
+                        <p className="mt-1 text-xs text-slate-700">
+                          <span className="font-semibold">
+                            Respuesta de soporte:{" "}
+                          </span>
+                          {t.admin_response}
+                        </p>
+                      )}
                     </li>
                   ))}
                 </ul>
 
-                {tickets.length > 3 && (
+                {tickets.length > 0 && (
                   <div className="mt-4">
                     <Link
                       href="/dashboard/tickets"
@@ -609,7 +451,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={goHome}
+              onClick={() => router.push("/")}
               className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
             >
               Comprar / vender entradas
@@ -694,7 +536,6 @@ function formatCategory(category) {
   if (category === "disputa_venta") return "Disputa por venta";
   if (category === "sugerencia") return "Sugerencia para TixSwap";
   if (category === "reclamo") return "Reclamo para TixSwap";
-  if (category === "disputa") return "Disputa"; // por compatibilidad con tickets antiguos
   if (category === "otro") return "Otro";
   return category || "—";
 }
