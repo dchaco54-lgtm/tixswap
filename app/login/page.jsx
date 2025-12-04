@@ -8,50 +8,76 @@ import { supabase } from "../lib/supabaseClient";
 export default function LoginPage() {
   const router = useRouter();
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+  });
+
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const handleChange = (field) => (e) => {
+    setForm((prev) => ({
+      ...prev,
+      [field]: e.target.value,
+    }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMsg("");
+    setErrorMessage("");
     setLoading(true);
 
-    if (!supabase) {
+    const { email, password } = form;
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        const msg = (error.message || "").toLowerCase();
+
+        // Si Supabase pide confirmación de correo
+        if (msg.includes("email not confirmed") || msg.includes("confirm")) {
+          setErrorMessage(
+            "Debes confirmar tu correo antes de iniciar sesión. Revisa tu bandeja de entrada o spam."
+          );
+        } else {
+          setErrorMessage("Correo o contraseña incorrectos.");
+        }
+
+        return;
+      }
+
+      // Login ok → enviar al dashboard
+      router.push("/dashboard");
+    } catch (err) {
+      console.error(err);
+      setErrorMessage("Ocurrió un problema al iniciar sesión. Inténtalo de nuevo.");
+    } finally {
       setLoading(false);
-      setErrorMsg("El servicio de autenticación aún no está configurado.");
-      return;
     }
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setErrorMsg(error.message || "Error al iniciar sesión");
-      return;
-    }
-
-    // Después de loguear, vamos al dashboard
-    router.push("/dashboard");
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-soft p-8">
-        <h1 className="text-2xl font-bold text-center mb-2">
-          Iniciar sesión
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+        <h1 className="text-2xl font-semibold text-gray-900 mb-2">
+          Inicia sesión en TixSwap
         </h1>
-        <p className="text-sm text-gray-500 text-center mb-6">
-          Accede a tu cuenta de TixSwap
+        <p className="text-sm text-gray-500 mb-6">
+          Accede a tu cuenta para ver tus compras, ventas y tu estado de cuenta.
         </p>
 
+        {errorMessage && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            {errorMessage}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Correo */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Correo electrónico
@@ -59,15 +85,13 @@ export default function LoginPage() {
             <input
               type="email"
               required
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
-              placeholder="tucorreo@ejemplo.com"
+              placeholder="tu@email.com"
+              value={form.email}
+              onChange={handleChange("email")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
-          {/* Contraseña */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Contraseña
@@ -75,32 +99,28 @@ export default function LoginPage() {
             <input
               type="password"
               required
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"
-              placeholder="••••••••"
+              placeholder="********"
+              value={form.password}
+              onChange={handleChange("password")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
-
-          {errorMsg && (
-            <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              {errorMsg}
-            </p>
-          )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#2563eb] text-white font-medium py-2.5 rounded-lg hover:bg-[#1e4ecb] disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? "Ingresando..." : "Iniciar sesión"}
           </button>
         </form>
 
-        <p className="mt-4 text-xs text-gray-500 text-center">
-          ¿Todavía no tienes cuenta?{" "}
-          <Link href="/register" className="text-[#2563eb] hover:underline">
+        <p className="mt-6 text-center text-sm text-gray-500">
+          ¿No tienes cuenta?{" "}
+          <Link
+            href="/register"
+            className="text-blue-600 hover:text-blue-700 font-medium"
+          >
             Crear cuenta
           </Link>
         </p>
@@ -108,3 +128,4 @@ export default function LoginPage() {
     </div>
   );
 }
+
