@@ -50,6 +50,7 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [showResetLink, setShowResetLink] = useState(false);
 
   const handleChange = (field) => (e) => {
     setForm((prev) => ({
@@ -62,6 +63,7 @@ export default function RegisterPage() {
     e.preventDefault();
     setErrorMessage("");
     setSuccessMessage("");
+    setShowResetLink(false);
 
     const { fullName, rut, email, phone, userType, password, passwordConfirm } =
       form;
@@ -100,7 +102,7 @@ export default function RegisterPage() {
         options: {
           data: {
             full_name: fullName.trim(),
-            name: fullName.trim(), // por compatibilidad
+            name: fullName.trim(),
             rut: rut.trim(),
             phone: phone.trim(),
             userType,
@@ -110,6 +112,21 @@ export default function RegisterPage() {
 
       if (error) {
         console.error(error);
+        const msg = (error.message || "").toLowerCase();
+
+        // Usuario ya existe (por correo)
+        if (
+          msg.includes("already registered") ||
+          msg.includes("user already registered") ||
+          msg.includes("duplicate")
+        ) {
+          setErrorMessage(
+            "Este RUT o correo ya tiene una cuenta en TixSwap."
+          );
+          setShowResetLink(true);
+          return;
+        }
+
         setErrorMessage(
           "Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente."
         );
@@ -120,7 +137,7 @@ export default function RegisterPage() {
         "Cuenta creada correctamente. Revisa tu correo para confirmar tu cuenta antes de iniciar sesión."
       );
 
-      // Opcional: redirigir al login después de unos segundos
+      // Redirigimos al login después de unos segundos
       setTimeout(() => {
         router.push("/login");
       }, 3000);
@@ -140,9 +157,22 @@ export default function RegisterPage() {
         </p>
 
         {errorMessage && (
-          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+          <div className="mb-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
             {errorMessage}
           </div>
+        )}
+
+        {showResetLink && (
+          <p className="mb-4 text-xs text-gray-500 text-center">
+            Si olvidaste tu contraseña,{" "}
+            <Link
+              href="/forgot-password"
+              className="text-blue-600 hover:text-blue-700 font-medium"
+            >
+              recupérala aquí
+            </Link>
+            .
+          </p>
         )}
 
         {successMessage && (
@@ -159,7 +189,7 @@ export default function RegisterPage() {
             <input
               type="text"
               required
-              placeholder="Ej: David Ignacio Chacón Pérez"
+              placeholder="Ej: Juan Pérez"
               value={form.fullName}
               onChange={handleChange("fullName")}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -277,4 +307,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-
