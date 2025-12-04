@@ -1,4 +1,3 @@
-// app/login/page.jsx
 "use client";
 
 import { useState } from "react";
@@ -51,10 +50,11 @@ export default function LoginPage() {
             "Ocurrió un problema al iniciar sesión. Inténtalo de nuevo."
           );
         }
+
         return;
       }
 
-      // ✅ Login correcto → ir al HOMEPAGE
+      // Login correcto → homepage (para que vea eventos / vender)
       router.push("/");
     } catch (err) {
       console.error(err);
@@ -67,22 +67,13 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8 relative">
-        {/* Link para volver al inicio */}
-        <button
-          type="button"
-          onClick={() => router.push("/")}
-          className="absolute -top-10 left-0 text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1"
-        >
-          <span>←</span> Volver al inicio
-        </button>
-
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">
           Iniciar sesión
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          Accede a tu cuenta de TixSwap
+          Accede a tu cuenta de TixSwap.
         </p>
 
         {errorMessage && (
@@ -129,7 +120,16 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-gray-500">
+        <div className="mt-4 flex flex-col items-center gap-2 text-sm">
+          <Link
+            href="/forgot-password"
+            className="text-blue-600 hover:text-blue-700"
+          >
+            ¿Olvidaste tu contraseña?
+          </Link>
+        </div>
+
+        <p className="mt-4 text-center text-sm text-gray-500">
           ¿Todavía no tienes cuenta?{" "}
           <Link
             href="/register"
@@ -139,6 +139,6 @@ export default function LoginPage() {
           </Link>
         </p>
       </div>
-    </main>
+    </div>
   );
 }
