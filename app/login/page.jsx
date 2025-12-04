@@ -1,3 +1,4 @@
+// app/login/page.jsx
 "use client";
 
 import { useState } from "react";
@@ -57,8 +58,8 @@ export default function LoginPage() {
         return;
       }
 
-      // Login correcto → dashboard
-      router.push("/dashboard");
+      // Login correcto → AHORA vamos a la homepage
+      router.push("/");
     } catch (err) {
       console.error(err);
       setErrorMessage(
@@ -136,4 +137,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
