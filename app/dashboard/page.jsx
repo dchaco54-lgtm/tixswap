@@ -106,7 +106,7 @@ export default function DashboardPage() {
     try {
       setSubmittingTicket(true);
 
-      const { data, error } = await supabase.from("support_tickets").insert([
+      const { error } = await supabase.from("support_tickets").insert([
         {
           user_id: user.id,
           category: ticketForm.category,
@@ -378,6 +378,16 @@ export default function DashboardPage() {
                     <p className="text-xs text-slate-600 line-clamp-2">
                       {t.message}
                     </p>
+
+                    {/* NUEVO: mostrar respuesta del admin si existe */}
+                    {t.admin_response && (
+                      <p className="mt-2 text-xs text-slate-700">
+                        <span className="font-semibold">
+                          Respuesta de soporte:{" "}
+                        </span>
+                        {t.admin_response}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -488,4 +498,5 @@ function formatCategory(category) {
   if (category === "otro") return "Otro";
   return category || "—";
 }
+
 
