@@ -1,3 +1,4 @@
+// app/login/page.jsx
 "use client";
 
 import { useState } from "react";
@@ -54,7 +55,7 @@ export default function LoginPage() {
         return;
       }
 
-      // Login correcto → homepage (para que vea eventos / vender)
+      // Login correcto → al homepage (para comprar/vender)
       router.push("/");
     } catch (err) {
       console.error(err);
@@ -73,7 +74,7 @@ export default function LoginPage() {
           Iniciar sesión
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          Accede a tu cuenta de TixSwap.
+          Accede a tu cuenta de TixSwap
         </p>
 
         {errorMessage && (
@@ -120,14 +121,15 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-4 flex flex-col items-center gap-2 text-sm">
+        <p className="mt-4 text-center text-sm text-gray-500">
+          ¿Olvidaste tu contraseña?{" "}
           <Link
             href="/forgot-password"
-            className="text-blue-600 hover:text-blue-700"
+            className="text-blue-600 hover:text-blue-700 font-medium"
           >
-            ¿Olvidaste tu contraseña?
+            Recuperarla
           </Link>
-        </div>
+        </p>
 
         <p className="mt-4 text-center text-sm text-gray-500">
           ¿Todavía no tienes cuenta?{" "}
