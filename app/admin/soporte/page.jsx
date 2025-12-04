@@ -1,231 +1,250 @@
+// app/admin/soporte/page.jsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-// 👇 usa el mismo import que en login/register, solo cambiando el camino
-import supabase from "../../../lib/supabaseClient"; // si falla, prueba con "../../../lib/supabaseClient"
+import { supabase } from "../../lib/supabaseClient";
 
-export default function SupportAdminPage() {
+const STATUS_OPTIONS = [
+  { value: "open", label: "Abierto" },
+  { value: "in_progress", label: "En revisión" },
+  { value: "closed", label: "Cerrado" },
+];
+
+export default function AdminSupportPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  const [loadingUser, setLoadingUser] = useState(true);
   const [tickets, setTickets] = useState([]);
-  const [selectedTicket, setSelectedTicket] = useState(null);
-  const [response, setResponse] = useState("");
-  const [status, setStatus] = useState("open");
+  const [loadingTickets, setLoadingTickets] = useState(true);
+  const [savingId, setSavingId] = useState(null);
   const [error, setError] = useState("");
 
+  // En un futuro aquí podríamos validar que el usuario sea admin.
   useEffect(() => {
     const init = async () => {
-      // 1. Verificamos que sea el admin de soporte
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
-      if (!user || user.email !== "soporte@tixswap.cl") {
-        router.push("/");
+      if (!user) {
+        router.push("/login");
         return;
       }
 
-      // 2. Traemos todos los tickets
-      const { data, error } = await supabase
-        .from("support_tickets")
-        .select(
-          "id, category, subject, message, status, created_at, admin_response"
-        )
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        console.error(error);
-        setError("No pudimos cargar los tickets.");
-      } else {
-        setTickets(data || []);
-      }
-
-      setLoading(false);
+      setLoadingUser(false);
+      await fetchTickets();
     };
 
     init();
   }, [router]);
 
-  const handleSelectTicket = (ticket) => {
-    setSelectedTicket(ticket);
-    setResponse(ticket.admin_response || "");
-    setStatus(ticket.status);
+  const fetchTickets = async () => {
+    setLoadingTickets(true);
     setError("");
+
+    const { data, error } = await supabase
+      .from("support_tickets")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      setError("No pudimos cargar los tickets. Intenta de nuevo.");
+      setTickets([]);
+    } else {
+      setTickets(data || []);
+    }
+
+    setLoadingTickets(false);
   };
 
-  const handleUpdate = async () => {
-    if (!selectedTicket) return;
+  const handleFieldChange = (id, field, value) => {
+    setTickets((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              [field]: value,
+            }
+          : t
+      )
+    );
+  };
+
+  const handleSaveTicket = async (ticket) => {
+    setSavingId(ticket.id);
+    setError("");
 
     const { error } = await supabase
       .from("support_tickets")
       .update({
-        status,
-        admin_response: response || null,
-        updated_at: new Date().toISOString(),
+        status: ticket.status,
+        admin_response: ticket.admin_response || null,
       })
-      .eq("id", selectedTicket.id);
+      .eq("id", ticket.id);
 
     if (error) {
       console.error(error);
-      setError("No pudimos actualizar el ticket.");
-      return;
+      setError("No pudimos actualizar el ticket. Intenta nuevamente.");
     }
 
-    // Refrescamos estado local
-    const updatedTickets = tickets.map((t) =>
-      t.id === selectedTicket.id
-        ? { ...t, status, admin_response: response }
-        : t
-    );
-    setTickets(updatedTickets);
-    setSelectedTicket((t) =>
-      t ? { ...t, status, admin_response: response } : t
-    );
+    setSavingId(null);
   };
 
-  if (loading) {
+  if (loadingUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        Cargando panel de soporte...
-      </div>
+      <main className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-sm text-slate-500">Cargando…</p>
+      </main>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-10">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-semibold">Panel de soporte TixSwap</h1>
-          <p className="text-xs text-gray-500">
-            Sesión admin:&nbsp;
-            <span className="font-medium">soporte@tixswap.cl</span>
-          </p>
-        </div>
-
-        <div className="grid md:grid-cols-[2fr,3fr] gap-6">
-          {/* Lista de tickets */}
-          <div className="bg-white rounded-2xl shadow p-4">
-            <h2 className="font-medium mb-4">Tickets recibidos</h2>
-            <div className="space-y-3 max-h-[600px] overflow-y-auto">
-              {tickets.length === 0 && (
-                <p className="text-sm text-gray-500">
-                  Aún no hay tickets de soporte.
-                </p>
-              )}
-
-              {tickets.map((ticket) => (
-                <button
-                  key={ticket.id}
-                  onClick={() => handleSelectTicket(ticket)}
-                  className={`w-full text-left border rounded-xl px-3 py-2 text-sm hover:border-blue-500 transition ${
-                    selectedTicket?.id === ticket.id
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-slate-200 bg-white"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-medium">{ticket.subject}</span>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full ${
-                        ticket.status === "open"
-                          ? "bg-orange-100 text-orange-700"
-                          : ticket.status === "in_progress"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-emerald-100 text-emerald-700"
-                      }`}
-                    >
-                      {ticket.status === "open"
-                        ? "Abierto"
-                        : ticket.status === "in_progress"
-                        ? "En proceso"
-                        : "Cerrado"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    {ticket.category} ·{" "}
-                    {new Date(ticket.created_at).toLocaleString("es-CL")}
-                  </p>
-                  {ticket.admin_response && (
-                    <p className="mt-1 text-[11px] text-gray-500 line-clamp-1">
-                      <span className="font-semibold">Respuesta: </span>
-                      {ticket.admin_response}
-                    </p>
-                  )}
-                </button>
-              ))}
-            </div>
+    <main className="min-h-screen bg-slate-50">
+      <div className="max-w-6xl mx-auto px-4 py-8 md:py-10">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
+              Soporte · Admin
+            </h1>
+            <p className="text-sm text-slate-500">
+              Revisa y responde los tickets creados por los usuarios.
+            </p>
           </div>
 
-          {/* Detalle del ticket */}
-          <div className="bg-white rounded-2xl shadow p-4">
-            {selectedTicket ? (
-              <>
-                <h2 className="font-medium mb-3">Detalle del ticket</h2>
+          <button
+            onClick={() => router.push("/")}
+            className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+          >
+            Volver al inicio
+          </button>
+        </div>
 
-                <div className="mb-3">
-                  <p className="text-sm">
-                    <span className="font-semibold">Asunto: </span>
-                    {selectedTicket.subject}
-                  </p>
-                  <p className="text-sm text-gray-600 mt-1">
-                    <span className="font-semibold">Categoría: </span>
-                    {selectedTicket.category}
-                  </p>
-                  <p className="text-sm text-gray-600 mt-2">
-                    <span className="font-semibold">Mensaje del usuario:</span>
-                    <br />
-                    {selectedTicket.message}
-                  </p>
-                </div>
+        {error && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
-                <div className="mb-3">
-                  <label className="block text-sm font-medium mb-1">
-                    Estado
-                  </label>
-                  <select
-                    className="border rounded-lg px-3 py-2 text-sm w-full"
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value)}
-                  >
-                    <option value="open">Abierto</option>
-                    <option value="in_progress">En proceso</option>
-                    <option value="closed">Cerrado</option>
-                  </select>
-                </div>
-
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-1">
-                    Respuesta para el usuario
-                  </label>
-                  <textarea
-                    className="w-full border rounded-lg px-3 py-2 text-sm min-h-[120px]"
-                    placeholder="Escribe aquí la respuesta que verá el usuario en su panel."
-                    value={response}
-                    onChange={(e) => setResponse(e.target.value)}
-                  />
-                </div>
-
-                {error && (
-                  <p className="text-sm text-red-500 mb-3">{error}</p>
-                )}
-
-                <button
-                  onClick={handleUpdate}
-                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
-                >
-                  Guardar cambios
-                </button>
-              </>
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Tickets de soporte
+            </h2>
+            {loadingTickets ? (
+              <span className="text-xs text-slate-400">Cargando…</span>
             ) : (
-              <p className="text-sm text-gray-500">
-                Selecciona un ticket en la lista de la izquierda para verlo y
-                responderlo.
-              </p>
+              <span className="text-xs text-slate-400">
+                {tickets.length} ticket
+                {tickets.length === 1 ? "" : "s"}
+              </span>
             )}
           </div>
+
+          {loadingTickets ? (
+            <p className="text-sm text-slate-500">
+              Cargando tickets de soporte…
+            </p>
+          ) : tickets.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Aún no hay tickets creados por los usuarios.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {tickets.map((t) => (
+                <div
+                  key={t.id}
+                  className="border border-slate-200 rounded-xl p-4 text-sm bg-slate-50/60"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {t.subject}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {formatCategory(t.category)} ·{" "}
+                        {new Date(t.created_at).toLocaleString("es-CL", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Usuario ID:{" "}
+                        <span className="font-mono">{t.user_id}</span>
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-500">
+                        Estado:
+                      </label>
+                      <select
+                        value={t.status}
+                        onChange={(e) =>
+                          handleFieldChange(t.id, "status", e.target.value)
+                        }
+                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white"
+                      >
+                        {STATUS_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <p className="text-xs font-semibold text-slate-700 mb-1">
+                      Mensaje del usuario
+                    </p>
+                    <p className="text-xs text-slate-700 whitespace-pre-line">
+                      {t.message}
+                    </p>
+                  </div>
+
+                  <div className="mb-3">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Respuesta de soporte
+                    </label>
+                    <textarea
+                      className="w-full border border-slate-300 rounded-lg px-2 py-1 text-xs min-h-[80px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Escribe aquí la respuesta que verá el usuario en su panel."
+                      value={t.admin_response || ""}
+                      onChange={(e) =>
+                        handleFieldChange(
+                          t.id,
+                          "admin_response",
+                          e.target.value
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={() => handleSaveTicket(t)}
+                      disabled={savingId === t.id}
+                      className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {savingId === t.id ? "Guardando…" : "Guardar cambios"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
-    </div>
+    </main>
   );
 }
+
+function formatCategory(category) {
+  if (category === "soporte") return "Soporte general";
+  if (category === "disputa") return "Disputa";
+  if (category === "otro") return "Otro";
+  return category || "—";
+}
+
