@@ -5,99 +5,153 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 
+// Helpers para RUT
+function cleanRut(rut) {
+  return rut.replace(/[^0-9kK]/g, "");
+}
+
+function isValidRut(rut) {
+  const clean = cleanRut(rut);
+  if (clean.length < 2) return false;
+
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1).toUpperCase();
+
+  let sum = 0;
+  let multiplier = 2;
+
+  for (let i = body.length - 1; i >= 0; i--) {
+    sum += parseInt(body[i], 10) * multiplier;
+    multiplier = multiplier === 7 ? 2 : multiplier + 1;
+  }
+
+  const mod = 11 - (sum % 11);
+  let dvCalc;
+  if (mod === 11) dvCalc = "0";
+  else if (mod === 10) dvCalc = "K";
+  else dvCalc = String(mod);
+
+  return dvCalc === dv;
+}
+
 export default function RegisterPage() {
   const router = useRouter();
 
   const [form, setForm] = useState({
-    name: "",
+    fullName: "",
     rut: "",
     email: "",
     phone: "",
     userType: "Usuario general",
     password: "",
-    confirmPassword: "",
-    termsAccepted: false,
+    passwordConfirm: "",
   });
 
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   const handleChange = (field) => (e) => {
-    const value =
-      field === "termsAccepted" ? e.target.checked : e.target.value;
-
     setForm((prev) => ({
       ...prev,
-      [field]: value,
+      [field]: e.target.value,
     }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMsg("");
-    setSuccessMsg("");
+    setErrorMessage("");
+    setSuccessMessage("");
 
-    if (form.password !== form.confirmPassword) {
-      setErrorMsg("Las contraseñas no coinciden.");
+    const { fullName, rut, email, phone, userType, password, passwordConfirm } =
+      form;
+
+    if (!fullName.trim()) {
+      setErrorMessage("Debes ingresar tu nombre completo.");
       return;
     }
 
-    if (!form.termsAccepted) {
-      setErrorMsg(
-        "Debes aceptar los términos y condiciones para crear tu cuenta."
-      );
+    if (!rut.trim() || !isValidRut(rut)) {
+      setErrorMessage("El RUT ingresado no es válido.");
+      return;
+    }
+
+    if (!email.trim()) {
+      setErrorMessage("Debes ingresar un correo electrónico.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMessage("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    if (password !== passwordConfirm) {
+      setErrorMessage("Las contraseñas no coinciden.");
       return;
     }
 
     setLoading(true);
 
-    if (!supabase) {
-      setLoading(false);
-      setErrorMsg("El servicio de registro aún no está configurado.");
-      return;
-    }
-
-    const { error } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        data: {
-          full_name: form.name,
-          rut: form.rut,
-          phone: form.phone,
-          user_type: form.userType,
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            name: fullName.trim(), // por compatibilidad
+            rut: rut.trim(),
+            phone: phone.trim(),
+            userType,
+          },
         },
-      },
-    });
+      });
 
-    setLoading(false);
+      if (error) {
+        console.error(error);
+        setErrorMessage(
+          "Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente."
+        );
+        return;
+      }
 
-    if (error) {
-      setErrorMsg(error.message || "Ocurrió un error al crear la cuenta.");
-      return;
+      setSuccessMessage(
+        "Cuenta creada correctamente. Revisa tu correo para confirmar tu cuenta antes de iniciar sesión."
+      );
+
+      // Opcional: redirigir al login después de unos segundos
+      setTimeout(() => {
+        router.push("/login");
+      }, 3000);
+    } finally {
+      setLoading(false);
     }
-
-    setSuccessMsg(
-      "Cuenta creada correctamente. Revisa tu correo para confirmar la cuenta."
-    );
-
-    // Después de 1.5s te mandamos al login
-    setTimeout(() => {
-      router.push("/login");
-    }, 1500);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-soft p-8">
-        <h1 className="text-3xl font-bold text-center mb-1">Crear cuenta</h1>
-        <p className="text-sm text-gray-500 text-center mb-6">
-          Únete al marketplace más seguro de Chile
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+        <h1 className="text-2xl font-semibold text-gray-900 mb-2">
+          Crear cuenta
+        </h1>
+        <p className="text-sm text-gray-500 mb-6">
+          Regístrate para comprar y vender entradas en TixSwap.
         </p>
 
+        {errorMessage && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            {errorMessage}
+          </div>
+        )}
+
+        {successMessage && (
+          <div className="mb-4 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
+            {successMessage}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Nombre completo */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Nombre completo
@@ -105,14 +159,13 @@ export default function RegisterPage() {
             <input
               type="text"
               required
-              placeholder="Tu nombre completo"
-              value={form.name}
-              onChange={handleChange("name")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+              placeholder="Ej: David Ignacio Chacón Pérez"
+              value={form.fullName}
+              onChange={handleChange("fullName")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
-          {/* RUT */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               RUT
@@ -120,14 +173,17 @@ export default function RegisterPage() {
             <input
               type="text"
               required
-              placeholder="12.345.678-9"
+              placeholder="12345678-9"
               value={form.rut}
               onChange={handleChange("rut")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
+            <p className="mt-1 text-xs text-gray-400">
+              Validaremos que el RUT sea correcto (incluyendo dígito
+              verificador).
+            </p>
           </div>
 
-          {/* Correo */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Correo electrónico
@@ -138,45 +194,39 @@ export default function RegisterPage() {
               placeholder="tu@email.com"
               value={form.email}
               onChange={handleChange("email")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
-          {/* Teléfono */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Teléfono (contacto)
+              Teléfono
             </label>
             <input
               type="tel"
-              required
-              placeholder="+56987654321"
+              placeholder="+569..."
               value={form.phone}
               onChange={handleChange("phone")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
-          {/* Tipo de usuario */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              ¿Qué tipo de usuario eres? (solo estadístico)
+              Tipo de usuario
             </label>
             <select
               value={form.userType}
               onChange={handleChange("userType")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
-              <option>Usuario general</option>
-              <option>Comprador frecuente</option>
-              <option>Vendedor frecuente</option>
+              <option value="Usuario general">Usuario general</option>
+              <option value="Comprador frecuente">Comprador frecuente</option>
+              <option value="Vendedor frecuente">Vendedor frecuente</option>
+              <option value="Promotor de eventos">Promotor de eventos</option>
             </select>
-            <p className="text-xs text-gray-400 mt-1">
-              Esto no limita tus funciones, solo nos ayuda con estadísticas.
-            </p>
           </div>
 
-          {/* Contraseña */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Contraseña
@@ -184,78 +234,43 @@ export default function RegisterPage() {
             <input
               type="password"
               required
+              placeholder="********"
               value={form.password}
               onChange={handleChange("password")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
-              placeholder="••••••••"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
-          {/* Confirmar contraseña */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Confirmar contraseña
+              Repetir contraseña
             </label>
             <input
               type="password"
               required
-              value={form.confirmPassword}
-              onChange={handleChange("confirmPassword")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
-              placeholder="••••••••"
+              placeholder="********"
+              value={form.passwordConfirm}
+              onChange={handleChange("passwordConfirm")}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
-
-          {/* Términos */}
-          <div className="flex items-start space-x-2">
-            <input
-              id="terms"
-              type="checkbox"
-              checked={form.termsAccepted}
-              onChange={handleChange("termsAccepted")}
-              className="mt-1 h-4 w-4 border-gray-300 rounded"
-            />
-            <label
-              htmlFor="terms"
-              className="text-xs text-gray-600 leading-relaxed"
-            >
-              Acepto los{" "}
-              <a href="#" className="underline">
-                términos y condiciones
-              </a>{" "}
-              y la{" "}
-              <a href="#" className="underline">
-                política de privacidad
-              </a>
-              .
-            </label>
-          </div>
-
-          {errorMsg && (
-            <p className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              {errorMsg}
-            </p>
-          )}
-
-          {successMsg && (
-            <p className="text-sm text-green-600 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
-              {successMsg}
-            </p>
-          )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#2563eb] text-white font-medium py-2.5 rounded-lg hover:bg-[#1e4ecb] disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? "Creando cuenta..." : "Crear cuenta"}
           </button>
         </form>
 
-        <p className="mt-4 text-sm text-gray-500 text-center">
+        <p className="mt-6 text-center text-sm text-gray-500">
           ¿Ya tienes cuenta?{" "}
-          <Link href="/login" className="text-[#2563eb] hover:underline">
-            Inicia sesión
+          <Link
+            href="/login"
+            className="text-blue-600 hover:text-blue-700 font-medium"
+          >
+            Iniciar sesión
           </Link>
         </p>
       </div>
