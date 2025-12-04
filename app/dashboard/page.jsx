@@ -223,8 +223,8 @@ export default function DashboardPage() {
       return (
         <PlaceholderCard title="Mis ventas">
           Aquí vas a poder ver todas las entradas que hayas publicado, el
-          comprador, la fecha de la venta y las calificaciones que recibas
-          como vendedor.
+          comprador, la fecha de la venta y las calificaciones que recibas como
+          vendedor.
         </PlaceholderCard>
       );
     }
@@ -337,8 +337,173 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Mis tickets</h2>
               {loadingTickets ? (
-                <span className="text-xs text-s
+                <span className="text-xs text-slate-400">Cargando…</span>
+              ) : (
+                <span className="text-xs text-slate-400">
+                  {tickets.length} ticket
+                  {tickets.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
 
-::contentReference[oaicite:0]{index=0}
+            {loadingTickets ? (
+              <p className="text-sm text-slate-500">
+                Cargando tus solicitudes de soporte…
+              </p>
+            ) : tickets.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Aún no has creado tickets de soporte. Cuando envíes uno, lo vas
+                a ver aquí con su estado.
+              </p>
+            ) : (
+              <ul className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                {tickets.map((t) => (
+                  <li
+                    key={t.id}
+                    className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="font-medium text-slate-800 truncate">
+                        {t.subject}
+                      </p>
+                      <StatusPill status={t.status} />
+                    </div>
+                    <p className="text-xs text-slate-500 mb-1">
+                      {formatCategory(t.category)} ·{" "}
+                      {new Date(t.created_at).toLocaleString("es-CL", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </p>
+                    <p className="text-xs text-slate-600 line-clamp-2">
+                      {t.message}
+                    </p>
 
+                    {t.admin_response && (
+                      <p className="mt-1 text-xs text-slate-700">
+                        <span className="font-semibold">
+                          Respuesta de soporte:{" "}
+                        </span>
+                        {t.admin_response}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      );
+    }
 
+    return null;
+  };
+
+  if (loadingUser) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-sm text-slate-500">Cargando tu cuenta…</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50">
+      <div className="max-w-6xl mx-auto px-4 py-10 md:py-12">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
+              Hola, {fullName} 👋
+            </h1>
+            <p className="text-sm text-slate-500">
+              Este es tu panel de cuenta en TixSwap.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push("/")}
+              className="text-sm px-4 py-2 rounded-lg border border-blue-600 text-blue-600 bg-white hover:bg-blue-50"
+            >
+              Comprar / vender entradas
+            </button>
+            <button
+              onClick={handleLogout}
+              className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-6">
+          {/* Sidebar */}
+          <aside className="w-full md:w-60 bg-white border border-slate-100 rounded-2xl p-3 shadow-sm">
+            <nav className="space-y-1">
+              {SECTIONS.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={() => setCurrentSection(section.id)}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm ${
+                    currentSection === section.id
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {section.label}
+                </button>
+              ))}
+            </nav>
+          </aside>
+
+          {/* Contenido */}
+          <section className="flex-1">{renderSection()}</section>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+// ---- Componentes auxiliares ----
+
+function PlaceholderCard({ title, children }) {
+  return (
+    <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+      <h2 className="text-lg font-semibold mb-3">{title}</h2>
+      <p className="text-sm text-slate-500 mb-2">{children}</p>
+      <p className="text-xs text-slate-400">
+        Esta sección está en construcción para el MVP. Más adelante aquí se verá
+        la información en detalle.
+      </p>
+    </div>
+  );
+}
+
+function StatusPill({ status }) {
+  const base =
+    "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium";
+
+  const map = {
+    open: base + " bg-amber-50 text-amber-700 border border-amber-100",
+    in_progress:
+      base + " bg-blue-50 text-blue-700 border border-blue-100",
+    closed:
+      base + " bg-emerald-50 text-emerald-700 border border-emerald-100",
+  };
+
+  return <span className={map[status] || base}>{formatStatus(status)}</span>;
+}
+
+function formatStatus(status) {
+  if (status === "open") return "Abierto";
+  if (status === "in_progress") return "En revisión";
+  if (status === "closed") return "Cerrado";
+  return status || "—";
+}
+
+function formatCategory(category) {
+  if (category === "soporte") return "Soporte general";
+  if (category === "disputa") return "Disputa";
+  if (category === "otro") return "Otro";
+  return category || "—";
+}
