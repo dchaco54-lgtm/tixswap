@@ -40,25 +40,21 @@ export default function LoginPage() {
       if (error) {
         const msg = (error.message || "").toLowerCase();
 
-        // Caso: correo no confirmado
         if (msg.includes("email not confirmed")) {
           setErrorMessage(
             "Debes confirmar tu correo antes de iniciar sesión. Revisa tu bandeja de entrada o spam."
           );
         } else if (msg.includes("invalid login credentials")) {
-          // Credenciales malas
           setErrorMessage("Correo o contraseña incorrectos.");
         } else {
-          // Cualquier otro error
           setErrorMessage(
             "Ocurrió un problema al iniciar sesión. Inténtalo de nuevo."
           );
         }
-
         return;
       }
 
-      // Login correcto → AHORA vamos a la homepage
+      // ✅ Login correcto → ir al HOMEPAGE
       router.push("/");
     } catch (err) {
       console.error(err);
@@ -71,8 +67,17 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
+    <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8 relative">
+        {/* Link para volver al inicio */}
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          className="absolute -top-10 left-0 text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1"
+        >
+          <span>←</span> Volver al inicio
+        </button>
+
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">
           Iniciar sesión
         </h1>
@@ -134,6 +139,6 @@ export default function LoginPage() {
           </Link>
         </p>
       </div>
-    </div>
+    </main>
   );
 }
