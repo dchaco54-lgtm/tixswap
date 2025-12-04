@@ -1,3 +1,4 @@
+// app/forgot-password/page.jsx
 "use client";
 
 import { useState } from "react";
@@ -6,7 +7,7 @@ import { supabase } from "../lib/supabaseClient";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -16,29 +17,37 @@ export default function ForgotPasswordPage() {
     setSuccessMessage("");
 
     if (!email.trim()) {
-      setErrorMessage("Debes ingresar el correo asociado a tu cuenta.");
+      setErrorMessage("Ingresa un correo válido.");
       return;
     }
 
-    setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        email.trim()
-      );
+      setSending(true);
+
+      const redirectTo = `${window.location.origin}/reset-password`;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
 
       if (error) {
         console.error(error);
         setErrorMessage(
-          "Ocurrió un problema al enviar el correo. Intenta nuevamente."
+          "No pudimos enviar el correo de recuperación. Inténtalo de nuevo en unos minutos."
         );
         return;
       }
 
       setSuccessMessage(
-        "Si existe una cuenta asociada a ese correo, te enviaremos un email con instrucciones para crear una nueva contraseña."
+        "Te enviamos un correo con el enlace para crear una nueva contraseña. Revisa tu bandeja de entrada o spam."
+      );
+    } catch (err) {
+      console.error(err);
+      setErrorMessage(
+        "Ocurrió un problema al solicitar la recuperación. Inténtalo nuevamente."
       );
     } finally {
-      setLoading(false);
+      setSending(false);
     }
   };
 
@@ -49,8 +58,8 @@ export default function ForgotPasswordPage() {
           Recuperar contraseña
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          Ingresa el correo con el que te registraste en TixSwap. Te enviaremos
-          un enlace para crear una nueva contraseña.
+          Ingresa el correo con el que creaste tu cuenta en TixSwap y te
+          enviaremos un enlace para crear una nueva contraseña.
         </p>
 
         {errorMessage && (
@@ -82,15 +91,15 @@ export default function ForgotPasswordPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={sending}
             className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {loading ? "Enviando correo..." : "Enviar instrucciones"}
+            {sending ? "Enviando correo..." : "Enviar enlace de recuperación"}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-gray-500">
-          ¿Te acordaste de tu contraseña?{" "}
+        <p className="mt-4 text-center text-sm text-gray-500">
+          ¿Ya recordaste tu clave?{" "}
           <Link
             href="/login"
             className="text-blue-600 hover:text-blue-700 font-medium"
