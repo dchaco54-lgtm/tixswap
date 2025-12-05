@@ -1,33 +1,46 @@
+// app/register/page.jsx
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 
-// --- Helpers para RUT chileno ---
+// ----------------- Helpers RUT -----------------
 
-function normalizeRut(rutRaw) {
-  const clean = rutRaw.replace(/[^0-9kK]/g, "").toUpperCase();
-  if (clean.length < 2) return clean;
-
+function normalizeRut(raw) {
+  if (!raw) return "";
+  const clean = raw.replace(/\./g, "").replace(/-/g, "").toUpperCase();
   const body = clean.slice(0, -1);
   const dv = clean.slice(-1);
-
-  const bodyNumber = parseInt(body, 10);
-  if (Number.isNaN(bodyNumber)) return clean;
-
-  return `${bodyNumber.toString()}-${dv}`;
+  return `${body}-${dv}`;
 }
 
-function isValidRut(rutRaw) {
-  const clean = rutRaw.replace(/[^0-9kK]/g, "").toUpperCase();
-  if (!clean || clean.length < 2) return false;
+function isValidRut(raw) {
+  if (!raw) return false;
+
+  const clean = raw.replace(/\./g, "").replace(/-/g, "").toUpperCase();
+
+  // Largo razonable
+  if (clean.length < 7 || clean.length > 9) return false;
 
   const body = clean.slice(0, -1);
   const dv = clean.slice(-1);
 
-  if (!/^[0-9]+$/.test(body)) return false;
+  // Cuerpo sólo números
+  if (!/^\d+$/.test(body)) return false;
 
+  // ❗Bloque extra anti-RUT trucho:
+  //  - todos los dígitos iguales (11111111, 22222222, etc.)
+  //  - algunos cuerpos muy típicos fake
+  const allSameDigit = new Set(body.split("")).size === 1;
+  const blacklistedBodies = ["12345678", "87654321"];
+
+  if (allSameDigit || blacklistedBodies.includes(body)) {
+    return false;
+  }
+
+  // Cálculo dígito verificador (módulo 11)
   let sum = 0;
   let multiplier = 2;
 
@@ -37,17 +50,17 @@ function isValidRut(rutRaw) {
   }
 
   const remainder = sum % 11;
-  const expected = 11 - remainder;
+  const calc = 11 - remainder;
 
-  let dvExpected;
-  if (expected === 11) dvExpected = "0";
-  else if (expected === 10) dvExpected = "K";
-  else dvExpected = String(expected);
+  let dvCalc;
+  if (calc === 11) dvCalc = "0";
+  else if (calc === 10) dvCalc = "K";
+  else dvCalc = String(calc);
 
-  return dv === dvExpected;
+  return dvCalc === dv;
 }
 
-// --- Página de registro ---
+// ----------------- Página -----------------
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -88,8 +101,21 @@ export default function RegisterPage() {
       passwordConfirm,
     } = form;
 
-    if (!fullName.trim() || !rut.trim() || !email.trim() || !password) {
-      setErrorMessage("Completa todos los campos obligatorios.");
+    // Validaciones básicas
+    if (
+      !fullName.trim() ||
+      !rut.trim() ||
+      !email.trim() ||
+      !phone.trim() ||
+      !password ||
+      !passwordConfirm
+    ) {
+      setErrorMessage("Por favor completa todos los campos.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMessage("La contraseña debe tener al menos 6 caracteres.");
       return;
     }
 
@@ -98,86 +124,73 @@ export default function RegisterPage() {
       return;
     }
 
-    const normalizedRut = normalizeRut(rut.trim());
-
-    if (!isValidRut(normalizedRut)) {
-      setErrorMessage(
-        "El RUT ingresado no es válido. Verifica el número y el dígito verificador."
-      );
+    if (!isValidRut(rut)) {
+      setErrorMessage("El RUT ingresado no es válido.");
       return;
     }
 
-    setLoading(true);
+    const normalizedRut = normalizeRut(rut);
 
     try {
-      // Revisar si el RUT ya existe
-      const {
-        data: rutExists,
-        error: rutCheckError,
-      } = await supabase.rpc("rut_exists", {
-        rut_input: normalizedRut,
-      });
+      setLoading(true);
 
-      if (rutCheckError) {
-        console.error("Error revisando RUT:", rutCheckError);
-        setErrorMessage(
-          "Ocurrió un problema al validar el RUT. Intenta nuevamente en unos minutos."
-        );
-        setLoading(false);
-        return;
-      }
-
-      if (rutExists) {
-        setErrorMessage(
-          "Este RUT ya tiene una cuenta en TixSwap. Si olvidaste tu contraseña, recupérala en “¿Olvidaste tu contraseña?” al iniciar sesión."
-        );
-        setLoading(false);
-        return;
-      }
-
-      // Registro normal
-      const { error } = await supabase.auth.signUp({
-        email,
+      // Registro en Supabase Auth
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
         password,
         options: {
           data: {
-            name: fullName.trim(),
             full_name: fullName.trim(),
             rut: normalizedRut,
             phone: phone.trim(),
             userType,
           },
+          // Después de confirmar, que vuelva al login
+          emailRedirectTo:
+            typeof window !== "undefined"
+              ? `${window.location.origin}/login`
+              : undefined,
         },
       });
 
       if (error) {
         const msg = (error.message || "").toLowerCase();
 
-        if (msg.includes("email") && msg.includes("already")) {
+        if (msg.includes("already registered")) {
           setErrorMessage(
-            "Este correo ya está registrado en TixSwap. Intenta iniciar sesión o recuperar tu contraseña."
+            "Este correo ya tiene una cuenta en TixSwap. Intenta iniciar sesión o recupera tu contraseña."
           );
         } else {
           setErrorMessage(
-            "Ocurrió un problema al crear tu cuenta. Intenta nuevamente en unos minutos."
+            "Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente."
           );
         }
-
-        setLoading(false);
         return;
       }
 
-      setSuccessMessage(
-        "Cuenta creada correctamente. Revisa tu correo para confirmar tu cuenta antes de iniciar sesión."
-      );
+      if (data?.user) {
+        setSuccessMessage(
+          "Cuenta creada correctamente. Te enviamos un correo para confirmar tu cuenta. Revisa tu bandeja de entrada o spam."
+        );
 
-      setTimeout(() => {
-        router.push("/login");
-      }, 2500);
+        // Opcional: limpiar formulario
+        setForm({
+          fullName: "",
+          rut: "",
+          email: "",
+          phone: "",
+          userType: "Usuario general",
+          password: "",
+          passwordConfirm: "",
+        });
+
+        // Después de unos segundos podrías redirigir al login si quieres
+        // setTimeout(() => router.push("/login"), 4000);
+      }
     } catch (err) {
       console.error(err);
       setErrorMessage(
-        "Ocurrió un problema al crear tu cuenta. Intenta nuevamente."
+        "Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente."
       );
     } finally {
       setLoading(false);
@@ -186,7 +199,7 @@ export default function RegisterPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
         <h1 className="text-2xl font-semibold text-gray-900 mb-2">
           Crear cuenta
         </h1>
@@ -207,45 +220,44 @@ export default function RegisterPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Nombre */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Nombre completo
             </label>
             <input
               type="text"
-              required
-              placeholder="Ej: Juan Pérez González"
+              placeholder="Ej: Juan Pérez"
               value={form.fullName}
               onChange={handleChange("fullName")}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
 
+          {/* RUT */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               RUT
             </label>
             <input
               type="text"
-              required
               placeholder="12345678-9"
               value={form.rut}
               onChange={handleChange("rut")}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
             <p className="mt-1 text-xs text-gray-400">
-              Validaremos que el RUT sea correcto (incluyendo dígito
-              verificador).
+              Validaremos que el RUT sea correcto (incluyendo dígito verificador).
             </p>
           </div>
 
+          {/* Correo */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Correo electrónico
             </label>
             <input
               type="email"
-              required
               placeholder="tu@email.com"
               value={form.email}
               onChange={handleChange("email")}
@@ -253,6 +265,7 @@ export default function RegisterPage() {
             />
           </div>
 
+          {/* Teléfono */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Teléfono
@@ -266,6 +279,7 @@ export default function RegisterPage() {
             />
           </div>
 
+          {/* Tipo de usuario */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Tipo de usuario
@@ -276,19 +290,19 @@ export default function RegisterPage() {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
             >
               <option value="Usuario general">Usuario general</option>
-              <option value="Vendedor frecuente">Vendedor frecuente</option>
               <option value="Comprador frecuente">Comprador frecuente</option>
+              <option value="Vendedor frecuente">Vendedor frecuente</option>
               <option value="Promotor de eventos">Promotor de eventos</option>
             </select>
           </div>
 
+          {/* Password */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Contraseña
             </label>
             <input
               type="password"
-              required
               placeholder="********"
               value={form.password}
               onChange={handleChange("password")}
@@ -296,13 +310,13 @@ export default function RegisterPage() {
             />
           </div>
 
+          {/* Confirmar password */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Repetir contraseña
             </label>
             <input
               type="password"
-              required
               placeholder="********"
               value={form.passwordConfirm}
               onChange={handleChange("passwordConfirm")}
@@ -318,6 +332,16 @@ export default function RegisterPage() {
             {loading ? "Creando cuenta..." : "Crear cuenta"}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-sm text-gray-500">
+          ¿Ya tienes cuenta?{" "}
+          <Link
+            href="/login"
+            className="text-blue-600 hover:text-blue-700 font-medium"
+          >
+            Iniciar sesión
+          </Link>
+        </p>
       </div>
     </main>
   );
