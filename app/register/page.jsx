@@ -7,15 +7,12 @@ import { supabase } from "../lib/supabaseClient";
 // --- Helpers para RUT chileno ---
 
 function normalizeRut(rutRaw) {
-  // Quita puntos y caracteres raros, deja solo números y K
   const clean = rutRaw.replace(/[^0-9kK]/g, "").toUpperCase();
-
   if (clean.length < 2) return clean;
 
   const body = clean.slice(0, -1);
   const dv = clean.slice(-1);
 
-  // Quita ceros a la izquierda del cuerpo y agrega guion
   const bodyNumber = parseInt(body, 10);
   if (Number.isNaN(bodyNumber)) return clean;
 
@@ -24,7 +21,6 @@ function normalizeRut(rutRaw) {
 
 function isValidRut(rutRaw) {
   const clean = rutRaw.replace(/[^0-9kK]/g, "").toUpperCase();
-
   if (!clean || clean.length < 2) return false;
 
   const body = clean.slice(0, -1);
@@ -114,7 +110,7 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      // 1) Revisar si el RUT ya existe usando la función rut_exists
+      // Revisar si el RUT ya existe
       const {
         data: rutExists,
         error: rutCheckError,
@@ -139,7 +135,7 @@ export default function RegisterPage() {
         return;
       }
 
-      // 2) Si el RUT es válido y no existe aún, seguimos con el registro normal
+      // Registro normal
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -247,81 +243,4 @@ export default function RegisterPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Correo electrónico
             </label>
-            <input
-              type="email"
-              required
-              placeholder="tu@email.com"
-              value={form.email}
-              onChange={handleChange("email")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Teléfono
-            </label>
-            <input
-              type="tel"
-              placeholder="+569..."
-              value={form.phone}
-              onChange={handleChange("phone")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Tipo de usuario
-            </label>
-            <select
-              value={form.userType}
-              onChange={handleChange("userType")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-            >
-              <option value="Usuario general">Usuario general</option>
-              <option value="Promotor">Promotor</option>
-              <option value="Ticket broker">Ticket broker</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Contraseña
-            </label>
-            <input
-              type="password"
-              required
-              placeholder="********"
-              value={form.password}
-              onChange={handleChange("password")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Repetir contraseña
-            </label>
-            <input
-              type="password"
-              required
-              placeholder="********"
-              value={form.passwordConfirm}
-              onChange={handleChange("passwordConfirm")}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {loading ? "Creando cuenta..." : "Crear cuenta"}
-          </button>
-        </form>
-      </div>
-    </main>
-  );
-}
