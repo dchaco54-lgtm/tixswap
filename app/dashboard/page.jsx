@@ -3,7 +3,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { supabase } from "../lib/supabaseClient";
 
 const SECTIONS = [
@@ -18,19 +17,10 @@ const SECTIONS = [
 
 export default function DashboardPage() {
   const router = useRouter();
+
   const [currentSection, setCurrentSection] = useState("overview");
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
-
-  // Perfil editable
-  const [profileForm, setProfileForm] = useState({
-    email: "",
-    phone: "",
-    userType: "Usuario general",
-  });
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileError, setProfileError] = useState("");
-  const [profileSuccess, setProfileSuccess] = useState("");
 
   // Soporte
   const [tickets, setTickets] = useState([]);
@@ -43,6 +33,17 @@ export default function DashboardPage() {
   const [submittingTicket, setSubmittingTicket] = useState(false);
   const [ticketError, setTicketError] = useState("");
   const [ticketSuccess, setTicketSuccess] = useState("");
+
+  // Perfil editable
+  const [profileForm, setProfileForm] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+    userType: "Usuario general",
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
 
   // Cargar usuario + tickets
   useEffect(() => {
@@ -62,17 +63,25 @@ export default function DashboardPage() {
       }
 
       setUser(user);
-
-      // Inicializar formulario de perfil
-      setProfileForm({
-        email: user.email ?? "",
-        phone: user.user_metadata?.phone ?? "",
-        userType: user.user_metadata?.userType ?? "Usuario general",
-      });
-
       setLoadingUser(false);
 
-      // Cargar tickets del usuario
+      // Inicializar formulario de perfil
+      const fullNameMeta =
+        user.user_metadata?.name ||
+        user.user_metadata?.full_name ||
+        "";
+      const rutMeta = user.user_metadata?.rut || "";
+      const phoneMeta = user.user_metadata?.phone || "";
+      const userTypeMeta = user.user_metadata?.userType || "Usuario general";
+
+      setProfileForm({
+        fullName: fullNameMeta,
+        email: user.email || "",
+        phone: phoneMeta,
+        userType: userTypeMeta,
+      });
+
+      // Cargar tickets del usuario (RLS se encarga de filtrar)
       const { data: ticketsData, error: ticketsError } = await supabase
         .from("support_tickets")
         .select("*")
@@ -92,7 +101,7 @@ export default function DashboardPage() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    router.push("/");
+    router.push("/login");
   };
 
   const fullName =
@@ -102,29 +111,35 @@ export default function DashboardPage() {
   const userType = user?.user_metadata?.userType || "Usuario general";
   const email = user?.email || "—";
 
-  // --- Perfil: editar datos ---
+  // -------- Perfil: actualizar datos --------
   const handleProfileChange = (field) => (e) => {
-    setProfileForm((prev) => ({ ...prev, [field]: e.target.value }));
+    setProfileForm((prev) => ({
+      ...prev,
+      [field]: e.target.value,
+    }));
   };
 
-  const handleProfileSubmit = async (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
     setProfileError("");
     setProfileSuccess("");
 
-    if (!user) return;
+    if (!user) {
+      setProfileError("Debes iniciar sesión para actualizar tus datos.");
+      return;
+    }
 
     if (!profileForm.email.trim()) {
       setProfileError("El correo no puede estar vacío.");
       return;
     }
 
-    setProfileSaving(true);
     try {
+      setSavingProfile(true);
+
       const { data, error } = await supabase.auth.updateUser({
         email: profileForm.email.trim(),
         data: {
-          // mantenemos el resto de metadatos
           ...user.user_metadata,
           phone: profileForm.phone.trim(),
           userType: profileForm.userType,
@@ -134,27 +149,27 @@ export default function DashboardPage() {
       if (error) {
         console.error(error);
         setProfileError(
-          "Ocurrió un problema al guardar tus datos. Inténtalo de nuevo."
+          "Ocurrió un problema al actualizar tus datos. Intenta de nuevo."
         );
         return;
       }
 
       if (data?.user) {
         setUser(data.user);
-        setProfileForm({
-          email: data.user.email ?? "",
-          phone: data.user.user_metadata?.phone ?? "",
-          userType: data.user.user_metadata?.userType ?? "Usuario general",
-        });
       }
 
-      setProfileSuccess("Tus datos se actualizaron correctamente.");
+      setProfileSuccess("Tus datos fueron actualizados correctamente.");
+    } catch (err) {
+      console.error(err);
+      setProfileError(
+        "Ocurrió un problema al actualizar tus datos. Intenta de nuevo."
+      );
     } finally {
-      setProfileSaving(false);
+      setSavingProfile(false);
     }
   };
 
-  // --- Soporte: crear ticket ---
+  // -------- Soporte: crear ticket --------
   const handleTicketChange = (field) => (e) => {
     setTicketForm((prev) => ({ ...prev, [field]: e.target.value }));
   };
@@ -183,6 +198,7 @@ export default function DashboardPage() {
           category: ticketForm.category,
           subject: ticketForm.subject.trim(),
           message: ticketForm.message.trim(),
+          // status por defecto 'open'
         },
       ]);
 
@@ -194,6 +210,7 @@ export default function DashboardPage() {
         return;
       }
 
+      // Recargar tickets
       const { data: ticketsData, error: ticketsError } = await supabase
         .from("support_tickets")
         .select("*")
@@ -203,6 +220,7 @@ export default function DashboardPage() {
         setTickets(ticketsData);
       }
 
+      // Limpiar formulario
       setTicketForm({
         category: "soporte",
         subject: "",
@@ -215,6 +233,7 @@ export default function DashboardPage() {
     }
   };
 
+  // -------- Render de secciones --------
   const renderSection = () => {
     if (currentSection === "overview") {
       return (
@@ -256,8 +275,8 @@ export default function DashboardPage() {
         <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100 max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Mis datos</h2>
           <p className="text-sm text-slate-500 mb-4">
-            El nombre y el RUT no se pueden modificar desde el panel. Si
-            necesitas actualizar alguno de esos datos, escríbenos a{" "}
+            Por seguridad, el nombre y el RUT no se pueden modificar desde el
+            panel. Si necesitas actualizar alguno de esos datos, escríbenos a{" "}
             <a
               href="mailto:soporte@tixswap.cl"
               className="text-blue-600 hover:underline"
@@ -267,73 +286,77 @@ export default function DashboardPage() {
             .
           </p>
 
-          <form onSubmit={handleProfileSubmit} className="space-y-4">
-            {/* Nombre (solo lectura) */}
+          <form onSubmit={handleSaveProfile} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">
                 Nombre completo
               </label>
-              <p className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                {fullName}
-              </p>
-            </div>
-
-            {/* RUT (solo lectura) */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                RUT
-              </label>
-              <p className="text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                {rut}
-              </p>
-            </div>
-
-            {/* Correo editable */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Correo electrónico
-              </label>
               <input
-                type="email"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={profileForm.email}
-                onChange={handleProfileChange("email")}
-                placeholder="tu@email.com"
-              />
-              <p className="mt-1 text-xs text-slate-400">
-                Si cambias el correo, podríamos pedirte confirmarlo nuevamente.
-              </p>
-            </div>
-
-            {/* Teléfono editable */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Teléfono
-              </label>
-              <input
-                type="tel"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={profileForm.phone}
-                onChange={handleProfileChange("phone")}
-                placeholder="+569..."
+                type="text"
+                value={profileForm.fullName}
+                disabled
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500"
               />
             </div>
 
-            {/* Tipo de usuario editable */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Tipo de usuario
-              </label>
-              <select
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                value={profileForm.userType}
-                onChange={handleProfileChange("userType")}
-              >
-                <option value="Usuario general">Usuario general</option>
-                <option value="Comprador frecuente">Comprador frecuente</option>
-                <option value="Vendedor frecuente">Vendedor frecuente</option>
-                <option value="Promotor de eventos">Promotor de eventos</option>
-              </select>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  RUT
+                </label>
+                <input
+                  type="text"
+                  value={rut}
+                  disabled
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Tipo de usuario
+                </label>
+                <select
+                  value={profileForm.userType}
+                  onChange={handleProfileChange("userType")}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Usuario general">Usuario general</option>
+                  <option value="Vendedor frecuente">Vendedor frecuente</option>
+                  <option value="Comprador frecuente">
+                    Comprador frecuente
+                  </option>
+                  <option value="Usuario verificado">Usuario verificado</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Correo electrónico
+                </label>
+                <input
+                  type="email"
+                  value={profileForm.email}
+                  onChange={handleProfileChange("email")}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="tucorreo@ejemplo.cl"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Teléfono
+                </label>
+                <input
+                  type="tel"
+                  value={profileForm.phone}
+                  onChange={handleProfileChange("phone")}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="+56 9 ..."
+                />
+              </div>
             </div>
 
             {profileError && (
@@ -350,10 +373,10 @@ export default function DashboardPage() {
 
             <button
               type="submit"
-              disabled={profileSaving}
-              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={savingProfile}
+              className="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {profileSaving ? "Guardando..." : "Guardar cambios"}
+              {savingProfile ? "Guardando..." : "Guardar cambios"}
             </button>
           </form>
         </div>
@@ -398,8 +421,7 @@ export default function DashboardPage() {
     }
 
     if (currentSection === "support") {
-      const MAX_TICKETS_PREVIEW = 3;
-      const ticketsPreview = tickets.slice(0, MAX_TICKETS_PREVIEW);
+      const lastTickets = tickets.slice(0, 2);
 
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)]">
@@ -424,12 +446,7 @@ export default function DashboardPage() {
                   onChange={handleTicketChange("category")}
                 >
                   <option value="soporte">Soporte general</option>
-                  <option value="disputa_compra">
-                    Disputa por compra de entrada
-                  </option>
-                  <option value="disputa_venta">
-                    Disputa por venta de entrada
-                  </option>
+                  <option value="disputa">Disputa por compra/venta</option>
                   <option value="sugerencia">Sugerencia para TixSwap</option>
                   <option value="reclamo">Reclamo para TixSwap</option>
                   <option value="otro">Otro</option>
@@ -483,7 +500,7 @@ export default function DashboardPage() {
             </form>
           </div>
 
-          {/* Lista de tickets */}
+          {/* Lista de tickets (últimos) */}
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-lg font-semibold">Mis tickets</h2>
@@ -498,9 +515,8 @@ export default function DashboardPage() {
             </div>
 
             {!loadingTickets && tickets.length > 0 && (
-              <p className="text-xs text-slate-400 mb-4">
-                Mostrando tus últimos{" "}
-                {Math.min(tickets.length, MAX_TICKETS_PREVIEW)} tickets.
+              <p className="text-[11px] text-slate-400 mb-3">
+                Mostrando tus últimos {lastTickets.length} tickets.
               </p>
             )}
 
@@ -516,7 +532,7 @@ export default function DashboardPage() {
             ) : (
               <>
                 <ul className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
-                  {ticketsPreview.map((t) => (
+                  {lastTickets.map((t) => (
                     <li
                       key={t.id}
                       className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
@@ -534,11 +550,11 @@ export default function DashboardPage() {
                           timeStyle: "short",
                         })}
                       </p>
-                      <p className="text-xs text-slate-600 line-clamp-2">
+                      <p className="text-xs text-slate-600 line-clamp-2 mb-1">
                         {t.message}
                       </p>
                       {t.admin_response && (
-                        <p className="mt-1 text-xs text-slate-700">
+                        <p className="text-[11px] text-slate-500 border-t border-slate-100 pt-1 mt-1">
                           <span className="font-semibold">
                             Respuesta de soporte:{" "}
                           </span>
@@ -549,19 +565,83 @@ export default function DashboardPage() {
                   ))}
                 </ul>
 
-                {tickets.length > 0 && (
-                  <div className="mt-4">
-                    <Link
-                      href="/dashboard/tickets"
-                      className="text-xs text-blue-600 hover:underline font-medium"
-                    >
-                      Ver todos mis tickets de soporte
-                    </Link>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setCurrentSection("tickets")}
+                  className="mt-4 text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  Ver todos mis tickets →
+                </button>
               </>
             )}
           </div>
+        </div>
+      );
+    }
+
+    if (currentSection === "tickets") {
+      return (
+        <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold">Todos mis tickets</h2>
+              <p className="text-xs text-slate-500">
+                Aquí puedes revisar el historial completo de tus solicitudes de
+                soporte.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCurrentSection("support")}
+              className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100"
+            >
+              ← Volver a soporte
+            </button>
+          </div>
+
+          {loadingTickets ? (
+            <p className="text-sm text-slate-500">
+              Cargando tus solicitudes de soporte…
+            </p>
+          ) : tickets.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Aún no has creado tickets de soporte.
+            </p>
+          ) : (
+            <ul className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+              {tickets.map((t) => (
+                <li
+                  key={t.id}
+                  className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-medium text-slate-800 truncate">
+                      {t.subject}
+                    </p>
+                    <StatusPill status={t.status} />
+                  </div>
+                  <p className="text-xs text-slate-500 mb-1">
+                    {formatCategory(t.category)} ·{" "}
+                    {new Date(t.created_at).toLocaleString("es-CL", {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
+                  </p>
+                  <p className="text-xs text-slate-600 mb-1 whitespace-pre-wrap">
+                    {t.message}
+                  </p>
+                  {t.admin_response && (
+                    <p className="text-[11px] text-slate-500 border-t border-slate-100 pt-1 mt-1">
+                      <span className="font-semibold">
+                        Respuesta de soporte:{" "}
+                      </span>
+                      {t.admin_response}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       );
     }
@@ -589,12 +669,26 @@ export default function DashboardPage() {
               Este es tu panel de cuenta en TixSwap.
             </p>
           </div>
-          <div className="flex items-center gap-3">
+
+          {/* BOTONES SUPERIORES */}
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => router.push("/")}
               className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
             >
-              Comprar / vender entradas
+              Volver al inicio
+            </button>
+            <button
+              onClick={() => router.push("/")}
+              className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+            >
+              Comprar
+            </button>
+            <button
+              onClick={() => router.push("/")}
+              className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+            >
+              Vender
             </button>
             <button
               onClick={handleLogout}
@@ -672,8 +766,7 @@ function formatStatus(status) {
 
 function formatCategory(category) {
   if (category === "soporte") return "Soporte general";
-  if (category === "disputa_compra") return "Disputa por compra";
-  if (category === "disputa_venta") return "Disputa por venta";
+  if (category === "disputa") return "Disputa por compra/venta";
   if (category === "sugerencia") return "Sugerencia para TixSwap";
   if (category === "reclamo") return "Reclamo para TixSwap";
   if (category === "otro") return "Otro";
