@@ -4,6 +4,55 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
+// --- Helpers para RUT chileno ---
+
+function normalizeRut(rutRaw) {
+  // Quita puntos y caracteres raros, deja solo números y K
+  const clean = rutRaw.replace(/[^0-9kK]/g, "").toUpperCase();
+
+  if (clean.length < 2) return clean;
+
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+
+  // Quita ceros a la izquierda del cuerpo y agrega guion
+  const bodyNumber = parseInt(body, 10);
+  if (Number.isNaN(bodyNumber)) return clean;
+
+  return `${bodyNumber.toString()}-${dv}`;
+}
+
+function isValidRut(rutRaw) {
+  const clean = rutRaw.replace(/[^0-9kK]/g, "").toUpperCase();
+
+  if (!clean || clean.length < 2) return false;
+
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+
+  if (!/^[0-9]+$/.test(body)) return false;
+
+  let sum = 0;
+  let multiplier = 2;
+
+  for (let i = body.length - 1; i >= 0; i--) {
+    sum += parseInt(body[i], 10) * multiplier;
+    multiplier = multiplier === 7 ? 2 : multiplier + 1;
+  }
+
+  const remainder = sum % 11;
+  const expected = 11 - remainder;
+
+  let dvExpected;
+  if (expected === 11) dvExpected = "0";
+  else if (expected === 10) dvExpected = "K";
+  else dvExpected = String(expected);
+
+  return dv === dvExpected;
+}
+
+// --- Página de registro ---
+
 export default function RegisterPage() {
   const router = useRouter();
 
@@ -53,6 +102,15 @@ export default function RegisterPage() {
       return;
     }
 
+    const normalizedRut = normalizeRut(rut.trim());
+
+    if (!isValidRut(normalizedRut)) {
+      setErrorMessage(
+        "El RUT ingresado no es válido. Verifica el número y el dígito verificador."
+      );
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -61,7 +119,7 @@ export default function RegisterPage() {
         data: rutExists,
         error: rutCheckError,
       } = await supabase.rpc("rut_exists", {
-        rut_input: rut.trim(),
+        rut_input: normalizedRut,
       });
 
       if (rutCheckError) {
@@ -81,7 +139,7 @@ export default function RegisterPage() {
         return;
       }
 
-      // 2) Si el RUT no existe, seguimos con el registro normal
+      // 2) Si el RUT es válido y no existe aún, seguimos con el registro normal
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -89,7 +147,7 @@ export default function RegisterPage() {
           data: {
             name: fullName.trim(),
             full_name: fullName.trim(),
-            rut: rut.trim(),
+            rut: normalizedRut,
             phone: phone.trim(),
             userType,
           },
