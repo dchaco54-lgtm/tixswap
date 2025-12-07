@@ -1,14 +1,7 @@
 'use client';
 
-import { useEffect, useState, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
-
-// Variables públicas de Supabase (deben estar definidas en Vercel y en tu .env.local)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type SaleType = 'fixed' | 'auction';
 
@@ -26,38 +19,6 @@ interface SellFormState {
 }
 
 export default function SellPage() {
-  const router = useRouter();
-  const [checkingSession, setCheckingSession] = useState(true);
-
-  useEffect(() => {
-    const checkSession = async () => {
-      try {
-        const { data } = await supabase.auth.getSession();
-
-        if (!data.session) {
-          // si no hay sesión, mandamos a login con redirect a /sell
-          router.replace('/login?redirectTo=/sell');
-          return;
-        }
-
-        setCheckingSession(false);
-      } catch (error) {
-        console.error('Error al obtener sesión:', error);
-        router.replace('/login?redirectTo=/sell');
-      }
-    };
-
-    checkSession();
-  }, [router]);
-
-  if (checkingSession) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Cargando formulario de venta...</p>
-      </div>
-    );
-  }
-
   return <SellForm />;
 }
 
@@ -94,11 +55,11 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
-      // TODO: acá iría el insert en Supabase cuando tengas la tabla
+      // TODO: acá después conectamos con Supabase (insert de la publicación)
       console.log('Publicación a guardar:', state);
 
       alert('Tu entrada fue creada (MVP: falta conectar al backend).');
-      // router.push('/panel'); // por si después quieres redirigir
+      // router.push('/panel'); // cuando tengas panel de usuario
     } catch (err) {
       console.error(err);
       alert('Ocurrió un error al crear la publicación.');
@@ -146,7 +107,7 @@ function SellForm() {
               required
             >
               <option value="">Selecciona un evento</option>
-              {/* TODO: poblar con eventos reales desde tu BD */}
+              {/* TODO: poblar con eventos reales de tu BD */}
               <option value="1">Ejemplo: Santiago Rocks 2026</option>
               <option value="2">Ejemplo: Lollapalooza Chile 2026</option>
             </select>
@@ -296,9 +257,9 @@ function SellForm() {
               </button>
             </div>
             <p className="text-xs text-gray-500">
-              Para el MVP solo permitimos venta a precio fijo. Luego activamos
-              la subasta con pre-autorización para que no tengas que andar
-              devolviendo plata.
+              Para el MVP solo permitimos venta a precio fijo. Más adelante
+              activamos la subasta con pre-autorización para que no tengas que
+              andar devolviendo plata.
             </p>
           </div>
 
@@ -382,4 +343,3 @@ function StepIndicator({ label, step, activeStep }: StepProps) {
     </div>
   );
 }
-
