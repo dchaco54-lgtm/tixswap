@@ -1,5 +1,4 @@
 import './globals.css';
-import Navbar from './Navbar';
 
 export const metadata = {
   title: 'TixSwap',
@@ -10,8 +9,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="es">
       <body className="bg-gray-50">
-        <Navbar />
-        <main className="min-h-screen">{children}</main>
+        {children}
       </body>
     </html>
   );
