@@ -2,7 +2,14 @@
 
 import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@supabase/supabase-js';
+
+// Usa tus variables de entorno públicas
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
+
+// Cliente Supabase para el browser
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type SaleType = 'fixed' | 'auction';
 
@@ -21,26 +28,28 @@ interface SellFormState {
 
 export default function SellPage() {
   const router = useRouter();
-  const supabase = createClientComponentClient();
   const [checkingSession, setCheckingSession] = useState(true);
 
   useEffect(() => {
     const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      try {
+        const { data } = await supabase.auth.getSession();
 
-      if (!session) {
-        // si no hay sesión, manda a login y después vuelve a /sell
+        if (!data.session) {
+          // si no hay sesión, manda a login con redirect de vuelta a /sell
+          router.replace('/login?redirectTo=/sell');
+          return;
+        }
+
+        setCheckingSession(false);
+      } catch (error) {
+        console.error('Error al obtener sesión:', error);
         router.replace('/login?redirectTo=/sell');
-        return;
       }
-
-      setCheckingSession(false);
     };
 
     checkSession();
-  }, [router, supabase]);
+  }, [router]);
 
   if (checkingSession) {
     return (
@@ -54,7 +63,8 @@ export default function SellPage() {
 }
 
 function SellForm() {
-  const [step] = useState(1); // por si después quieres manejar los 3 pasos
+  const router = useRouter();
+  const [step] = useState(1); // para el stepper (por ahora siempre en Detalles)
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [state, setState] = useState<SellFormState>({
     eventId: '',
@@ -85,11 +95,11 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
-      // TODO: conectar con Supabase para guardar la publicación
+      // TODO: conectar a Supabase (insert en tabla de tickets) cuando definas el schema
       console.log('Publicación a guardar:', state);
 
       alert('Tu entrada fue creada (MVP: falta conectar al backend).');
-      // aquí podrías redirigir al panel o a un resumen
+      // Ejemplo: redirigir al panel del usuario
       // router.push('/panel');
     } catch (err) {
       console.error(err);
@@ -102,8 +112,10 @@ function SellForm() {
   return (
     <div className="min-h-screen bg-gray-50 py-10">
       <div className="mx-auto max-w-3xl px-4">
-        {/* Header / título */}
-        <h1 className="text-2xl font-semibold text-gray-900 mb-6">Vender entrada</h1>
+        {/* Título */}
+        <h1 className="text-2xl font-semibold text-gray-900 mb-6">
+          Vender entrada
+        </h1>
 
         {/* Stepper */}
         <div className="mb-8 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 p-[1px]">
@@ -136,13 +148,13 @@ function SellForm() {
               required
             >
               <option value="">Selecciona un evento</option>
-              {/* TODO: poblar con eventos reales */}
+              {/* TODO: poblar con eventos reales de tu BD */}
               <option value="1">Ejemplo: Santiago Rocks 2026</option>
               <option value="2">Ejemplo: Lollapalooza Chile 2026</option>
             </select>
           </div>
 
-          {/* Título */}
+          {/* Título de la entrada */}
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">
               Título de la entrada *
@@ -189,7 +201,9 @@ function SellForm() {
               />
             </div>
             <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">Fila</label>
+              <label className="block text-sm font-medium text-gray-700">
+                Fila
+              </label>
               <input
                 type="text"
                 name="row"
@@ -271,7 +285,7 @@ function SellForm() {
                 </span>
               </button>
 
-              {/* Subasta (deshabilitada en MVP) */}
+              {/* Subasta (MVP deshabilitada) */}
               <button
                 type="button"
                 disabled
@@ -291,7 +305,7 @@ function SellForm() {
             </p>
           </div>
 
-          {/* Subasta automática de emergencia (también deshabilitada por ahora) */}
+          {/* Subasta automática de emergencia (también solo UI por ahora) */}
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
             <div className="flex items-start gap-2">
               <input
@@ -321,7 +335,7 @@ function SellForm() {
             <button
               type="button"
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              onClick={() => history.back()}
+              onClick={() => router.back()}
             >
               Cancelar
             </button>
