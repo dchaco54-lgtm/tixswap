@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
@@ -20,12 +20,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
 
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState(null);
 
   // Si venías desde /sell, acá viene "?redirectTo=/sell"
   const redirectTo = searchParams.get('redirectTo') || '/panel'; // fallback al estado de cuenta
 
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -50,14 +50,14 @@ export default function LoginPage() {
         return;
       }
 
-      if (!data.session) {
+      if (!data || !data.session) {
         setErrorMsg('No se pudo iniciar sesión. Intenta nuevamente.');
         return;
       }
 
       // ✅ Login OK: respetamos redirectTo si viene, si no, vamos al panel
       router.push(redirectTo);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       setErrorMsg('Ocurrió un error inesperado al iniciar sesión.');
     } finally {
