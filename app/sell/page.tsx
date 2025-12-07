@@ -1,11 +1,6 @@
 'use client';
 
-import React, {
-  useState,
-  useEffect,
-  FormEvent,
-  ChangeEvent,
-} from 'react';
+import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
@@ -38,9 +33,10 @@ export default function SellPage() {
 
   useEffect(() => {
     const checkSession = async () => {
+      // Si no hay Supabase configurado, igual exigimos login
       if (!supabase) {
-        // Si no hay config de Supabase, no bloqueamos nada (MVP)
-        setCheckingSession(false);
+        console.warn('Supabase no está configurado, redirigiendo a login.');
+        router.replace('/login?redirectTo=/sell');
         return;
       }
 
@@ -49,15 +45,17 @@ export default function SellPage() {
 
         if (error) {
           console.error('Error al obtener sesión:', error);
-        }
-
-        if (!data || !data.session) {
-          // ❌ Sin sesión → login con redirect
           router.replace('/login?redirectTo=/sell');
           return;
         }
 
-        // ✅ Hay sesión
+        if (!data || !data.session) {
+          // ❌ Sin sesión -> login
+          router.replace('/login?redirectTo=/sell');
+          return;
+        }
+
+        // ✅ Hay sesión: mostramos el formulario
         setCheckingSession(false);
       } catch (err) {
         console.error('Error revisando sesión:', err);
@@ -315,7 +313,7 @@ function SellForm() {
             </div>
             <p className="text-xs text-gray-500">
               Para el MVP solo permitimos venta a precio fijo. Más adelante
-              activamos la subasta con pre-autorización para no estar
+              activamos la subasta con pre-autorización para no andar
               devolviendo plata.
             </p>
           </div>
@@ -399,4 +397,3 @@ function StepIndicator({ label, step, activeStep }: StepProps) {
     </div>
   );
 }
-
