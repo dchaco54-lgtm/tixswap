@@ -120,14 +120,6 @@ export default function LoginPage() {
             {loading ? 'Ingresando...' : 'Iniciar sesión'}
           </button>
         </form>
-
-        <p className="mt-4 text-xs text-gray-500">
-          Después de iniciar sesión te redirigiremos a{' '}
-          <span className="font-semibold text-gray-700">
-            {redirectTo}
-          </span>
-          .
-        </p>
       </div>
     </div>
   );
