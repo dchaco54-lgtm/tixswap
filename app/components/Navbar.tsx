@@ -11,7 +11,6 @@ export default function Navbar() {
 
         {/* Navegación derecha */}
         <nav className="flex items-center gap-4">
-          {/* Ejemplo otros links (opcionales) */}
           <Link
             href="/"
             className="text-sm text-gray-600 hover:text-gray-900"
@@ -31,3 +30,4 @@ export default function Navbar() {
     </header>
   );
 }
+
