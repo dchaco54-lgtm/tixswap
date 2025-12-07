@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 type SaleType = 'fixed' | 'auction';
@@ -40,7 +40,7 @@ function SellForm() {
   });
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const { name, value, type, checked } = e.target as any;
 
@@ -50,16 +50,23 @@ function SellForm() {
     }));
   };
 
+  const handleCancel = () => {
+    // Para que SIEMPRE haga algo: ir al home
+    router.push('/');
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
     try {
-      // TODO: acá después conectamos con Supabase (insert de la publicación)
+      // MVP: solo mostramos en consola
       console.log('Publicación a guardar:', state);
 
       alert('Tu entrada fue creada (MVP: falta conectar al backend).');
-      // router.push('/panel'); // cuando tengas panel de usuario
+
+      // Redirigimos al home (después esto podría ser /account o /dashboard)
+      router.push('/');
     } catch (err) {
       console.error(err);
       alert('Ocurrió un error al crear la publicación.');
@@ -292,7 +299,7 @@ function SellForm() {
             <button
               type="button"
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              onClick={() => router.back()}
+              onClick={handleCancel}
             >
               Cancelar
             </button>
@@ -343,3 +350,4 @@ function StepIndicator({ label, step, activeStep }: StepProps) {
     </div>
   );
 }
+
