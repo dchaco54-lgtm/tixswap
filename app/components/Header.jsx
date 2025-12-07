@@ -34,6 +34,19 @@ export default function Header() {
     router.push("/");
   };
 
+  // 👇 Lógica del botón VENDER
+  const handleSellClick = () => {
+    if (loadingUser) return; // por si aún carga
+
+    if (user) {
+      // Usuario con sesión → directo a vender
+      router.push("/sell");
+    } else {
+      // SIN sesión → ir a login, pero con redirect a /sell
+      router.push("/login?redirectTo=/sell");
+    }
+  };
+
   const firstName =
     user?.user_metadata?.name?.split(" ")[0] ||
     user?.user_metadata?.full_name?.split(" ")[0] ||
@@ -55,7 +68,12 @@ export default function Header() {
         {/* Navegación principal */}
         <nav className="hidden md:flex items-center gap-6 text-sm text-slate-700">
           <button className="hover:text-blue-600">Comprar</button>
-          <button className="hover:text-blue-600">Vender</button>
+          <button
+            className="hover:text-blue-600"
+            onClick={handleSellClick}
+          >
+            Vender
+          </button>
           <button className="hover:text-blue-600">Cómo funciona</button>
         </nav>
 
