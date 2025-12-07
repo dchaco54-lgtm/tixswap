@@ -1,7 +1,13 @@
 'use client';
 
-import React, { useState, FormEvent, ChangeEvent } from 'react';
+import React, {
+  useState,
+  useEffect,
+  FormEvent,
+  ChangeEvent,
+} from 'react';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
 
 type SaleType = 'fixed' | 'auction';
 
@@ -18,7 +24,58 @@ interface SellFormState {
   emergencyAuction: boolean;
 }
 
+// Config Supabase (lado cliente)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase =
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey)
+    : null;
+
 export default function SellPage() {
+  const router = useRouter();
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    const checkSession = async () => {
+      if (!supabase) {
+        // Si no hay config de Supabase, no bloqueamos nada (MVP)
+        setCheckingSession(false);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase.auth.getSession();
+
+        if (error) {
+          console.error('Error al obtener sesión:', error);
+        }
+
+        if (!data || !data.session) {
+          // ❌ Sin sesión → login con redirect
+          router.replace('/login?redirectTo=/sell');
+          return;
+        }
+
+        // ✅ Hay sesión
+        setCheckingSession(false);
+      } catch (err) {
+        console.error('Error revisando sesión:', err);
+        router.replace('/login?redirectTo=/sell');
+      }
+    };
+
+    checkSession();
+  }, [router]);
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <p className="text-sm text-gray-500">Validando tu sesión...</p>
+      </div>
+    );
+  }
+
   return <SellForm />;
 }
 
@@ -258,11 +315,12 @@ function SellForm() {
             </div>
             <p className="text-xs text-gray-500">
               Para el MVP solo permitimos venta a precio fijo. Más adelante
-              activamos la subasta con pre-autorización.
+              activamos la subasta con pre-autorización para no estar
+              devolviendo plata.
             </p>
           </div>
 
-          {/* Subasta emergencia (UI futura) */}
+          {/* Subasta emergencia */}
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
             <div className="flex items-start gap-2">
               <input
@@ -341,3 +399,4 @@ function StepIndicator({ label, step, activeStep }: StepProps) {
     </div>
   );
 }
+
