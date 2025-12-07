@@ -1,5 +1,5 @@
 import './globals.css';
-import Navbar from '../components/Navbar';
+import Navbar from './Navbar';
 
 export const metadata = {
   title: 'TixSwap',
