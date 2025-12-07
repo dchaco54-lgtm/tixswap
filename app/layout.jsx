@@ -1,17 +1,12 @@
-import type { Metadata } from 'next';
 import './globals.css';
-import Navbar from '@/components/Navbar';
+import Navbar from '../components/Navbar';
 
-export const metadata: Metadata = {
+export const metadata = {
   title: 'TixSwap',
   description: 'Marketplace de reventa segura de entradas',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }) {
   return (
     <html lang="es">
       <body className="bg-gray-50">
