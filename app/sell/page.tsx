@@ -4,11 +4,10 @@ import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
 
-// Usa tus variables de entorno públicas
+// Variables públicas de Supabase (deben estar definidas en Vercel y en tu .env.local)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
 
-// Cliente Supabase para el browser
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type SaleType = 'fixed' | 'auction';
@@ -36,7 +35,7 @@ export default function SellPage() {
         const { data } = await supabase.auth.getSession();
 
         if (!data.session) {
-          // si no hay sesión, manda a login con redirect de vuelta a /sell
+          // si no hay sesión, mandamos a login con redirect a /sell
           router.replace('/login?redirectTo=/sell');
           return;
         }
@@ -64,7 +63,7 @@ export default function SellPage() {
 
 function SellForm() {
   const router = useRouter();
-  const [step] = useState(1); // para el stepper (por ahora siempre en Detalles)
+  const [step] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [state, setState] = useState<SellFormState>({
     eventId: '',
@@ -95,12 +94,11 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
-      // TODO: conectar a Supabase (insert en tabla de tickets) cuando definas el schema
+      // TODO: acá iría el insert en Supabase cuando tengas la tabla
       console.log('Publicación a guardar:', state);
 
       alert('Tu entrada fue creada (MVP: falta conectar al backend).');
-      // Ejemplo: redirigir al panel del usuario
-      // router.push('/panel');
+      // router.push('/panel'); // por si después quieres redirigir
     } catch (err) {
       console.error(err);
       alert('Ocurrió un error al crear la publicación.');
@@ -126,7 +124,7 @@ function SellForm() {
           </div>
         </div>
 
-        {/* Card del formulario */}
+        {/* Formulario */}
         <form
           onSubmit={handleSubmit}
           className="rounded-2xl bg-white shadow-sm border border-gray-100 p-6 space-y-6"
@@ -148,13 +146,13 @@ function SellForm() {
               required
             >
               <option value="">Selecciona un evento</option>
-              {/* TODO: poblar con eventos reales de tu BD */}
+              {/* TODO: poblar con eventos reales desde tu BD */}
               <option value="1">Ejemplo: Santiago Rocks 2026</option>
               <option value="2">Ejemplo: Lollapalooza Chile 2026</option>
             </select>
           </div>
 
-          {/* Título de la entrada */}
+          {/* Título entrada */}
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">
               Título de la entrada *
@@ -267,7 +265,6 @@ function SellForm() {
               Tipo de venta
             </label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Precio fijo */}
               <button
                 type="button"
                 onClick={() =>
@@ -285,7 +282,6 @@ function SellForm() {
                 </span>
               </button>
 
-              {/* Subasta (MVP deshabilitada) */}
               <button
                 type="button"
                 disabled
@@ -300,12 +296,13 @@ function SellForm() {
               </button>
             </div>
             <p className="text-xs text-gray-500">
-              Para el MVP solo permitimos venta a precio fijo. Las subastas se
-              habilitarán más adelante para mantener el flujo 100% seguro.
+              Para el MVP solo permitimos venta a precio fijo. Luego activamos
+              la subasta con pre-autorización para que no tengas que andar
+              devolviendo plata.
             </p>
           </div>
 
-          {/* Subasta automática de emergencia (también solo UI por ahora) */}
+          {/* Subasta emergencia (UI futura) */}
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
             <div className="flex items-start gap-2">
               <input
@@ -322,9 +319,8 @@ function SellForm() {
                 </p>
                 <p>
                   Si tu entrada no se vende, se activará automáticamente una
-                  subasta pocas horas antes del evento. Los compradores podrán
-                  pujar y se te avisará por correo cada vez que tu oferta sea
-                  superada.
+                  subasta pocas horas antes del evento. Te avisaremos por correo
+                  cada vez que tu oferta sea superada.
                 </p>
               </div>
             </div>
@@ -386,3 +382,4 @@ function StepIndicator({ label, step, activeStep }: StepProps) {
     </div>
   );
 }
+
