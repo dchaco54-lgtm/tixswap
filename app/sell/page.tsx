@@ -1,13 +1,7 @@
 'use client';
 
-import React, {
-  useState,
-  useEffect,
-  FormEvent,
-  ChangeEvent,
-} from 'react';
+import React, { useState, FormEvent, ChangeEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
 
 type SaleType = 'fixed' | 'auction';
 
@@ -24,59 +18,7 @@ interface SellFormState {
   emergencyAuction: boolean;
 }
 
-// Cliente Supabase (solo si están configuradas las env)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null;
-
 export default function SellPage() {
-  const router = useRouter();
-  const [checkingSession, setCheckingSession] = useState(true);
-
-  useEffect(() => {
-    const checkSession = async () => {
-      // Si no está configurado Supabase, no bloqueamos nada (MVP)
-      if (!supabase) {
-        setCheckingSession(false);
-        return;
-      }
-
-      try {
-        const { data, error } = await supabase.auth.getSession();
-
-        if (error) {
-          console.error('Error al obtener sesión:', error);
-        }
-
-        if (!data || !data.session) {
-          // ❌ Sin sesión -> mandar a login con redirect
-          router.replace('/login?redirectTo=/sell');
-          return;
-        }
-
-        // ✅ Hay sesión
-        setCheckingSession(false);
-      } catch (err) {
-        console.error('Error inesperado al revisar sesión:', err);
-        // Ante error raro, mandamos a login igual
-        router.replace('/login?redirectTo=/sell');
-      }
-    };
-
-    checkSession();
-  }, [router]);
-
-  if (checkingSession) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-sm text-gray-500">Validando tu sesión...</p>
-      </div>
-    );
-  }
-
   return <SellForm />;
 }
 
@@ -117,9 +59,7 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
-      // TODO: aquí se hace el insert real en Supabase
       console.log('Publicación a guardar:', state);
-
       alert('Tu entrada fue creada (MVP: falta conectar al backend).');
       router.push('/');
     } catch (err) {
@@ -168,7 +108,6 @@ function SellForm() {
               required
             >
               <option value="">Selecciona un evento</option>
-              {/* TODO: poblar con eventos reales de tu BD */}
               <option value="1">Ejemplo: Santiago Rocks 2026</option>
               <option value="2">Ejemplo: Lollapalooza Chile 2026</option>
             </select>
@@ -319,8 +258,7 @@ function SellForm() {
             </div>
             <p className="text-xs text-gray-500">
               Para el MVP solo permitimos venta a precio fijo. Más adelante
-              activamos la subasta con pre-autorización para evitar devoluciones
-              de plata.
+              activamos la subasta con pre-autorización.
             </p>
           </div>
 
