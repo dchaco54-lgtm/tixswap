@@ -1,54 +1,8 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
-
-// Leemos las vars de entorno públicas de Supabase
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-// Creamos el cliente SOLO si las vars existen
-const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null;
 
 export default function Navbar() {
-  const router = useRouter();
-  const [checking, setChecking] = useState(false);
-
-  const handleSellClick = async (e) => {
-    e.preventDefault();
-
-    // Si no tenemos supabase configurado, no bloqueamos: vamos directo a /sell
-    if (!supabase) {
-      router.push('/sell');
-      return;
-    }
-
-    try {
-      setChecking(true);
-
-      const { data } = await supabase.auth.getSession();
-
-      if (data && data.session) {
-        // ✅ Usuario con sesión -> directo a vender
-        router.push('/sell');
-      } else {
-        // ❌ Sin sesión -> ir a login con redirect
-        router.push('/login?redirectTo=/sell');
-      }
-    } catch (err) {
-      console.error('Error revisando sesión:', err);
-      // Ante cualquier error, preferimos mandarlo a login
-      router.push('/login?redirectTo=/sell');
-    } finally {
-      setChecking(false);
-    }
-  };
-
   return (
     <header className="w-full bg-white border-b border-gray-200">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
@@ -71,15 +25,13 @@ export default function Navbar() {
             Comprar
           </Link>
 
-          {/* VENDER con lógica de sesión */}
-          <button
-            type="button"
-            onClick={handleSellClick}
+          {/* VENDER -> va a /sell */}
+          <Link
+            href="/sell"
             className="text-gray-700 hover:text-blue-600 underline-offset-4"
-            disabled={checking}
           >
-            {checking ? 'Validando…' : 'Vender'}
-          </button>
+            Vender
+          </Link>
 
           <Link
             href="#como-funciona"
@@ -89,7 +41,7 @@ export default function Navbar() {
           </Link>
         </nav>
 
-        {/* Botones de sesión (solo UI por ahora) */}
+        {/* Botones de sesión (UI por ahora) */}
         <div className="flex items-center gap-3">
           <Link
             href="/login"
@@ -108,4 +60,3 @@ export default function Navbar() {
     </header>
   );
 }
-
