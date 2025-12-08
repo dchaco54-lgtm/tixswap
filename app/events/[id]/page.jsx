@@ -1,49 +1,47 @@
 // app/events/[id]/page.jsx
 
 import Link from "next/link";
+import { notFound } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
-function getMockEvent(id) {
-  // TODO: reemplazar por datos reales desde Supabase cuando tengamos el backend listo
-  return {
-    id,
-    name: "Chayanne - 29 marzo 2026",
-    date: "29 de marzo 2026",
-    venue: "Movistar Arena",
-    city: "Santiago, Chile",
-    tickets: [
-      {
-        id: "1",
-        sector: "Galería",
-        rowSeat: "Fila 12, asiento 3",
-        price: 35000,
-        sellerName: "usuario_demo",
-        sellerRating: 4.8,
-      },
-      {
-        id: "2",
-        sector: "Galería Andes",
-        rowSeat: "Fila 8, asiento 15",
-        price: 42000,
-        sellerName: "claudia_rock",
-        sellerRating: 4.9,
-      },
-      {
-        id: "3",
-        sector: "Platea Baja",
-        rowSeat: "Fila 4, asiento 7",
-        price: 68000,
-        sellerName: "tix_pro",
-        sellerRating: 4.7,
-      },
-    ],
-  };
+export const revalidate = 30;
+
+async function getEventAndTickets(id) {
+  const { data: event, error: eventError } = await supabase
+    .from("events")
+    .select("id, name, date_display, venue, city")
+    .eq("id", id)
+    .single();
+
+  if (eventError || !event) {
+    console.error("Error cargando evento:", eventError);
+    return { event: null, tickets: [] };
+  }
+
+  const { data: tickets, error: ticketsError } = await supabase
+    .from("tickets")
+    .select(
+      "id, sector, row_label, seat_label, price, seller_name, seller_rating"
+    )
+    .eq("event_id", id)
+    .order("price", { ascending: true });
+
+  if (ticketsError) {
+    console.error("Error cargando tickets:", ticketsError);
+  }
+
+  return { event, tickets: tickets ?? [] };
 }
 
-export default function EventPage({ params }) {
+export default async function EventPage({ params }) {
   const { id } = params;
-  const event = getMockEvent(id);
+  const { event, tickets } = await getEventAndTickets(id);
 
-  const sectors = Array.from(new Set(event.tickets.map((t) => t.sector)));
+  if (!event) {
+    notFound();
+  }
+
+  const sectors = Array.from(new Set(tickets.map((t) => t.sector)));
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -64,7 +62,7 @@ export default function EventPage({ params }) {
                 {event.name}
               </h1>
               <p className="mt-2 text-gray-700">
-                📅 {event.date}
+                📅 {event.date_display}
                 <br />
                 📍 {event.venue} · {event.city}
               </p>
@@ -89,7 +87,7 @@ export default function EventPage({ params }) {
               </h2>
 
               <div className="flex flex-wrap gap-2 text-sm">
-                {/* Filtro por sector (todavía sin lógica, solo UI) */}
+                {/* Filtro por sector (solo UI de momento) */}
                 <select className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm">
                   <option>Todos los sectores</option>
                   {sectors.map((sector) => (
@@ -97,7 +95,7 @@ export default function EventPage({ params }) {
                   ))}
                 </select>
 
-                {/* Orden por precio (todavía sin lógica, solo UI) */}
+                {/* Orden por precio (solo UI de momento) */}
                 <select className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm">
                   <option>Precio: menor a mayor</option>
                   <option>Precio: mayor a menor</option>
@@ -106,32 +104,50 @@ export default function EventPage({ params }) {
             </div>
 
             <div className="space-y-3">
-              {event.tickets.length > 0 ? (
-                event.tickets.map((ticket) => (
-                  <article
-                    key={ticket.id}
-                    className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {ticket.sector} · {ticket.rowSeat}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500">
-                        Publicado por {ticket.sellerName} ·{" "}
-                        {ticket.sellerRating.toFixed(1)}★
-                      </p>
-                    </div>
+              {tickets.length > 0 ? (
+                tickets.map((ticket) => {
+                  const seatText =
+                    ticket.row_label || ticket.seat_label
+                      ? `Fila ${ticket.row_label ?? "-"}, asiento ${
+                          ticket.seat_label ?? "-"
+                        }`
+                      : "Asientos sin numerar";
 
-                    <div className="text-right">
-                      <p className="text-base font-semibold text-emerald-600">
-                        ${ticket.price.toLocaleString("es-CL")}
-                      </p>
-                      <button className="mt-2 rounded-full bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
-                        Comprar
-                      </button>
-                    </div>
-                  </article>
-                ))
+                  return (
+                    <article
+                      key={ticket.id}
+                      className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {ticket.sector} · {seatText}
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {ticket.seller_name
+                            ? `Publicado por ${ticket.seller_name}`
+                            : "Vendedor TixSwap"}
+                          {ticket.seller_rating
+                            ? ` · ${Number(
+                                ticket.seller_rating
+                              ).toFixed(1)}★`
+                            : ""}
+                        </p>
+                      </div>
+
+                      <div className="text-right">
+                        <p className="text-base font-semibold text-emerald-600">
+                          $
+                          {ticket.price.toLocaleString("es-CL", {
+                            minimumFractionDigits: 0,
+                          })}
+                        </p>
+                        <button className="mt-2 rounded-full bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
+                          Comprar
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
               ) : (
                 <p className="text-sm text-gray-500">
                   Todavía no hay publicaciones para este evento.
@@ -159,8 +175,8 @@ export default function EventPage({ params }) {
               </h3>
               <p className="mt-2 text-xs text-gray-600">
                 Aquí después vamos a mostrar el resumen de calificaciones del
-                vendedor, similar a Falabella / Mercado Libre:
-                promedio, número de ventas, comentarios, etc.
+                vendedor, similar a Falabella / Mercado Libre: promedio, número
+                de ventas, comentarios, etc.
               </p>
             </div>
           </aside>
