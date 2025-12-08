@@ -1,12 +1,13 @@
-// app/lib/supabaseClient.js
+// lib/supabaseClient.js
 import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Si faltan las variables de entorno, no creamos el cliente
-// (evitamos que reviente el build en Vercel)
-export const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null;
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    "Faltan variables NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY"
+  );
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
