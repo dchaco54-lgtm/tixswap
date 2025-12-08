@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -18,6 +18,39 @@ export default function AdminEventsPage() {
   const router = useRouter();
   const [form, setForm] = useState(initialForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // SOLO soporte@tixswap.cl puede entrar acá
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (!supabase) {
+        router.replace("/login");
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      if (user.email?.toLowerCase() !== "soporte@tixswap.cl") {
+        // No es admin → lo mandamos al estado de cuenta
+        router.replace("/dashboard");
+        return;
+      }
+
+      setIsAdmin(true);
+      setCheckingAdmin(false);
+    };
+
+    checkAdmin();
+  }, [router]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -63,6 +96,20 @@ export default function AdminEventsPage() {
       setIsSubmitting(false);
     }
   };
+
+  if (checkingAdmin) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-gray-100 text-sm text-gray-700">
+          Validando permisos de administrador...
+        </div>
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return null; // el redirect ya corrió en el useEffect
+  }
 
   return (
     <main className="min-h-screen bg-gray-50 py-10">
@@ -211,3 +258,4 @@ export default function AdminEventsPage() {
     </main>
   );
 }
+
