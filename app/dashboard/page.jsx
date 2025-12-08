@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
-const SECTIONS = [
+const BASE_SECTIONS = [
   { id: "overview", label: "Resumen" },
   { id: "profile", label: "Mis datos" },
   { id: "sales", label: "Mis ventas" },
@@ -21,6 +21,8 @@ export default function DashboardPage() {
   const [currentSection, setCurrentSection] = useState("overview");
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
+
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Soporte
   const [tickets, setTickets] = useState([]);
@@ -45,7 +47,7 @@ export default function DashboardPage() {
   const [profileError, setProfileError] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
 
-  // Cargar usuario + tickets
+  // Cargar usuario + tickets + rol
   useEffect(() => {
     const load = async () => {
       const {
@@ -65,11 +67,26 @@ export default function DashboardPage() {
       setUser(user);
       setLoadingUser(false);
 
-      // Inicializar formulario de perfil
+      // --- cargar rol desde public.profiles ---
+      try {
+        const { data: profileRow, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.warn("Error cargando perfil:", profileError.message);
+        } else if (profileRow?.role === "admin") {
+          setIsAdmin(true);
+        }
+      } catch (e) {
+        console.warn("Error inesperado cargando rol de perfil:", e);
+      }
+
+      // Inicializar formulario de perfil desde metadata
       const fullNameMeta =
-        user.user_metadata?.name ||
-        user.user_metadata?.full_name ||
-        "";
+        user.user_metadata?.name || user.user_metadata?.full_name || "";
       const rutMeta = user.user_metadata?.rut || "";
       const phoneMeta = user.user_metadata?.phone || "";
       const userTypeMeta = user.user_metadata?.userType || "Usuario general";
@@ -108,8 +125,10 @@ export default function DashboardPage() {
     user?.user_metadata?.name || user?.user_metadata?.full_name || "Usuario";
   const rut = user?.user_metadata?.rut || "—";
   const phone = user?.user_metadata?.phone || "—";
-  const userType = user?.user_metadata?.userType || "Usuario general";
+  const userTypeMeta = user?.user_metadata?.userType || "Usuario general";
   const email = user?.email || "—";
+
+  const displayedUserType = isAdmin ? "Administrador TixSwap" : userTypeMeta;
 
   // -------- Perfil: actualizar datos --------
   const handleProfileChange = (field) => (e) => {
@@ -250,7 +269,8 @@ export default function DashboardPage() {
               <span className="font-medium">Teléfono:</span> {phone}
             </p>
             <p className="text-sm text-slate-700">
-              <span className="font-medium">Tipo de usuario:</span> {userType}
+              <span className="font-medium">Tipo de usuario:</span>{" "}
+              {displayedUserType}
             </p>
           </div>
 
@@ -646,6 +666,54 @@ export default function DashboardPage() {
       );
     }
 
+    if (currentSection === "admin") {
+      return (
+        <div className="grid gap-6 md:grid-cols-3">
+          <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+            <h2 className="text-lg font-semibold mb-2">Eventos</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Crea, edita o desactiva eventos publicados en TixSwap.
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/admin/events")}
+              className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Abrir gestor de eventos
+            </button>
+          </div>
+
+          <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+            <h2 className="text-lg font-semibold mb-2">Tickets de soporte</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Revisa y responde las solicitudes que envían los usuarios.
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/admin/support")}
+              className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Ver tickets de soporte
+            </button>
+          </div>
+
+          <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+            <h2 className="text-lg font-semibold mb-2">Usuarios</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Cambia roles, bloquea usuarios y administra cuentas especiales.
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push("/admin/users")}
+              className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Administrar usuarios
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return null;
   };
 
@@ -656,6 +724,10 @@ export default function DashboardPage() {
       </main>
     );
   }
+
+  const sidebarSections = isAdmin
+    ? [...BASE_SECTIONS, { id: "admin", label: "Admin" }]
+    : BASE_SECTIONS;
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -685,7 +757,7 @@ export default function DashboardPage() {
               Comprar
             </button>
             <button
-              onClick={() => router.push("/")}
+              onClick={() => router.push("/sell")}
               className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
             >
               Vender
@@ -703,7 +775,7 @@ export default function DashboardPage() {
           {/* Sidebar */}
           <aside className="w-full md:w-60 bg-white border border-slate-100 rounded-2xl p-3 shadow-sm">
             <nav className="space-y-1">
-              {SECTIONS.map((section) => (
+              {sidebarSections.map((section) => (
                 <button
                   key={section.id}
                   onClick={() => setCurrentSection(section.id)}
