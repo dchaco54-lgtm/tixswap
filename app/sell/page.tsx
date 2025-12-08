@@ -1,11 +1,10 @@
-// app/sell/page.tsx
-"use client";
+'use client';
 
-import { useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import { EVENTS } from "../lib/events";
+import { useState, FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { EVENTS } from '../lib/events';
 
-type SaleType = "fixed" | "auction";
+type SaleType = 'fixed' | 'auction';
 
 interface SellFormState {
   eventId: string;
@@ -29,28 +28,28 @@ function SellForm() {
   const [step] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [state, setState] = useState<SellFormState>({
-    eventId: "",
-    title: "",
-    description: "",
-    sector: "",
-    row: "",
-    seat: "",
-    salePrice: "",
-    originalPrice: "",
-    saleType: "fixed",
+    eventId: '',
+    title: '',
+    description: '',
+    sector: '',
+    row: '',
+    seat: '',
+    salePrice: '',
+    originalPrice: '',
+    saleType: 'fixed',
     emergencyAuction: false,
   });
 
   const handleChange = (
     e: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
+    >,
   ) => {
     const { name, value, type, checked } = e.target as any;
 
     setState((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : value,
+      [name]: type === 'checkbox' ? checked : value,
     }));
   };
 
@@ -59,12 +58,14 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
-      console.log("Publicación a guardar:", state);
-      alert("Tu entrada fue creada (MVP: falta conectar al backend).");
+      // TODO: conectar con Supabase (insert de la publicación)
+      console.log('Publicación a guardar:', state);
+
+      alert('Tu entrada fue creada (MVP: falta conectar al backend).');
       // router.push('/panel'); // cuando tengas panel de usuario
     } catch (err) {
       console.error(err);
-      alert("Ocurrió un error al crear la publicación.");
+      alert('Ocurrió un error al crear la publicación.');
     } finally {
       setIsSubmitting(false);
     }
@@ -72,7 +73,7 @@ function SellForm() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-10">
-      <div className="mx-auto max-w-3xl px-4">
+      <div className="mx-auto max-w-5xl px-4">
         {/* Título */}
         <h1 className="text-2xl font-semibold text-gray-900 mb-6">
           Vender entrada
@@ -111,7 +112,8 @@ function SellForm() {
               <option value="">Selecciona un evento</option>
               {EVENTS.map((event) => (
                 <option key={event.id} value={event.id}>
-                  {event.title} — {event.location}
+                  {/* Título + fecha + recinto/ciudad */}
+                  {event.title} — {event.date} — {event.location}
                 </option>
               ))}
             </select>
@@ -233,12 +235,12 @@ function SellForm() {
               <button
                 type="button"
                 onClick={() =>
-                  setState((prev) => ({ ...prev, saleType: "fixed" }))
+                  setState((prev) => ({ ...prev, saleType: 'fixed' }))
                 }
                 className={`flex flex-col items-start rounded-xl border px-4 py-3 text-left text-sm transition ${
-                  state.saleType === "fixed"
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 bg-white hover:bg-gray-50"
+                  state.saleType === 'fixed'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 bg-white hover:bg-gray-50'
                 }`}
               >
                 <span className="font-semibold text-gray-900">Precio fijo</span>
@@ -267,7 +269,7 @@ function SellForm() {
             </p>
           </div>
 
-          {/* Subasta emergencia (UI futura) */}
+          {/* Subasta emergencia (deshabilitada por ahora) */}
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
             <div className="flex items-start gap-2">
               <input
@@ -305,7 +307,7 @@ function SellForm() {
               disabled={isSubmitting}
               className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              {isSubmitting ? "Guardando..." : "Continuar"}
+              {isSubmitting ? 'Guardando...' : 'Continuar'}
             </button>
           </div>
         </form>
@@ -329,17 +331,17 @@ function StepIndicator({ label, step, activeStep }: StepProps) {
       <div
         className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
           isActive
-            ? "bg-blue-600 text-white"
+            ? 'bg-blue-600 text-white'
             : isCompleted
-            ? "bg-green-500 text-white"
-            : "bg-gray-200 text-gray-600"
+            ? 'bg-green-500 text-white'
+            : 'bg-gray-200 text-gray-600'
         }`}
       >
         {step}
       </div>
       <span
         className={`text-sm ${
-          isActive ? "text-gray-900 font-semibold" : "text-gray-500"
+          isActive ? 'text-gray-900 font-semibold' : 'text-gray-500'
         }`}
       >
         {label}
