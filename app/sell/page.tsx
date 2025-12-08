@@ -1,8 +1,9 @@
+// app/sell/page.tsx
 "use client";
 
-import { useEffect, useState, FormEvent, ChangeEvent } from "react";
+import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
+import { EVENTS } from "../lib/events";
 
 type SaleType = "fixed" | "auction";
 
@@ -19,26 +20,14 @@ interface SellFormState {
   emergencyAuction: boolean;
 }
 
-interface EventOption {
-  id: string;
-  title: string;
-  starts_at: string;
-  venue: string | null;
-  city: string | null;
-}
-
 export default function SellPage() {
   return <SellForm />;
 }
 
 function SellForm() {
   const router = useRouter();
-
-  const [checkingSession, setCheckingSession] = useState(true);
+  const [step] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [events, setEvents] = useState<EventOption[]>([]);
-  const [loadingEvents, setLoadingEvents] = useState(true);
-
   const [state, setState] = useState<SellFormState>({
     eventId: "",
     title: "",
@@ -52,54 +41,8 @@ function SellForm() {
     emergencyAuction: false,
   });
 
-  // 1) Guard de sesión: si no hay user → login con redirectTo=/sell
-  useEffect(() => {
-    const checkSessionAndLoadEvents = async () => {
-      if (!supabase) {
-        // Si por alguna razón no está configurado Supabase
-        router.replace("/login?redirectTo=/sell");
-        return;
-      }
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.replace("/login?redirectTo=/sell");
-        return;
-      }
-
-      setCheckingSession(false);
-
-      // 2) Cargar eventos desde la tabla `events`
-      try {
-        const now = new Date();
-        const { data, error } = await supabase
-          .from("events")
-          .select("id, title, starts_at, venue, city")
-          .gte("starts_at", now.toISOString())
-          .order("starts_at", { ascending: true });
-
-        if (error) {
-          console.error("Error cargando eventos:", error);
-          setEvents([]);
-        } else {
-          setEvents(data || []);
-        }
-      } catch (err) {
-        console.error("Error inesperado cargando eventos:", err);
-        setEvents([]);
-      } finally {
-        setLoadingEvents(false);
-      }
-    };
-
-    checkSessionAndLoadEvents();
-  }, [router]);
-
   const handleChange = (
-    e: ChangeEvent<
+    e: React.ChangeEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
     >
   ) => {
@@ -113,52 +56,18 @@ function SellForm() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-
-    if (!state.eventId) {
-      alert("Selecciona un evento antes de publicar.");
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
-      // TODO: acá después conectamos con Supabase (insert a tabla `listings`)
       console.log("Publicación a guardar:", state);
-
       alert("Tu entrada fue creada (MVP: falta conectar al backend).");
-      // router.push("/panel"); // cuando tengas panel de usuario
+      // router.push('/panel'); // cuando tengas panel de usuario
     } catch (err) {
       console.error(err);
       alert("Ocurrió un error al crear la publicación.");
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  if (checkingSession) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-gray-100 text-sm text-gray-700">
-          Validando tu sesión...
-        </div>
-      </div>
-    );
-  }
-
-  const renderEventLabel = (ev: EventOption) => {
-    const date = new Date(ev.starts_at);
-    const dia = date.getDate().toString().padStart(2, "0");
-    const mes = date.toLocaleString("es-CL", { month: "short" });
-    const año = date.getFullYear();
-
-    const fecha = `${dia} ${mes} ${año}`;
-    const lugar = ev.city
-      ? ev.venue
-        ? `${ev.venue} · ${ev.city}`
-        : ev.city
-      : ev.venue || "";
-
-    return `${ev.title} — ${fecha}${lugar ? " · " + lugar : ""}`;
   };
 
   return (
@@ -172,9 +81,9 @@ function SellForm() {
         {/* Stepper */}
         <div className="mb-8 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 p-[1px]">
           <div className="flex justify-between rounded-2xl bg-white px-6 py-4 text-sm font-medium">
-            <StepIndicator label="Detalles" step={1} activeStep={1} />
-            <StepIndicator label="Archivo" step={2} activeStep={1} />
-            <StepIndicator label="Confirmar" step={3} activeStep={1} />
+            <StepIndicator label="Detalles" step={1} activeStep={step} />
+            <StepIndicator label="Archivo" step={2} activeStep={step} />
+            <StepIndicator label="Confirmar" step={3} activeStep={step} />
           </div>
         </div>
 
@@ -198,26 +107,14 @@ function SellForm() {
               onChange={handleChange}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
               required
-              disabled={loadingEvents}
             >
-              <option value="">
-                {loadingEvents
-                  ? "Cargando eventos..."
-                  : events.length === 0
-                  ? "No hay eventos configurados (usa /admin/events)"
-                  : "Selecciona un evento"}
-              </option>
-              {!loadingEvents &&
-                events.map((ev) => (
-                  <option key={ev.id} value={ev.id}>
-                    {renderEventLabel(ev)}
-                  </option>
-                ))}
+              <option value="">Selecciona un evento</option>
+              {EVENTS.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.title} — {event.location}
+                </option>
+              ))}
             </select>
-            <p className="text-xs text-gray-500">
-              Los eventos vienen desde Supabase (&quot;events&quot;). Como
-              admin puedes crearlos en <code>/admin/events</code>.
-            </p>
           </div>
 
           {/* Título entrada */}
@@ -370,7 +267,7 @@ function SellForm() {
             </p>
           </div>
 
-          {/* Subasta emergencia (futuro) */}
+          {/* Subasta emergencia (UI futura) */}
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
             <div className="flex items-start gap-2">
               <input
@@ -400,7 +297,6 @@ function SellForm() {
               type="button"
               className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
               onClick={() => router.back()}
-              disabled={isSubmitting}
             >
               Cancelar
             </button>
