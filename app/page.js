@@ -1,50 +1,39 @@
 // app/page.js
+"use client";
+
 export const dynamic = "force-dynamic";
 
+import { useMemo, useState } from "react";
 import Header from "./components/Header";
 import Hero from "./components/Hero";
 import Categories from "./components/Categories";
 import EventGrid from "./components/EventGrid";
 import CTA from "./components/CTA";
 import Footer from "./components/Footer";
+import { EVENTS } from "./lib/events";
 
 export default function Home() {
-  const featuredEvents = [
-    {
-      id: 1,
-      title: "My Chemical Romance",
-      category: "Rock",
-      date: "29 de enero de 2026",
-      location: "Estadio Bicentenario La Florida",
-    },
-    {
-      id: 2,
-      title: "Chayanne",
-      category: "Pop Latino",
-      date: "7 de febrero de 2026",
-      location: "Concepción",
-    },
-    {
-      id: 3,
-      title: "Doja Cat",
-      category: "Hip Hop",
-      date: "10 de febrero de 2026",
-      location: "Movistar Arena",
-    },
-  ];
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // Filtra eventos según lo que escribas en el buscador del hero
+  const filteredEvents = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return EVENTS;
+
+    return EVENTS.filter((event) => {
+      const haystack = `${event.title} ${event.category} ${event.location}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [searchTerm]);
 
   return (
     <main>
-      {/* Header maneja toda la navegación + login/logout */}
       <Header />
-
-      {/* Resto de la landing */}
-      <Hero />
+      <Hero searchTerm={searchTerm} onSearchChange={setSearchTerm} />
       <Categories />
-      <EventGrid events={featuredEvents} />
+      <EventGrid events={filteredEvents} />
       <CTA />
       <Footer />
     </main>
   );
 }
-
