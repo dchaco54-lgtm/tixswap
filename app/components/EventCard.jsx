@@ -1,6 +1,12 @@
+// app/components/EventCard.jsx
+import Link from "next/link";
+
 export default function EventCard({ event }) {
   return (
-    <div className="bg-white rounded-xl shadow-soft overflow-hidden border hover-pop">
+    <Link
+      href={`/events/${event.id}`}
+      className="bg-white rounded-xl shadow-soft overflow-hidden border hover-pop block"
+    >
       <div className="card-gradient h-40 flex items-center justify-center text-white font-bold text-lg">
         {event.category}
       </div>
@@ -13,10 +19,10 @@ export default function EventCard({ event }) {
           📍 {event.location}
         </p>
 
-        <a className="text-blue-600 text-sm mt-4 inline-block cursor-pointer">
+        <span className="text-blue-600 text-sm mt-4 inline-block cursor-pointer">
           Ver entradas disponibles →
-        </a>
+        </span>
       </div>
-    </div>
+    </Link>
   );
 }
