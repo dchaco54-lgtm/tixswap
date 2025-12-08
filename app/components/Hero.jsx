@@ -1,4 +1,7 @@
-export default function Hero() {
+// app/components/Hero.jsx
+"use client";
+
+export default function Hero({ searchTerm, onSearchChange }) {
   return (
     <section className="gradient-hero pt-32 pb-24 px-6 text-center">
       <h1 className="text-5xl font-extrabold leading-tight">
@@ -13,6 +16,8 @@ export default function Hero() {
 
       <div className="mt-8 mx-auto max-w-xl">
         <input
+          value={searchTerm}
+          onChange={(e) => onSearchChange?.(e.target.value)}
           placeholder="Busca eventos, artistas, lugares..."
           className="w-full px-4 py-3 rounded-xl shadow-soft border border-gray-200"
         />
