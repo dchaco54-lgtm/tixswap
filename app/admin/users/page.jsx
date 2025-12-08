@@ -1,8 +1,9 @@
+// app/admin/users/page.jsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '../../lib/supabaseClient';
 
 const ROLE_OPTIONS = [
   { value: 'user', label: 'Usuario normal' },
@@ -187,9 +188,7 @@ export default function AdminUsersPage() {
         {/* Título */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-900">
-              Usuarios
-            </h1>
+            <h1 className="text-2xl font-semibold text-gray-900">Usuarios</h1>
             <p className="text-sm text-gray-500">
               Administra roles, bloquea cuentas y busca usuarios por correo,
               nombre o RUT.
@@ -307,7 +306,11 @@ export default function AdminUsersPage() {
                           u.is_blocked
                             ? 'border-emerald-500 text-emerald-700 hover:bg-emerald-50'
                             : 'border-red-500 text-red-700 hover:bg-red-50'
-                        } ${savingId === u.id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        } ${
+                          savingId === u.id
+                            ? 'opacity-60 cursor-not-allowed'
+                            : ''
+                        }`}
                       >
                         {savingId === u.id
                           ? 'Guardando...'
@@ -324,9 +327,11 @@ export default function AdminUsersPage() {
         </div>
 
         <p className="mt-4 text-[11px] text-gray-400">
-          Tip: recuerda que los usuarios con rol <span className="font-semibold">premium</span> 
-          y <span className="font-semibold">super premium</span> pueden tener comisiones más bajas.
-          Asegúrate de que este rol coincida con la lógica que uses para calcular las comisiones.
+          Tip: recuerda que los usuarios con rol{' '}
+          <span className="font-semibold">premium</span> y{' '}
+          <span className="font-semibold">super premium</span> pueden tener
+          comisiones más bajas. Asegúrate de que este rol coincida con la
+          lógica que uses para calcular las comisiones.
         </p>
       </div>
     </div>
