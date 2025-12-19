@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../../lib/supabaseClient";
 import { EVENTS } from "../../lib/events";
 
 export const revalidate = 30;
@@ -10,7 +10,7 @@ export const revalidate = 30;
 async function getTicketsByEvent(eventId) {
   const { data, error } = await supabase
     .from("tickets")
-    .select("*")
+    .select("id, sector, row_label, seat_label, price, seller_name, seller_rating")
     .eq("event_id", eventId)
     .order("price", { ascending: true });
 
@@ -29,15 +29,7 @@ export default async function EventPage({ params }) {
   if (!event) notFound();
 
   const tickets = await getTicketsByEvent(id);
-
-  const sectors = Array.from(
-    new Set(
-      tickets
-        .map((t) => t.sector)
-        .filter(Boolean)
-        .map((s) => String(s))
-    )
-  );
+  const sectors = Array.from(new Set(tickets.map((t) => t.sector).filter(Boolean)));
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -46,7 +38,6 @@ export default async function EventPage({ params }) {
           ← Volver a eventos
         </Link>
 
-        {/* Cabecera evento */}
         <section className="mt-4 rounded-2xl bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
@@ -70,7 +61,6 @@ export default async function EventPage({ params }) {
         </section>
 
         <section className="mt-6 grid gap-6 md:grid-cols-[2fr,1fr]">
-          {/* Lista tickets */}
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-gray-900">
@@ -95,20 +85,10 @@ export default async function EventPage({ params }) {
             <div className="space-y-3">
               {tickets.length > 0 ? (
                 tickets.map((ticket) => {
-                  const sector = ticket.sector || "Sector";
-                  const row = ticket.row_label ?? ticket.row ?? null;
-                  const seat = ticket.seat_label ?? ticket.seat ?? null;
-
                   const seatText =
-                    row || seat
-                      ? `Fila ${row ?? "-"}, asiento ${seat ?? "-"}`
+                    ticket.row_label || ticket.seat_label
+                      ? `Fila ${ticket.row_label ?? "-"}, asiento ${ticket.seat_label ?? "-"}`
                       : "Asientos sin numerar";
-
-                  const sellerName = ticket.seller_name || "Vendedor TixSwap";
-                  const sellerRating =
-                    ticket.seller_rating != null
-                      ? Number(ticket.seller_rating).toFixed(1)
-                      : null;
 
                   return (
                     <article
@@ -117,12 +97,11 @@ export default async function EventPage({ params }) {
                     >
                       <div>
                         <p className="text-sm font-medium text-gray-900">
-                          {sector} · {seatText}
+                          {ticket.sector} · {seatText}
                         </p>
-
                         <p className="mt-1 text-xs text-gray-500">
-                          Publicado por {sellerName}
-                          {sellerRating ? ` · ${sellerRating}★` : ""}
+                          {ticket.seller_name ? `Publicado por ${ticket.seller_name}` : "Vendedor TixSwap"}
+                          {ticket.seller_rating ? ` · ${Number(ticket.seller_rating).toFixed(1)}★` : ""}
                         </p>
                       </div>
 
@@ -130,7 +109,6 @@ export default async function EventPage({ params }) {
                         <p className="text-base font-semibold text-emerald-600">
                           ${Number(ticket.price).toLocaleString("es-CL")}
                         </p>
-
                         <button className="mt-2 rounded-full bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
                           Comprar
                         </button>
@@ -146,7 +124,6 @@ export default async function EventPage({ params }) {
             </div>
           </div>
 
-          {/* Sidebar */}
           <aside className="space-y-4">
             <div className="rounded-2xl bg-white p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900">
@@ -164,4 +141,3 @@ export default async function EventPage({ params }) {
     </main>
   );
 }
-
