@@ -3,30 +3,41 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
 export default function Header() {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
   useEffect(() => {
-    const loadUser = async () => {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
-
-      if (error) {
-        console.error("Error getUser:", error);
-      }
-      setUser(user || null);
+    const fetchUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      setUser(data?.user || null);
       setLoadingUser(false);
     };
-
-    loadUser();
+    fetchUser();
   }, []);
+
+  const handleSellClick = async () => {
+    const { data } = await supabase.auth.getUser();
+    if (!data?.user) {
+      router.push(`/login?redirectTo=${encodeURIComponent("/sell")}`);
+      return;
+    }
+    router.push("/sell");
+  };
+
+  const handleBuyClick = async () => {
+    const { data } = await supabase.auth.getUser();
+    if (!data?.user) {
+      router.push(`/login?redirectTo=${encodeURIComponent("/events")}`);
+      return;
+    }
+    router.push("/events");
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -34,90 +45,67 @@ export default function Header() {
     router.push("/");
   };
 
-  // 👇 Lógica del botón VENDER
-  const handleSellClick = () => {
-    if (loadingUser) return; // por si aún carga
-
-    if (user) {
-      // Usuario con sesión → directo a vender
-      router.push("/sell");
-    } else {
-      // SIN sesión → ir a login, pero con redirect a /sell
-      router.push("/login?redirectTo=/sell");
-    }
-  };
-
-  const firstName =
-    user?.user_metadata?.name?.split(" ")[0] ||
-    user?.user_metadata?.full_name?.split(" ")[0] ||
-    "Usuario";
-
   return (
-    <header className="border-b bg-white/80 backdrop-blur">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-        {/* Logo */}
-        <div className="flex items-center gap-2">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-xl font-semibold text-blue-600">TixSwap</span>
-          </Link>
-          <span className="hidden sm:inline text-xs text-slate-500">
+    <header className="sticky top-0 z-50 bg-white border-b">
+      <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
+        <Link href="/" className="flex items-center gap-2">
+          <h1 className="text-xl font-bold text-blue-600">TixSwap</h1>
+          <span className="text-sm text-gray-500 hidden sm:block">
             Reventa segura, en un clic
           </span>
-        </div>
+        </Link>
 
-        {/* Navegación principal */}
-        <nav className="hidden md:flex items-center gap-6 text-sm text-slate-700">
-          <button className="hover:text-blue-600">Comprar</button>
+        <nav className="flex items-center gap-4">
           <button
-            className="hover:text-blue-600"
+            onClick={handleBuyClick}
+            className="text-gray-700 hover:text-blue-600 font-medium"
+          >
+            Comprar
+          </button>
+
+          <button
             onClick={handleSellClick}
+            className="text-gray-700 hover:text-blue-600 font-medium"
           >
             Vender
           </button>
-          <button className="hover:text-blue-600">Cómo funciona</button>
-        </nav>
 
-        {/* Botones de auth: SOLO UNO DE LOS DOS BLOQUES SEGÚN ESTADO */}
-        {!loadingUser && (
-          <>
-            {user ? (
-              // Usuario logeado
-              <div className="flex items-center gap-2">
-                <span className="hidden sm:inline text-sm text-slate-600">
-                  Hola, {firstName}
-                </span>
-                <Link
-                  href="/dashboard"
-                  className="text-sm px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50"
-                >
-                  Ver mi cuenta
-                </Link>
-                <button
-                  onClick={handleLogout}
-                  className="text-sm px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700"
-                >
-                  Cerrar sesión
-                </button>
-              </div>
-            ) : (
-              // Usuario NO logeado
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/login"
-                  className="text-sm px-3 py-1.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50"
-                >
-                  Iniciar sesión
-                </Link>
-                <Link
-                  href="/register"
-                  className="text-sm px-3 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700"
-                >
-                  Crear cuenta
-                </Link>
-              </div>
-            )}
-          </>
-        )}
+          <a
+            href="/#como-funciona"
+            className="text-gray-700 hover:text-blue-600 font-medium hidden sm:block"
+          >
+            Cómo funciona
+          </a>
+
+          {!loadingUser && user ? (
+            <>
+              <span className="text-sm text-gray-600 hidden sm:block">
+                Hola, {user.user_metadata?.name || user.email?.split("@")[0]}
+              </span>
+              <button
+                onClick={() => router.push("/account")}
+                className="border rounded-full px-4 py-2 text-sm hover:bg-gray-50"
+              >
+                Ver mi cuenta
+              </button>
+              <button
+                onClick={handleLogout}
+                className="bg-blue-600 text-white px-4 py-2 rounded-full text-sm font-medium hover:opacity-90"
+              >
+                Cerrar sesión
+              </button>
+            </>
+          ) : (
+            !loadingUser && (
+              <button
+                onClick={() => router.push(`/login?redirectTo=${encodeURIComponent(pathname || "/")}`)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-full text-sm font-medium hover:opacity-90"
+              >
+                Iniciar sesión
+              </button>
+            )
+          )}
+        </nav>
       </div>
     </header>
   );
