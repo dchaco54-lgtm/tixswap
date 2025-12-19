@@ -6,8 +6,28 @@ import { supabase } from '../lib/supabaseClient';
 
 type SaleType = 'fixed' | 'auction';
 
+type DbEvent = {
+  id: string;
+  title: string | null;
+  starts_at: string | null;
+  venue: string | null;
+  city: string | null;
+  category?: string | null;
+};
+
 interface SellFormState {
+  // Caso 1
   eventId: string;
+
+  // Caso 2
+  useCustomEvent: boolean;
+  customEventTitle: string;
+  customEventDateTime: string; // datetime-local
+  customEventVenue: string;
+  customEventCity: string;
+  customEventCategory: string;
+
+  // Ticket
   title: string;
   description: string;
   sector: string;
@@ -16,16 +36,7 @@ interface SellFormState {
   salePrice: string;
   originalPrice: string;
   saleType: SaleType;
-  emergencyAuction: boolean;
 }
-
-type DbEvent = {
-  id: string;
-  title: string | null;
-  starts_at: string | null;
-  venue: string | null;
-  city: string | null;
-};
 
 function formatEventDisplay(ev: DbEvent) {
   const title = ev.title ?? 'Evento';
@@ -33,10 +44,9 @@ function formatEventDisplay(ev: DbEvent) {
   const city = ev.city ?? '';
   const place = [venue, city].filter(Boolean).join(' · ');
 
-  let dateDisplay = '';
+  let dateDisplay = 'Fecha por confirmar';
   if (ev.starts_at) {
     const d = new Date(ev.starts_at);
-    // Esto funciona bien en Vercel/Node normalmente
     dateDisplay = d.toLocaleString('es-CL', {
       year: 'numeric',
       month: 'long',
@@ -44,8 +54,6 @@ function formatEventDisplay(ev: DbEvent) {
       hour: '2-digit',
       minute: '2-digit',
     });
-  } else {
-    dateDisplay = 'Fecha por confirmar';
   }
 
   return `${title} — ${dateDisplay}${place ? ` — ${place}` : ''}`;
@@ -73,6 +81,14 @@ function SellForm() {
 
   const [state, setState] = useState<SellFormState>({
     eventId: '',
+
+    useCustomEvent: false,
+    customEventTitle: '',
+    customEventDateTime: '',
+    customEventVenue: '',
+    customEventCity: '',
+    customEventCategory: '',
+
     title: '',
     description: '',
     sector: '',
@@ -81,7 +97,6 @@ function SellForm() {
     salePrice: '',
     originalPrice: '',
     saleType: 'fixed',
-    emergencyAuction: false,
   });
 
   // ✅ Exigir login
@@ -104,14 +119,14 @@ function SellForm() {
     initAuth();
   }, [router]);
 
-  // ✅ Traer eventos reales desde Supabase
+  // ✅ Traer eventos desde Supabase
   useEffect(() => {
     const loadEvents = async () => {
       setEventsLoading(true);
       try {
         const { data, error } = await supabase
           .from('events')
-          .select('id, title, starts_at, venue, city')
+          .select('id, title, starts_at, venue, city, category')
           .order('starts_at', { ascending: true });
 
         if (error) {
@@ -151,18 +166,6 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
-      // Validaciones
-      if (!state.eventId) {
-        alert('Selecciona un evento.');
-        return;
-      }
-
-      const price = Number(state.salePrice);
-      if (!Number.isFinite(price) || price <= 0) {
-        alert('Ingresa un precio válido.');
-        return;
-      }
-
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -172,13 +175,92 @@ function SellForm() {
         return;
       }
 
+      // Validaciones ticket
+      const price = Number(state.salePrice);
+      if (!state.title.trim()) {
+        alert('Ingresa el título de la entrada.');
+        return;
+      }
+      if (!Number.isFinite(price) || price <= 0) {
+        alert('Ingresa un precio de venta válido.');
+        return;
+      }
+
       const sellerName =
         (user.user_metadata as any)?.full_name ||
         (user.user_metadata as any)?.name ||
         user.email ||
         'Vendedor';
 
-      // ✅ Payload base (probablemente coincide con tu tabla tickets)
+      // ============================
+      // CASO 2: Evento NO está en listado
+      // ============================
+      if (state.useCustomEvent) {
+        if (!state.customEventTitle.trim()) {
+          alert('Ingresa el nombre del evento.');
+          return;
+        }
+        if (!state.customEventDateTime) {
+          alert('Ingresa fecha y hora del evento (aunque sea aproximada).');
+          return;
+        }
+
+        const msgLines = [
+          `SOLICITUD NUEVO EVENTO + PUBLICACIÓN`,
+          ``,
+          `Usuario: ${user.email || ''}`,
+          `User ID: ${user.id}`,
+          ``,
+          `EVENTO SOLICITADO`,
+          `- Título: ${state.customEventTitle.trim()}`,
+          `- Fecha/Hora: ${state.customEventDateTime}`,
+          `- Recinto: ${state.customEventVenue.trim() || '(no informado)'}`,
+          `- Ciudad: ${state.customEventCity.trim() || '(no informado)'}`,
+          `- Categoría: ${state.customEventCategory.trim() || '(no informado)'}`,
+          ``,
+          `ENTRADA A PUBLICAR (pendiente de validación/creación del evento)`,
+          `- Título entrada: ${state.title.trim()}`,
+          `- Descripción: ${state.description.trim() || '(sin descripción)'}`,
+          `- Sector: ${state.sector.trim() || '-'}`,
+          `- Fila: ${state.row.trim() || '-'}`,
+          `- Asiento: ${state.seat.trim() || '-'}`,
+          `- Precio venta: ${price}`,
+          `- Precio original: ${state.originalPrice ? Number(state.originalPrice) : '(no informado)'}`,
+          `- Tipo venta: ${state.saleType}`,
+          ``,
+          `NOTA SOPORTE`,
+          `Crear evento en /admin/events y luego publicar esta entrada bajo ese evento.`,
+        ];
+
+        const { error } = await supabase.from('support_tickets').insert([
+          {
+            user_id: user.id,
+            category: 'event_request',
+            subject: `Crear evento: ${state.customEventTitle.trim()} (y publicar entrada)`,
+            message: msgLines.join('\n'),
+            // status default 'open'
+          },
+        ]);
+
+        if (error) {
+          console.error(error);
+          alert('No se pudo enviar la solicitud a soporte. Intenta nuevamente.');
+          return;
+        }
+
+        alert('Listo ✅ Enviamos la solicitud a soporte. Te avisaremos cuando el evento esté creado y tu entrada publicada.');
+        router.push('/dashboard/tickets');
+        return;
+      }
+
+      // ============================
+      // CASO 1: Evento existe
+      // ============================
+      if (!state.eventId) {
+        alert('Selecciona un evento.');
+        return;
+      }
+
       const basePayload: any = {
         event_id: state.eventId,
         sector: state.sector || null,
@@ -188,7 +270,6 @@ function SellForm() {
         seller_name: sellerName,
       };
 
-      // ✅ Payload extendido (si tu tabla tiene estas columnas)
       const extendedPayload: any = {
         ...basePayload,
         title: state.title || null,
@@ -199,12 +280,9 @@ function SellForm() {
         seller_email: user.email,
       };
 
-      // Intento 1: insert extendido
       let { error } = await supabase.from('tickets').insert(extendedPayload);
 
-      // Si falla por columnas no existentes, hacemos fallback al base
       if (error && isMissingColumnError(error)) {
-        console.warn('Fallback insert basePayload (faltan columnas en tickets).', error);
         const res2 = await supabase.from('tickets').insert(basePayload);
         error = res2.error ?? null;
       }
@@ -212,7 +290,6 @@ function SellForm() {
       if (error) {
         console.error('Error insert ticket:', error);
 
-        // Mensaje útil para debug
         const msg = [
           error.message ? `Mensaje: ${error.message}` : null,
           error.code ? `Code: ${error.code}` : null,
@@ -226,17 +303,15 @@ function SellForm() {
         return;
       }
 
-      // ✅ Redirigir al "sub-evento" (agrupación)
       router.push(`/events/${state.eventId}`);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      alert('Ocurrió un error inesperado al crear la publicación.');
+      alert('Ocurrió un error inesperado.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // UI loading states
   if (authChecking) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -246,6 +321,8 @@ function SellForm() {
       </main>
     );
   }
+
+  const noEvents = !eventsLoading && eventOptions.length === 0;
 
   return (
     <div className="min-h-screen bg-gray-50 py-10">
@@ -270,35 +347,143 @@ function SellForm() {
             Detalles de la entrada
           </h2>
 
-          {/* Evento */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              Evento *
-            </label>
-
-            {eventsLoading ? (
-              <div className="text-sm text-gray-500">Cargando eventos...</div>
-            ) : eventOptions.length === 0 ? (
-              <div className="text-sm text-red-600">
-                No hay eventos en el backend. Crea uno en <b>/admin/events</b>.
-              </div>
-            ) : (
-              <select
-                name="eventId"
-                value={state.eventId}
+          {/* Toggle Caso 2 */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                name="useCustomEvent"
+                checked={state.useCustomEvent}
                 onChange={handleChange}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                required
-              >
-                <option value="">Selecciona un evento</option>
-                {eventOptions.map((ev) => (
-                  <option key={ev.id} value={ev.id}>
-                    {ev.label}
-                  </option>
-                ))}
-              </select>
-            )}
+                className="mt-1"
+              />
+              <div>
+                <p className="text-sm font-semibold text-gray-900">
+                  Mi evento no está en el listado
+                </p>
+                <p className="text-xs text-gray-600">
+                  Puedes enviar la solicitud y soporte creará el evento y publicará tu entrada.
+                </p>
+              </div>
+            </label>
           </div>
+
+          {/* Caso 1: Evento existente */}
+          {!state.useCustomEvent && (
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-gray-700">
+                Evento *
+              </label>
+
+              {eventsLoading ? (
+                <div className="text-sm text-gray-500">Cargando eventos...</div>
+              ) : noEvents ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                  No hay eventos creados todavía. Soporte debe importarlos/crearlos en <b>/admin/events</b>.
+                  <div className="mt-2 text-xs text-red-700">
+                    Mientras tanto, marca “Mi evento no está en el listado” para enviar solicitud a soporte.
+                  </div>
+                </div>
+              ) : (
+                <select
+                  name="eventId"
+                  value={state.eventId}
+                  onChange={handleChange}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  required
+                >
+                  <option value="">Selecciona un evento</option>
+                  {eventOptions.map((ev) => (
+                    <option key={ev.id} value={ev.id}>
+                      {ev.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* Caso 2: Solicitud evento */}
+          {state.useCustomEvent && (
+            <div className="rounded-2xl border border-gray-200 p-4 space-y-4">
+              <p className="text-sm font-semibold text-gray-900">
+                Datos del evento (solicitud a soporte)
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Nombre del evento *
+                  </label>
+                  <input
+                    type="text"
+                    name="customEventTitle"
+                    value={state.customEventTitle}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    placeholder="Ej: Chayanne (Concepción)"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Fecha y hora *
+                  </label>
+                  <input
+                    type="datetime-local"
+                    name="customEventDateTime"
+                    value={state.customEventDateTime}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Recinto
+                  </label>
+                  <input
+                    type="text"
+                    name="customEventVenue"
+                    value={state.customEventVenue}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    placeholder="Ej: Estadio Ester Roa"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Ciudad
+                  </label>
+                  <input
+                    type="text"
+                    name="customEventCity"
+                    value={state.customEventCity}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    placeholder="Ej: Concepción"
+                  />
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Categoría (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    name="customEventCategory"
+                    value={state.customEventCategory}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    placeholder="Pop, Rock, Festival..."
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Título entrada */}
           <div className="space-y-1">
@@ -311,7 +496,7 @@ function SellForm() {
               value={state.title}
               onChange={handleChange}
               placeholder="Ej: Entrada General - Platea Alta"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               required
             />
           </div>
@@ -327,7 +512,7 @@ function SellForm() {
               onChange={handleChange}
               rows={3}
               placeholder="Describe tu entrada (ubicación específica, estado, restricciones, etc.)"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
             />
           </div>
 
@@ -343,7 +528,7 @@ function SellForm() {
                 value={state.sector}
                 onChange={handleChange}
                 placeholder="Cancha, Platea, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
             <div className="space-y-1">
@@ -356,7 +541,7 @@ function SellForm() {
                 value={state.row}
                 onChange={handleChange}
                 placeholder="A, B, 1, 2, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
             <div className="space-y-1">
@@ -369,7 +554,7 @@ function SellForm() {
                 value={state.seat}
                 onChange={handleChange}
                 placeholder="1, 2, 3, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -387,7 +572,7 @@ function SellForm() {
                 value={state.salePrice}
                 onChange={handleChange}
                 placeholder="50000"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 required
               />
             </div>
@@ -402,7 +587,7 @@ function SellForm() {
                 value={state.originalPrice}
                 onChange={handleChange}
                 placeholder="65000"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
           </div>
@@ -442,12 +627,6 @@ function SellForm() {
                 </span>
               </button>
             </div>
-
-            <p className="text-xs text-gray-500">
-              Para el MVP solo permitimos venta a precio fijo. Más adelante
-              activamos la subasta con pre-autorización para que no tengas que
-              andar devolviendo plata.
-            </p>
           </div>
 
           {/* Botones */}
@@ -462,10 +641,10 @@ function SellForm() {
 
             <button
               type="submit"
-              disabled={isSubmitting || eventsLoading || eventOptions.length === 0}
+              disabled={isSubmitting || (!state.useCustomEvent && (eventsLoading || eventOptions.length === 0))}
               className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              {isSubmitting ? 'Guardando...' : 'Continuar'}
+              {isSubmitting ? 'Guardando...' : state.useCustomEvent ? 'Enviar a soporte' : 'Publicar'}
             </button>
           </div>
         </form>
