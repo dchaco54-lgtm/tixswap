@@ -3,33 +3,55 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
-import { EVENTS } from "../../lib/events";
 
 export const revalidate = 30;
 
-async function getTicketsByEvent(eventId) {
-  const { data, error } = await supabase
-    .from("tickets")
-    .select("id, sector, row_label, seat_label, price, seller_name, seller_rating")
-    .eq("event_id", eventId)
-    .order("price", { ascending: true });
+function formatDate(iso) {
+  if (!iso) return "Fecha por confirmar";
+  const d = new Date(iso);
+  return d.toLocaleString("es-CL", {
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-  if (error) {
-    console.error("Error cargando tickets:", error);
-    return [];
+async function getEventAndTickets(id) {
+  const { data: event, error: eventError } = await supabase
+    .from("events")
+    .select("id, title, starts_at, venue, city")
+    .eq("id", id)
+    .single();
+
+  if (eventError || !event) {
+    console.error("Error cargando evento:", eventError);
+    return { event: null, tickets: [] };
   }
 
-  return data ?? [];
+  const { data: tickets, error: ticketsError } = await supabase
+    .from("tickets")
+    .select("id, sector, row_label, seat_label, price, seller_name, seller_rating")
+    .eq("event_id", id)
+    .order("price", { ascending: true });
+
+  if (ticketsError) {
+    console.error("Error cargando tickets:", ticketsError);
+  }
+
+  return { event, tickets: tickets ?? [] };
 }
 
 export default async function EventPage({ params }) {
   const { id } = params;
+  const { event, tickets } = await getEventAndTickets(id);
 
-  const event = EVENTS.find((e) => e.id === id) || null;
   if (!event) notFound();
 
-  const tickets = await getTicketsByEvent(id);
-  const sectors = Array.from(new Set(tickets.map((t) => t.sector).filter(Boolean)));
+  const sectors = Array.from(
+    new Set((tickets || []).map((t) => t.sector).filter(Boolean))
+  );
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -42,19 +64,19 @@ export default async function EventPage({ params }) {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-2xl font-semibold text-gray-900">
-                {event.title}
+                {event.title || "Evento"}
               </h1>
               <p className="mt-2 text-gray-700">
-                📅 {event.date}
+                📅 {formatDate(event.starts_at)}
                 <br />
-                📍 {event.location}
+                📍 {(event.venue || "Recinto") + (event.city ? ` · ${event.city}` : "")}
               </p>
             </div>
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
               <p className="font-medium">Reventa segura en TixSwap</p>
               <p className="mt-1 text-xs text-gray-500">
-                Pagas solo cuando el vendedor sube la entrada y la validamos.
+                Pagas solo cuando el vendedor sube su entrada y la validamos.
               </p>
             </div>
           </div>
@@ -100,8 +122,12 @@ export default async function EventPage({ params }) {
                           {ticket.sector} · {seatText}
                         </p>
                         <p className="mt-1 text-xs text-gray-500">
-                          {ticket.seller_name ? `Publicado por ${ticket.seller_name}` : "Vendedor TixSwap"}
-                          {ticket.seller_rating ? ` · ${Number(ticket.seller_rating).toFixed(1)}★` : ""}
+                          {ticket.seller_name
+                            ? `Publicado por ${ticket.seller_name}`
+                            : "Vendedor TixSwap"}
+                          {ticket.seller_rating
+                            ? ` · ${Number(ticket.seller_rating).toFixed(1)}★`
+                            : ""}
                         </p>
                       </div>
 
