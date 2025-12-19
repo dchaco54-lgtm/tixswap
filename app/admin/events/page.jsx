@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 import { EVENTS as FRONT_EVENTS } from "../../lib/events";
+
+const ADMIN_EMAILS = [
+  "soporte@tixswap.cl",
+  "davidchacon_17@hotmail.com",
+].map((e) => e.toLowerCase());
 
 const initialForm = {
   title: "",
@@ -28,16 +33,12 @@ function formatDate(iso) {
 }
 
 function parseLocation(location) {
-  // "Estadio Ester Roa — Concepción, Chile"
   if (!location) return { venue: null, city: null };
-
   const parts = String(location).split("—").map((s) => s.trim());
   const venue = parts[0] || null;
   let city = parts[1] || null;
 
-  if (city) {
-    city = city.replace(/,\s*Chile\s*$/i, "").trim();
-  }
+  if (city) city = city.replace(/,\s*Chile\s*$/i, "").trim();
 
   return { venue, city };
 }
@@ -62,7 +63,7 @@ export default function AdminEventsPage() {
 
   const [importing, setImporting] = useState(false);
 
-  // ✅ SOLO soporte@tixswap.cl
+  // ✅ Admin whitelist (incluye tu hotmail)
   useEffect(() => {
     const checkAdmin = async () => {
       const {
@@ -75,7 +76,9 @@ export default function AdminEventsPage() {
         return;
       }
 
-      if ((user.email || "").toLowerCase() !== "soporte@tixswap.cl") {
+      const email = (user.email || "").toLowerCase();
+
+      if (!ADMIN_EMAILS.includes(email)) {
         router.replace("/dashboard");
         return;
       }
@@ -96,7 +99,7 @@ export default function AdminEventsPage() {
         .order("starts_at", { ascending: true });
 
       if (error) {
-        console.error(error);
+        console.error("Error cargando events:", error);
         setEvents([]);
         return;
       }
@@ -111,15 +114,6 @@ export default function AdminEventsPage() {
     if (!checkingAdmin && isAdmin) loadEvents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkingAdmin, isAdmin]);
-
-  const existingKeySet = useMemo(() => {
-    const set = new Set();
-    for (const e of events) {
-      const k = `${e.title || ""}|${e.starts_at || ""}|${e.venue || ""}|${e.city || ""}`.toLowerCase();
-      set.add(k);
-    }
-    return set;
-  }, [events]);
 
   const onChange = (e) => {
     const { name, value } = e.target;
@@ -148,8 +142,8 @@ export default function AdminEventsPage() {
       });
 
       if (error) {
-        console.error(error);
-        alert("Ocurrió un error al guardar el evento.");
+        console.error("Error insert events:", error);
+        alert(`Error al guardar evento:\n${error.message || "revisa consola"}`);
         return;
       }
 
@@ -164,13 +158,12 @@ export default function AdminEventsPage() {
   const importFrontEvents = async () => {
     setImporting(true);
     try {
-      // Re-cargar en caliente para duplicados correctos
       const { data: current, error: currentErr } = await supabase
         .from("events")
         .select("title, starts_at, venue, city");
 
       if (currentErr) {
-        console.error(currentErr);
+        console.error("Error leyendo events:", currentErr);
         alert("No se pudo cargar eventos actuales.");
         return;
       }
@@ -204,15 +197,14 @@ export default function AdminEventsPage() {
         return;
       }
 
-      // Insert en chunks para no reventar límites
       const chunks = chunkArray(toInsert, 50);
       let inserted = 0;
 
       for (const chunk of chunks) {
         const { error } = await supabase.from("events").insert(chunk);
         if (error) {
-          console.error(error);
-          alert("Falló la importación en una tanda. Revisa consola.");
+          console.error("Error importando chunk:", error);
+          alert(`Falló la importación:\n${error.message || "revisa consola"}`);
           return;
         }
         inserted += chunk.length;
@@ -244,7 +236,7 @@ export default function AdminEventsPage() {
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Admin · Eventos</h1>
             <p className="mt-1 text-sm text-gray-600">
-              Crea eventos para que aparezcan en /sell y /events.
+              Crea/importa eventos para que aparezcan en /sell y /events.
             </p>
           </div>
 
