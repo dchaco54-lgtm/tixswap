@@ -2,6 +2,7 @@
 
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
 import { EVENTS } from '../lib/events';
 
 type SaleType = 'fixed' | 'auction';
@@ -20,11 +21,8 @@ interface SellFormState {
 }
 
 export default function SellPage() {
-  return <SellForm />;
-}
-
-function SellForm() {
   const router = useRouter();
+
   const [step] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [state, setState] = useState<SellFormState>({
@@ -58,11 +56,77 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
-      // TODO: conectar con Supabase (insert de la publicación)
-      console.log('Publicación a guardar:', state);
+      // 1) Requerimos usuario logueado (MVP). Si no, lo mandamos a login.
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      alert('Tu entrada fue creada (MVP: falta conectar al backend).');
-      // router.push('/panel'); // cuando tengas panel de usuario
+      if (!user) {
+        alert('Primero inicia sesión para publicar una entrada.');
+        router.push('/login');
+        return;
+      }
+
+      const sellerName =
+        (user.user_metadata as any)?.full_name ||
+        (user.user_metadata as any)?.name ||
+        user.email ||
+        'Vendedor';
+
+      // 2) Intento "extendido" (si tu tabla tickets tiene más columnas)
+      const extendedPayload: any = {
+        event_id: state.eventId,
+        title: state.title,
+        description: state.description || null,
+        sector: state.sector || null,
+        row_label: state.row || null,
+        seat_label: state.seat || null,
+        price: Number(state.salePrice),
+        original_price: state.originalPrice ? Number(state.originalPrice) : null,
+        sale_type: state.saleType, // fixed | auction
+        seller_id: user.id,
+        seller_email: user.email,
+        seller_name: sellerName,
+      };
+
+      let { error } = await supabase.from('tickets').insert(extendedPayload);
+
+      // 3) Fallback "medio" (útil si tienes RLS/cols seller_id pero no title/description)
+      if (error) {
+        const midPayload: any = {
+          event_id: state.eventId,
+          sector: state.sector || null,
+          row_label: state.row || null,
+          seat_label: state.seat || null,
+          price: Number(state.salePrice),
+          original_price: state.originalPrice ? Number(state.originalPrice) : null,
+          sale_type: state.saleType,
+          seller_id: user.id,
+          seller_email: user.email,
+          seller_name: sellerName,
+        };
+
+        const { error: errorMid } = await supabase.from('tickets').insert(midPayload);
+        error = errorMid ?? null;
+      }
+
+      // 4) Fallback "simple" (si tu tabla tickets es minimalista)
+      if (error) {
+        const basePayload: any = {
+          event_id: state.eventId,
+          sector: state.sector || null,
+          row_label: state.row || null,
+          seat_label: state.seat || null,
+          price: Number(state.salePrice),
+          seller_name: sellerName,
+        };
+
+        const { error: errorBase } = await supabase.from('tickets').insert(basePayload);
+        if (errorBase) throw errorBase;
+      }
+
+      // ✅ Sub-evento: redirigimos a la página del evento, donde se agrupan las publicaciones por event_id
+      router.push(`/events/${state.eventId}`);
     } catch (err) {
       console.error(err);
       alert('Ocurrió un error al crear la publicación.');
@@ -88,208 +152,219 @@ function SellForm() {
           </div>
         </div>
 
-        {/* Formulario */}
+        {/* Form */}
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl bg-white shadow-sm border border-gray-100 p-6 space-y-6"
+          className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm"
         >
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">
             Detalles de la entrada
           </h2>
 
           {/* Evento */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              Evento *
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Evento <span className="text-red-500">*</span>
             </label>
             <select
               name="eventId"
               value={state.eventId}
               onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
               required
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
             >
-              <option value="">Selecciona un evento</option>
+              <option value="" disabled>
+                Selecciona un evento...
+              </option>
               {EVENTS.map((event) => (
                 <option key={event.id} value={event.id}>
-                  {/* Título + fecha + recinto/ciudad */}
                   {event.title} — {event.date} — {event.location}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Título entrada */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              Título de la entrada *
+          {/* Título */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Título de la entrada <span className="text-red-500">*</span>
             </label>
             <input
-              type="text"
               name="title"
               value={state.title}
               onChange={handleChange}
-              placeholder="Ej: Entrada General - Platea Alta"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               required
+              placeholder="Ej: Entrada sector cancha (2 unidades)"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
           </div>
 
           {/* Descripción */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Descripción
             </label>
             <textarea
               name="description"
               value={state.description}
               onChange={handleChange}
-              rows={3}
-              placeholder="Describe tu entrada (ubicación específica, estado, restricciones, etc.)"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Agrega detalles: si es e-ticket, vista, restricciones, etc."
+              rows={4}
+              className="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
           </div>
 
           {/* Sector / Fila / Asiento */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Sector
               </label>
               <input
-                type="text"
                 name="sector"
                 value={state.sector}
                 onChange={handleChange}
-                placeholder="Campo, Platea, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Ej: Cancha"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Fila
               </label>
               <input
-                type="text"
                 name="row"
                 value={state.row}
                 onChange={handleChange}
-                placeholder="A, B, 1, 2, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Ej: 12"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Asiento
               </label>
               <input
-                type="text"
                 name="seat"
                 value={state.seat}
                 onChange={handleChange}
-                placeholder="1, 2, 3, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Ej: 08"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
           </div>
 
           {/* Precios */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Precio de venta *
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Precio de venta <span className="text-red-500">*</span>
               </label>
               <input
-                type="number"
-                min={0}
                 name="salePrice"
                 value={state.salePrice}
                 onChange={handleChange}
-                placeholder="50000"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 required
+                inputMode="numeric"
+                placeholder="Ej: 65000"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Precio original (opcional)
               </label>
               <input
-                type="number"
-                min={0}
                 name="originalPrice"
                 value={state.originalPrice}
                 onChange={handleChange}
-                placeholder="60000"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                inputMode="numeric"
+                placeholder="Ej: 88997"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
           </div>
 
           {/* Tipo de venta */}
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-700">
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-3">
               Tipo de venta
             </label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() =>
-                  setState((prev) => ({ ...prev, saleType: 'fixed' }))
-                }
-                className={`flex flex-col items-start rounded-xl border px-4 py-3 text-left text-sm transition ${
-                  state.saleType === 'fixed'
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 bg-white hover:bg-gray-50'
-                }`}
-              >
-                <span className="font-semibold text-gray-900">Precio fijo</span>
-                <span className="text-gray-500 text-xs">
-                  Vende inmediatamente al precio que estableces.
-                </span>
-              </button>
 
-              <button
-                type="button"
-                disabled
-                className="flex flex-col items-start rounded-xl border border-gray-200 px-4 py-3 text-left text-sm bg-gray-50 cursor-not-allowed opacity-60"
-              >
-                <span className="font-semibold text-gray-900">
-                  Subasta (próximamente)
-                </span>
-                <span className="text-gray-500 text-xs">
-                  Los compradores podrán pujar por tu entrada.
-                </span>
-              </button>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <label className="cursor-pointer">
+                <input
+                  type="radio"
+                  name="saleType"
+                  value="fixed"
+                  checked={state.saleType === 'fixed'}
+                  onChange={handleChange}
+                  className="hidden"
+                />
+                <div
+                  className={`rounded-xl border p-4 ${
+                    state.saleType === 'fixed'
+                      ? 'border-blue-600 bg-blue-50'
+                      : 'border-gray-200 bg-white'
+                  }`}
+                >
+                  <p className="font-semibold text-gray-900">Precio fijo</p>
+                  <p className="text-sm text-gray-600">
+                    Vende inmediatamente al precio que estableces.
+                  </p>
+                </div>
+              </label>
+
+              <label className="cursor-not-allowed opacity-60">
+                <input
+                  type="radio"
+                  name="saleType"
+                  value="auction"
+                  checked={state.saleType === 'auction'}
+                  onChange={handleChange}
+                  className="hidden"
+                  disabled
+                />
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="font-semibold text-gray-900">
+                    Subasta (próximamente)
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    Los compradores podrán pujar por tu entrada.
+                  </p>
+                </div>
+              </label>
             </div>
-            <p className="text-xs text-gray-500">
+
+            <p className="mt-2 text-xs text-gray-500">
               Para el MVP solo permitimos venta a precio fijo. Más adelante
               activamos la subasta con pre-autorización para que no tengas que
               andar devolviendo plata.
             </p>
-          </div>
 
-          {/* Subasta emergencia (deshabilitada por ahora) */}
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
-            <div className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                disabled
-                name="emergencyAuction"
-                checked={state.emergencyAuction}
-                onChange={handleChange}
-                className="mt-[2px]"
-              />
-              <div>
-                <p className="font-semibold">
-                  Subasta automática de emergencia (próximamente)
-                </p>
-                <p>
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <label className="flex items-start gap-3 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  name="emergencyAuction"
+                  checked={state.emergencyAuction}
+                  onChange={handleChange}
+                  disabled
+                  className="mt-1"
+                />
+                <span>
+                  <span className="font-semibold">
+                    Subasta automática de emergencia (próximamente)
+                  </span>
+                  <br />
                   Si tu entrada no se vende, se activará automáticamente una
                   subasta pocas horas antes del evento. Te avisaremos por correo
                   cada vez que tu oferta sea superada.
-                </p>
-              </div>
+                </span>
+              </label>
             </div>
           </div>
 
@@ -330,18 +405,18 @@ function StepIndicator({ label, step, activeStep }: StepProps) {
     <div className="flex items-center gap-2">
       <div
         className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-          isActive
+          isCompleted
+            ? 'bg-emerald-600 text-white'
+            : isActive
             ? 'bg-blue-600 text-white'
-            : isCompleted
-            ? 'bg-green-500 text-white'
-            : 'bg-gray-200 text-gray-600'
+            : 'bg-gray-200 text-gray-700'
         }`}
       >
         {step}
       </div>
       <span
-        className={`text-sm ${
-          isActive ? 'text-gray-900 font-semibold' : 'text-gray-500'
+        className={`${
+          isActive ? 'text-gray-900' : 'text-gray-600'
         }`}
       >
         {label}
