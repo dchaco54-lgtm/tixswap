@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
+import { EVENTS as FRONT_EVENTS } from "../../lib/events";
 
 const initialForm = {
   title: "",
@@ -14,33 +15,67 @@ const initialForm = {
   image_url: "",
 };
 
+function formatDate(iso) {
+  if (!iso) return "Fecha por confirmar";
+  const d = new Date(iso);
+  return d.toLocaleString("es-CL", {
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function parseLocation(location) {
+  // "Estadio Ester Roa — Concepción, Chile"
+  if (!location) return { venue: null, city: null };
+
+  const parts = String(location).split("—").map((s) => s.trim());
+  const venue = parts[0] || null;
+  let city = parts[1] || null;
+
+  if (city) {
+    city = city.replace(/,\s*Chile\s*$/i, "").trim();
+  }
+
+  return { venue, city };
+}
+
+function chunkArray(arr, size) {
+  const res = [];
+  for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+  return res;
+}
+
 export default function AdminEventsPage() {
   const router = useRouter();
-  const [form, setForm] = useState(initialForm);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // SOLO soporte@tixswap.cl puede entrar acá
+  const [form, setForm] = useState(initialForm);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [events, setEvents] = useState([]);
+  const [loadingEvents, setLoadingEvents] = useState(true);
+
+  const [importing, setImporting] = useState(false);
+
+  // ✅ SOLO soporte@tixswap.cl
   useEffect(() => {
     const checkAdmin = async () => {
-      if (!supabase) {
-        router.replace("/login");
-        return;
-      }
-
       const {
         data: { user },
+        error,
       } = await supabase.auth.getUser();
 
-      if (!user) {
+      if (error || !user) {
         router.replace("/login");
         return;
       }
 
-      if (user.email?.toLowerCase() !== "soporte@tixswap.cl") {
-        // No es admin → lo mandamos al estado de cuenta
+      if ((user.email || "").toLowerCase() !== "soporte@tixswap.cl") {
         router.replace("/dashboard");
         return;
       }
@@ -52,26 +87,54 @@ export default function AdminEventsPage() {
     checkAdmin();
   }, [router]);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+  const loadEvents = async () => {
+    setLoadingEvents(true);
+    try {
+      const { data, error } = await supabase
+        .from("events")
+        .select("id, title, category, starts_at, venue, city, image_url")
+        .order("starts_at", { ascending: true });
+
+      if (error) {
+        console.error(error);
+        setEvents([]);
+        return;
+      }
+
+      setEvents(data || []);
+    } finally {
+      setLoadingEvents(false);
+    }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!checkingAdmin && isAdmin) loadEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkingAdmin, isAdmin]);
 
-    if (!supabase) {
-      alert("Supabase no está configurado (revisa las env vars).");
-      return;
+  const existingKeySet = useMemo(() => {
+    const set = new Set();
+    for (const e of events) {
+      const k = `${e.title || ""}|${e.starts_at || ""}|${e.venue || ""}|${e.city || ""}`.toLowerCase();
+      set.add(k);
     }
+    return set;
+  }, [events]);
+
+  const onChange = (e) => {
+    const { name, value } = e.target;
+    setForm((p) => ({ ...p, [name]: value }));
+  };
+
+  const createEvent = async (e) => {
+    e.preventDefault();
 
     if (!form.title || !form.date) {
       alert("Título y fecha son obligatorios.");
       return;
     }
 
-    setIsSubmitting(true);
-
+    setSubmitting(true);
     try {
       const startsAt = new Date(`${form.date}T${form.time || "21:00"}:00`);
 
@@ -90,10 +153,75 @@ export default function AdminEventsPage() {
         return;
       }
 
-      alert("Evento creado correctamente 🙌");
+      alert("Evento creado ✅");
       setForm(initialForm);
+      await loadEvents();
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false);
+    }
+  };
+
+  const importFrontEvents = async () => {
+    setImporting(true);
+    try {
+      // Re-cargar en caliente para duplicados correctos
+      const { data: current, error: currentErr } = await supabase
+        .from("events")
+        .select("title, starts_at, venue, city");
+
+      if (currentErr) {
+        console.error(currentErr);
+        alert("No se pudo cargar eventos actuales.");
+        return;
+      }
+
+      const currentSet = new Set(
+        (current || []).map((e) =>
+          `${e.title || ""}|${e.starts_at || ""}|${e.venue || ""}|${e.city || ""}`.toLowerCase()
+        )
+      );
+
+      const toInsert = [];
+      for (const ev of FRONT_EVENTS) {
+        const startsAtIso = ev.dateISO ? new Date(ev.dateISO).toISOString() : null;
+        const { venue, city } = parseLocation(ev.location);
+
+        const key = `${ev.title || ""}|${startsAtIso || ""}|${venue || ""}|${city || ""}`.toLowerCase();
+        if (currentSet.has(key)) continue;
+
+        toInsert.push({
+          title: ev.title || null,
+          category: ev.category || null,
+          venue,
+          city,
+          image_url: null,
+          starts_at: startsAtIso,
+        });
+      }
+
+      if (toInsert.length === 0) {
+        alert("No hay eventos nuevos para importar (ya estaban creados).");
+        return;
+      }
+
+      // Insert en chunks para no reventar límites
+      const chunks = chunkArray(toInsert, 50);
+      let inserted = 0;
+
+      for (const chunk of chunks) {
+        const { error } = await supabase.from("events").insert(chunk);
+        if (error) {
+          console.error(error);
+          alert("Falló la importación en una tanda. Revisa consola.");
+          return;
+        }
+        inserted += chunk.length;
+      }
+
+      alert(`Importados ${inserted} eventos ✅`);
+      await loadEvents();
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -101,161 +229,165 @@ export default function AdminEventsPage() {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-gray-100 text-sm text-gray-700">
-          Validando permisos de administrador...
+          Verificando acceso...
         </div>
       </main>
     );
   }
 
-  if (!isAdmin) {
-    return null; // el redirect ya corrió en el useEffect
-  }
+  if (!isAdmin) return null;
 
   return (
     <main className="min-h-screen bg-gray-50 py-10">
-      <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Admin · Crear evento
-          </h1>
+      <div className="mx-auto max-w-5xl px-4">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Admin · Eventos</h1>
+            <p className="mt-1 text-sm text-gray-600">
+              Crea eventos para que aparezcan en /sell y /events.
+            </p>
+          </div>
+
           <button
-            type="button"
-            onClick={() => router.back()}
-            className="text-sm text-gray-500 hover:text-gray-700"
+            onClick={importFrontEvents}
+            disabled={importing}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
           >
-            ← Volver
+            {importing ? "Importando..." : "Importar eventos del listado (front)"}
           </button>
-        </div>
+        </header>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Título */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              Título del evento *
-            </label>
-            <input
-              type="text"
-              name="title"
-              value={form.title}
-              onChange={handleChange}
-              placeholder="Ej: Bad Bunny, Chayanne, AC/DC..."
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
+        <section className="mt-6 rounded-2xl bg-white border border-gray-100 p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Crear evento manual</h2>
 
-          {/* Categoría */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              Categoría / género
-            </label>
-            <input
-              type="text"
-              name="category"
-              value={form.category}
-              onChange={handleChange}
-              placeholder="Pop, Rock, Reggaetón, Electrónica..."
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
+          <form onSubmit={createEvent} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Título *</label>
+              <input
+                name="title"
+                value={form.title}
+                onChange={onChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder="Ej: Chayanne"
+                required
+              />
+            </div>
 
-          {/* Fecha y hora */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Fecha *
-              </label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Categoría</label>
+              <input
+                name="category"
+                value={form.category}
+                onChange={onChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder="Pop, Rock, Festival..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Fecha *</label>
               <input
                 type="date"
                 name="date"
                 value={form.date}
-                onChange={handleChange}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={onChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                 required
               />
             </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Hora
-              </label>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Hora</label>
               <input
                 type="time"
                 name="time"
                 value={form.time}
-                onChange={handleChange}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={onChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
               />
             </div>
-          </div>
 
-          {/* Recinto y ciudad */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Recinto
-              </label>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Recinto</label>
               <input
-                type="text"
                 name="venue"
                 value={form.venue}
-                onChange={handleChange}
-                placeholder="Movistar Arena, Estadio Nacional..."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={onChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder="Estadio Nacional"
               />
             </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Ciudad
-              </label>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Ciudad</label>
               <input
-                type="text"
                 name="city"
                 value={form.city}
-                onChange={handleChange}
-                placeholder="Santiago, Concepción, Viña del Mar..."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={onChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder="Santiago"
               />
             </div>
-          </div>
 
-          {/* Imagen opcional */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              URL de imagen (opcional)
-            </label>
-            <input
-              type="text"
-              name="image_url"
-              value={form.image_url}
-              onChange={handleChange}
-              placeholder="https://..."
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-            <p className="text-xs text-gray-500">
-              Más adelante podemos integrar subida directa a Supabase Storage.
-            </p>
-          </div>
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700">Imagen URL</label>
+              <input
+                name="image_url"
+                value={form.image_url}
+                onChange={onChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                placeholder="https://..."
+              />
+            </div>
 
-          <div className="pt-4 flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={() => setForm(initialForm)}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              disabled={isSubmitting}
-            >
-              Limpiar
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              {isSubmitting ? "Guardando..." : "Crear evento"}
-            </button>
-          </div>
-        </form>
+            <div className="md:col-span-2 flex justify-end">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {submitting ? "Guardando..." : "Crear evento"}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="mt-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">Eventos en backend</h2>
+
+          {loadingEvents ? (
+            <div className="text-sm text-gray-500">Cargando eventos...</div>
+          ) : events.length === 0 ? (
+            <div className="rounded-2xl bg-white border border-gray-100 p-6 text-sm text-gray-600 shadow-sm">
+              No hay eventos aún. Usa el botón de importar o crea uno manual.
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {events.map((e) => (
+                <div
+                  key={e.id}
+                  className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-gray-900">{e.title || "Evento"}</p>
+                      <p className="mt-1 text-sm text-gray-600">
+                        📅 {formatDate(e.starts_at)}
+                        <br />
+                        📍 {(e.venue || "Recinto") + (e.city ? ` · ${e.city}` : "")}
+                      </p>
+                      {e.category ? (
+                        <p className="mt-2 text-xs text-gray-500">Categoría: {e.category}</p>
+                      ) : null}
+                    </div>
+                    <span className="text-xs text-gray-400">{String(e.id).slice(0, 8)}…</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </main>
   );
 }
-
