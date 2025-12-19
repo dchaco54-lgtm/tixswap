@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabaseClient';
-import { EVENTS } from '../lib/events';
 
 type SaleType = 'fixed' | 'auction';
 
@@ -20,6 +19,44 @@ interface SellFormState {
   emergencyAuction: boolean;
 }
 
+type DbEvent = {
+  id: string;
+  title: string | null;
+  starts_at: string | null;
+  venue: string | null;
+  city: string | null;
+};
+
+function formatEventDisplay(ev: DbEvent) {
+  const title = ev.title ?? 'Evento';
+  const venue = ev.venue ?? '';
+  const city = ev.city ?? '';
+  const place = [venue, city].filter(Boolean).join(' · ');
+
+  let dateDisplay = '';
+  if (ev.starts_at) {
+    const d = new Date(ev.starts_at);
+    // Esto funciona bien en Vercel/Node normalmente
+    dateDisplay = d.toLocaleString('es-CL', {
+      year: 'numeric',
+      month: 'long',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } else {
+    dateDisplay = 'Fecha por confirmar';
+  }
+
+  return `${title} — ${dateDisplay}${place ? ` — ${place}` : ''}`;
+}
+
+function isMissingColumnError(err: any) {
+  const msg = String(err?.message || '').toLowerCase();
+  const code = String(err?.code || '');
+  return code === '42703' || (msg.includes('column') && msg.includes('does not exist'));
+}
+
 export default function SellPage() {
   return <SellForm />;
 }
@@ -27,6 +64,11 @@ export default function SellPage() {
 function SellForm() {
   const router = useRouter();
   const [step] = useState(1);
+
+  const [authChecking, setAuthChecking] = useState(true);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [events, setEvents] = useState<DbEvent[]>([]);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [state, setState] = useState<SellFormState>({
@@ -42,13 +84,62 @@ function SellForm() {
     emergencyAuction: false,
   });
 
+  // ✅ Exigir login
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user) {
+          router.replace('/login');
+          return;
+        }
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+
+    initAuth();
+  }, [router]);
+
+  // ✅ Traer eventos reales desde Supabase
+  useEffect(() => {
+    const loadEvents = async () => {
+      setEventsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('events')
+          .select('id, title, starts_at, venue, city')
+          .order('starts_at', { ascending: true });
+
+        if (error) {
+          console.error('Error cargando events:', error);
+          setEvents([]);
+          return;
+        }
+
+        setEvents((data as DbEvent[]) ?? []);
+      } finally {
+        setEventsLoading(false);
+      }
+    };
+
+    loadEvents();
+  }, []);
+
+  const eventOptions = useMemo(() => {
+    return events.map((ev) => ({
+      id: ev.id,
+      label: formatEventDisplay(ev),
+    }));
+  }, [events]);
+
   const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) => {
     const { name, value, type, checked } = e.target as any;
-
     setState((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
@@ -60,79 +151,101 @@ function SellForm() {
     setIsSubmitting(true);
 
     try {
+      // Validaciones
       if (!state.eventId) {
         alert('Selecciona un evento.');
-        return;
-      }
-      if (!state.title.trim()) {
-        alert('Escribe un título.');
         return;
       }
 
       const price = Number(state.salePrice);
       if (!Number.isFinite(price) || price <= 0) {
-        alert('Ingresa un precio de venta válido.');
+        alert('Ingresa un precio válido.');
         return;
       }
 
-      const originalPrice =
-        state.originalPrice && Number(state.originalPrice) > 0
-          ? Number(state.originalPrice)
-          : null;
-
-      // Intentamos traer usuario; si no hay, igual intentamos insertar (depende de tus RLS)
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
+      if (!user) {
+        router.replace('/login');
+        return;
+      }
+
       const sellerName =
-        (user?.user_metadata as any)?.full_name ||
-        (user?.user_metadata as any)?.name ||
-        user?.email ||
+        (user.user_metadata as any)?.full_name ||
+        (user.user_metadata as any)?.name ||
+        user.email ||
         'Vendedor';
 
-      const payload: any = {
+      // ✅ Payload base (probablemente coincide con tu tabla tickets)
+      const basePayload: any = {
         event_id: state.eventId,
-        title: state.title,
-        description: state.description || null,
         sector: state.sector || null,
         row_label: state.row || null,
         seat_label: state.seat || null,
         price,
-        original_price: originalPrice,
-        sale_type: state.saleType,
         seller_name: sellerName,
       };
 
-      // Si existe user, guardamos datos del vendedor (si tienes esas columnas)
-      if (user) {
-        payload.seller_id = user.id;
-        payload.seller_email = user.email;
+      // ✅ Payload extendido (si tu tabla tiene estas columnas)
+      const extendedPayload: any = {
+        ...basePayload,
+        title: state.title || null,
+        description: state.description || null,
+        original_price: state.originalPrice ? Number(state.originalPrice) : null,
+        sale_type: state.saleType,
+        seller_id: user.id,
+        seller_email: user.email,
+      };
+
+      // Intento 1: insert extendido
+      let { error } = await supabase.from('tickets').insert(extendedPayload);
+
+      // Si falla por columnas no existentes, hacemos fallback al base
+      if (error && isMissingColumnError(error)) {
+        console.warn('Fallback insert basePayload (faltan columnas en tickets).', error);
+        const res2 = await supabase.from('tickets').insert(basePayload);
+        error = res2.error ?? null;
       }
 
-      const { error } = await supabase.from('tickets').insert(payload);
-
       if (error) {
-        // Si tu RLS exige login, caería aquí cuando user=null
-        if (!user) {
-          alert('Para publicar necesitas iniciar sesión.');
-          router.push('/login');
-          return;
-        }
-        console.error(error);
-        alert('No se pudo crear la publicación.');
+        console.error('Error insert ticket:', error);
+
+        // Mensaje útil para debug
+        const msg = [
+          error.message ? `Mensaje: ${error.message}` : null,
+          error.code ? `Code: ${error.code}` : null,
+          error.details ? `Details: ${error.details}` : null,
+          error.hint ? `Hint: ${error.hint}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        alert(`No se pudo crear la publicación.\n\n${msg}`);
         return;
       }
 
-      // ✅ Sub-evento: agrupar por event_id en /events/[eventId]
+      // ✅ Redirigir al "sub-evento" (agrupación)
       router.push(`/events/${state.eventId}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Ocurrió un error al crear la publicación.');
+      alert('Ocurrió un error inesperado al crear la publicación.');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  // UI loading states
+  if (authChecking) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-gray-100 text-sm text-gray-700">
+          Revisando sesión...
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-10">
@@ -157,26 +270,37 @@ function SellForm() {
             Detalles de la entrada
           </h2>
 
+          {/* Evento */}
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">
               Evento *
             </label>
-            <select
-              name="eventId"
-              value={state.eventId}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-              required
-            >
-              <option value="">Selecciona un evento</option>
-              {EVENTS.map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.title} — {event.date} — {event.location}
-                </option>
-              ))}
-            </select>
+
+            {eventsLoading ? (
+              <div className="text-sm text-gray-500">Cargando eventos...</div>
+            ) : eventOptions.length === 0 ? (
+              <div className="text-sm text-red-600">
+                No hay eventos en el backend. Crea uno en <b>/admin/events</b>.
+              </div>
+            ) : (
+              <select
+                name="eventId"
+                value={state.eventId}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                required
+              >
+                <option value="">Selecciona un evento</option>
+                {eventOptions.map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
+          {/* Título entrada */}
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">
               Título de la entrada *
@@ -192,6 +316,7 @@ function SellForm() {
             />
           </div>
 
+          {/* Descripción */}
           <div className="space-y-1">
             <label className="block text-sm font-medium text-gray-700">
               Descripción
@@ -206,6 +331,7 @@ function SellForm() {
             />
           </div>
 
+          {/* Sector / Fila / Asiento */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
@@ -216,7 +342,7 @@ function SellForm() {
                 name="sector"
                 value={state.sector}
                 onChange={handleChange}
-                placeholder="Campo, Platea, etc."
+                placeholder="Cancha, Platea, etc."
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -248,6 +374,7 @@ function SellForm() {
             </div>
           </div>
 
+          {/* Precios */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="block text-sm font-medium text-gray-700">
@@ -274,22 +401,22 @@ function SellForm() {
                 name="originalPrice"
                 value={state.originalPrice}
                 onChange={handleChange}
-                placeholder="60000"
+                placeholder="65000"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
           </div>
 
+          {/* Tipo de venta */}
           <div className="space-y-3">
             <label className="block text-sm font-medium text-gray-700">
               Tipo de venta
             </label>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() =>
-                  setState((prev) => ({ ...prev, saleType: 'fixed' }))
-                }
+                onClick={() => setState((p) => ({ ...p, saleType: 'fixed' }))}
                 className={`flex flex-col items-start rounded-xl border px-4 py-3 text-left text-sm transition ${
                   state.saleType === 'fixed'
                     ? 'border-blue-500 bg-blue-50'
@@ -315,6 +442,7 @@ function SellForm() {
                 </span>
               </button>
             </div>
+
             <p className="text-xs text-gray-500">
               Para el MVP solo permitimos venta a precio fijo. Más adelante
               activamos la subasta con pre-autorización para que no tengas que
@@ -322,29 +450,7 @@ function SellForm() {
             </p>
           </div>
 
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
-            <div className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                disabled
-                name="emergencyAuction"
-                checked={state.emergencyAuction}
-                onChange={handleChange}
-                className="mt-[2px]"
-              />
-              <div>
-                <p className="font-semibold">
-                  Subasta automática de emergencia (próximamente)
-                </p>
-                <p>
-                  Si tu entrada no se vende, se activará automáticamente una
-                  subasta pocas horas antes del evento. Te avisaremos por correo
-                  cada vez que tu oferta sea superada.
-                </p>
-              </div>
-            </div>
-          </div>
-
+          {/* Botones */}
           <div className="flex justify-between pt-4">
             <button
               type="button"
@@ -353,9 +459,10 @@ function SellForm() {
             >
               Cancelar
             </button>
+
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || eventsLoading || eventOptions.length === 0}
               className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
               {isSubmitting ? 'Guardando...' : 'Continuar'}
