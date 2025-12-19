@@ -1,179 +1,279 @@
 // app/events/[id]/page.jsx
+"use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { supabase } from "../../lib/supabaseClient";
 
-export const revalidate = 30;
-
-function formatDate(iso) {
-  if (!iso) return "Fecha por confirmar";
-  const d = new Date(iso);
-  return d.toLocaleString("es-CL", {
-    year: "numeric",
-    month: "long",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+function formatDateTime(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return new Intl.DateTimeFormat("es-CL", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(d);
+  } catch {
+    return String(iso);
+  }
 }
 
-async function getEventAndTickets(id) {
-  const { data: event, error: eventError } = await supabase
-    .from("events")
-    .select("id, title, starts_at, venue, city")
-    .eq("id", id)
-    .single();
-
-  if (eventError || !event) {
-    console.error("Error cargando evento:", eventError);
-    return { event: null, tickets: [] };
-  }
-
-  const { data: tickets, error: ticketsError } = await supabase
-    .from("tickets")
-    .select("id, sector, row_label, seat_label, price, seller_name, title, description, status")
-    .eq("event_id", id)
-    .eq("status", "active")
-    .order("price", { ascending: true });
-
-  if (ticketsError) {
-    console.error("Error cargando tickets:", ticketsError);
-  }
-
-  return { event, tickets: tickets ?? [] };
+function toNumber(x) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : null;
 }
 
-export default async function EventPage({ params }) {
-  const { id } = params;
-  const { event, tickets } = await getEventAndTickets(id);
+export default function EventDetailPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useParams();
+  const id = params?.id;
 
-  if (!event) notFound();
+  const [userChecked, setUserChecked] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [event, setEvent] = useState(null);
+  const [tickets, setTickets] = useState([]);
+  const [error, setError] = useState("");
 
-  const sectors = Array.from(new Set((tickets || []).map((t) => t.sector).filter(Boolean)));
+  const [sectorFilter, setSectorFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("price_asc");
 
-  return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        <Link href="/events" className="text-sm text-gray-500 hover:text-gray-700">
+  // Auth guard
+  useEffect(() => {
+    const guard = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!data?.user) {
+        router.replace(`/login?redirectTo=${encodeURIComponent(pathname || `/events/${id}`)}`);
+        return;
+      }
+      setUserChecked(true);
+    };
+    guard();
+  }, [router, pathname, id]);
+
+  // Load event + tickets
+  useEffect(() => {
+    if (!userChecked || !id) return;
+
+    const load = async () => {
+      setLoading(true);
+      setError("");
+
+      const { data: ev, error: evErr } = await supabase
+        .from("events")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (evErr) {
+        setError("No pudimos cargar el evento.");
+        setEvent(null);
+        setTickets([]);
+        setLoading(false);
+        return;
+      }
+
+      setEvent(ev);
+
+      const { data: tks, error: tkErr } = await supabase
+        .from("tickets")
+        .select("*")
+        .eq("event_id", id)
+        .order("price", { ascending: true });
+
+      if (tkErr) {
+        setTickets([]);
+      } else {
+        setTickets(Array.isArray(tks) ? tks : []);
+      }
+
+      setLoading(false);
+    };
+
+    load();
+  }, [userChecked, id]);
+
+  const sectors = useMemo(() => {
+    const set = new Set();
+    (tickets || []).forEach((t) => {
+      if (t?.sector) set.add(t.sector);
+    });
+    return ["all", ...Array.from(set)];
+  }, [tickets]);
+
+  const filteredTickets = useMemo(() => {
+    let list = [...(tickets || [])];
+
+    if (sectorFilter !== "all") {
+      list = list.filter((t) => t?.sector === sectorFilter);
+    }
+
+    if (sortBy === "price_asc") {
+      list.sort((a, b) => (toNumber(a?.price) ?? 0) - (toNumber(b?.price) ?? 0));
+    }
+    if (sortBy === "price_desc") {
+      list.sort((a, b) => (toNumber(b?.price) ?? 0) - (toNumber(a?.price) ?? 0));
+    }
+
+    return list;
+  }, [tickets, sectorFilter, sortBy]);
+
+  if (!userChecked) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando…</div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando evento…</div>
+    );
+  }
+
+  if (error || !event) {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-16">
+        <Link href="/events" className="text-sm text-slate-600 hover:text-blue-600">
           ← Volver a eventos
         </Link>
-
-        <section className="mt-4 rounded-2xl bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-2xl font-semibold text-gray-900">
-                {event.title || "Evento"}
-              </h1>
-              <p className="mt-2 text-gray-700">
-                📅 {formatDate(event.starts_at)}
-                <br />
-                📍 {(event.venue || "Recinto") + (event.city ? ` · ${event.city}` : "")}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-              <p className="font-medium">Reventa segura en TixSwap</p>
-              <p className="mt-1 text-xs text-gray-500">
-                Pagas solo cuando el vendedor sube la entrada y la validamos.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-6 grid gap-6 md:grid-cols-[2fr,1fr]">
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Entradas disponibles
-              </h2>
-
-              <div className="flex flex-wrap gap-2 text-sm">
-                <select className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm">
-                  <option>Todos los sectores</option>
-                  {sectors.map((sector) => (
-                    <option key={sector}>{sector}</option>
-                  ))}
-                </select>
-
-                <select className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm">
-                  <option>Precio: menor a mayor</option>
-                  <option>Precio: mayor a menor</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              {tickets.length > 0 ? (
-                tickets.map((ticket) => {
-                  const seatText =
-                    ticket.row_label || ticket.seat_label
-                      ? `Fila ${ticket.row_label ?? "-"}, asiento ${ticket.seat_label ?? "-"}`
-                      : "Asientos sin numerar";
-
-                  return (
-                    <article
-                      key={ticket.id}
-                      className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {(ticket.sector || "Sector")} · {seatText}
-                        </p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {ticket.seller_name
-                            ? `Publicado por ${ticket.seller_name}`
-                            : "Publicado por un vendedor"}
-                        </p>
-                        {ticket.title ? (
-                          <p className="mt-1 text-xs text-gray-600">
-                            {ticket.title}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <div className="text-right">
-                        <p className="text-base font-semibold text-emerald-600">
-                          ${Number(ticket.price).toLocaleString("es-CL")}
-                        </p>
-                        <button className="mt-2 rounded-full bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
-                          Comprar
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-gray-500">
-                  Todavía no hay publicaciones para este evento.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <aside className="space-y-4">
-            <div className="rounded-2xl bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900">
-                Cómo funciona TixSwap
-              </h3>
-              <ol className="mt-2 space-y-1 text-xs text-gray-600">
-                <li>1. Pagas y el vendedor sube su entrada.</li>
-                <li>2. La revisamos y la dejamos en tu correo.</li>
-                <li>3. Si algo no calza, te devolvemos la plata.</li>
-              </ol>
-            </div>
-
-            <div className="rounded-2xl bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900">
-                Recomendaciones del vendedor
-              </h3>
-              <p className="mt-2 text-xs text-gray-600">
-                Esto después lo conectamos a un sistema de reputación real.
-              </p>
-            </div>
-          </aside>
-        </section>
+        <p className="mt-6 text-slate-700">{error || "Evento no encontrado."}</p>
       </div>
-    </main>
+    );
+  }
+
+  const title = event?.title || event?.name || "Evento";
+  const dateLabel = formatDateTime(event?.starts_at || event?.date);
+  const venue = event?.venue || event?.location || "";
+  const city = event?.city || "";
+
+  return (
+    <div className="max-w-6xl mx-auto px-4 py-12">
+      <Link href="/events" className="text-sm text-slate-600 hover:text-blue-600">
+        ← Volver a eventos
+      </Link>
+
+      <div className="mt-6 bg-white border rounded-xl p-6 shadow-sm flex items-start justify-between gap-6">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">{title}</h1>
+          <div className="mt-3 text-slate-700 space-y-1">
+            {dateLabel && <p>📅 {dateLabel}</p>}
+            {(venue || city) && (
+              <p>
+                📍 {venue}
+                {venue && city ? " · " : ""}
+                {city}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="hidden md:block bg-slate-50 border rounded-xl px-5 py-4 text-sm text-slate-700">
+          <p className="font-semibold">Reventa segura en TixSwap</p>
+          <p className="mt-1">
+            Pagas solo cuando el vendedor sube la entrada y la validamos.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <h2 className="text-xl font-semibold text-slate-900">Entradas disponibles</h2>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <select
+                value={sectorFilter}
+                onChange={(e) => setSectorFilter(e.target.value)}
+                className="border rounded-xl px-4 py-2"
+              >
+                {sectors.map((s) => (
+                  <option key={s} value={s}>
+                    {s === "all" ? "Todos los sectores" : s}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className="border rounded-xl px-4 py-2"
+              >
+                <option value="price_asc">Precio: menor a mayor</option>
+                <option value="price_desc">Precio: mayor a menor</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-4">
+            {filteredTickets.length === 0 ? (
+              <div className="text-slate-600">
+                Aún no hay entradas publicadas para este evento.
+              </div>
+            ) : (
+              filteredTickets.map((t) => (
+                <div
+                  key={t.id}
+                  className="border rounded-xl p-5 bg-white shadow-sm flex items-center justify-between gap-4"
+                >
+                  <div>
+                    <p className="font-semibold text-slate-900">
+                      {t?.title || "Entrada"}
+                      {t?.sector ? ` · ${t.sector}` : ""}
+                      {t?.row ? ` · Fila ${t.row}` : ""}
+                      {t?.seat ? `, asiento ${t.seat}` : ""}
+                    </p>
+
+                    {t?.description && (
+                      <p className="mt-1 text-sm text-slate-600">{t.description}</p>
+                    )}
+
+                    {t?.seller_name && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Publicado por {t.seller_name}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-lg font-bold text-green-700">
+                      ${Number(t?.price || 0).toLocaleString("es-CL")}
+                    </p>
+                    <button
+                      className="mt-2 bg-green-600 text-white px-4 py-2 rounded-xl font-semibold hover:opacity-90"
+                      onClick={() => alert("Compra (MVP): próximamente")}
+                    >
+                      Comprar
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <aside className="space-y-4">
+          <div className="bg-white border rounded-xl p-5 shadow-sm">
+            <h3 className="font-semibold text-slate-900">Cómo funciona TixSwap</h3>
+            <ol className="mt-3 text-sm text-slate-700 space-y-2 list-decimal list-inside">
+              <li>Pagas y el vendedor sube su entrada.</li>
+              <li>La revisamos y la dejamos en tu correo.</li>
+              <li>Si algo no calza, te devolvemos la plata.</li>
+            </ol>
+          </div>
+
+          <div className="bg-white border rounded-xl p-5 shadow-sm">
+            <h3 className="font-semibold text-slate-900">Recomendaciones del vendedor</h3>
+            <p className="mt-2 text-sm text-slate-700">
+              Esto después lo conectamos a un sistema de reputación real.
+            </p>
+          </div>
+        </aside>
+      </div>
+    </div>
   );
 }
+
