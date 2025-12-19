@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 export const revalidate = 30;
 
@@ -32,8 +32,9 @@ async function getEventAndTickets(id) {
 
   const { data: tickets, error: ticketsError } = await supabase
     .from("tickets")
-    .select("id, sector, row_label, seat_label, price, seller_name, seller_rating")
+    .select("id, sector, row_label, seat_label, price, seller_name, title, description, status")
     .eq("event_id", id)
+    .eq("status", "active")
     .order("price", { ascending: true });
 
   if (ticketsError) {
@@ -49,9 +50,7 @@ export default async function EventPage({ params }) {
 
   if (!event) notFound();
 
-  const sectors = Array.from(
-    new Set((tickets || []).map((t) => t.sector).filter(Boolean))
-  );
+  const sectors = Array.from(new Set((tickets || []).map((t) => t.sector).filter(Boolean)));
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -76,7 +75,7 @@ export default async function EventPage({ params }) {
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
               <p className="font-medium">Reventa segura en TixSwap</p>
               <p className="mt-1 text-xs text-gray-500">
-                Pagas solo cuando el vendedor sube su entrada y la validamos.
+                Pagas solo cuando el vendedor sube la entrada y la validamos.
               </p>
             </div>
           </div>
@@ -119,16 +118,18 @@ export default async function EventPage({ params }) {
                     >
                       <div>
                         <p className="text-sm font-medium text-gray-900">
-                          {ticket.sector} · {seatText}
+                          {(ticket.sector || "Sector")} · {seatText}
                         </p>
                         <p className="mt-1 text-xs text-gray-500">
                           {ticket.seller_name
                             ? `Publicado por ${ticket.seller_name}`
-                            : "Vendedor TixSwap"}
-                          {ticket.seller_rating
-                            ? ` · ${Number(ticket.seller_rating).toFixed(1)}★`
-                            : ""}
+                            : "Publicado por un vendedor"}
                         </p>
+                        {ticket.title ? (
+                          <p className="mt-1 text-xs text-gray-600">
+                            {ticket.title}
+                          </p>
+                        ) : null}
                       </div>
 
                       <div className="text-right">
@@ -160,6 +161,15 @@ export default async function EventPage({ params }) {
                 <li>2. La revisamos y la dejamos en tu correo.</li>
                 <li>3. Si algo no calza, te devolvemos la plata.</li>
               </ol>
+            </div>
+
+            <div className="rounded-2xl bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Recomendaciones del vendedor
+              </h3>
+              <p className="mt-2 text-xs text-gray-600">
+                Esto después lo conectamos a un sistema de reputación real.
+              </p>
             </div>
           </aside>
         </section>
