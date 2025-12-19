@@ -1,509 +1,567 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type EventRow = {
   id: string;
-  name: string;
-  date: string;
-  location: string;
+  title: string;
+  date: string | null;
+  location: string | null;
   category?: string | null;
   image_url?: string | null;
 };
 
+type Step = 1 | 2 | 3;
+
 export default function SellPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
-  const redirectTo = searchParams.get('redirectTo') || '/sell';
+  const [step, setStep] = useState<Step>(1);
 
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
 
-  // Wizard
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-
-  // Events
   const [events, setEvents] = useState<EventRow[]>([]);
-  const [eventId, setEventId] = useState('');
-  const [eventNotListed, setEventNotListed] = useState(false);
-  const [newEventName, setNewEventName] = useState('');
-  const [newEventDate, setNewEventDate] = useState('');
-  const [newEventLocation, setNewEventLocation] = useState('');
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState<string | null>(null);
 
-  // Ticket fields
-  const [title, setTitle] = useState('');
+  const [eventNotInList, setEventNotInList] = useState(false);
+
+  // Caso 1: evento existente
+  const [eventId, setEventId] = useState('');
+
+  // Caso 2: evento no existente (solicitud a soporte)
+  const [customEventName, setCustomEventName] = useState('');
+  const [customEventDate, setCustomEventDate] = useState('');
+  const [customEventLocation, setCustomEventLocation] = useState('');
+
+  // Datos entrada
+  const [ticketTitle, setTicketTitle] = useState('');
   const [description, setDescription] = useState('');
   const [sector, setSector] = useState('');
   const [row, setRow] = useState('');
   const [seat, setSeat] = useState('');
-  const [price, setPrice] = useState('');
-  const [originalPrice, setOriginalPrice] = useState('');
 
-  // File
+  const [price, setPrice] = useState<number | ''>('');
+  const [originalPrice, setOriginalPrice] = useState<number | ''>('');
+  const [saleType, setSaleType] = useState<'fixed' | 'auction'>('fixed');
+
+  // Archivo
   const [file, setFile] = useState<File | null>(null);
 
-  useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      setError(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        router.push(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === eventId) || null,
+    [events, eventId]
+  );
+
+  useEffect(() => {
+    (async () => {
+      setLoadingUser(true);
+      const { data, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error('[sell] getUser error', error);
+      }
+      const u = data?.user ?? null;
+
+      if (!u) {
+        router.replace('/login?redirect=/sell');
         return;
       }
 
-      const { data, error: eventsError } = await supabase
+      setUserId(u.id);
+      setLoadingUser(false);
+    })();
+  }, [router]);
+
+  const fetchEvents = async () => {
+    setEventsLoading(true);
+    setEventsError(null);
+    try {
+      const { data, error } = await supabase
         .from('events')
-        .select('id,name,date,location,category,image_url')
+        .select('id,title,date,location,category,image_url')
         .order('date', { ascending: true });
 
-      if (eventsError) {
-        setError('No pude cargar los eventos. Intenta de nuevo.');
-      } else {
-        setEvents((data || []) as EventRow[]);
-      }
+      if (error) throw error;
 
-      setLoading(false);
+      setEvents((data as EventRow[]) || []);
+    } catch (e: any) {
+      console.error('[sell] fetchEvents error:', e);
+      setEvents([]);
+      setEventsError(e?.message || 'No pude cargar los eventos. Intenta de nuevo.');
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!loadingUser) fetchEvents();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingUser]);
+
+  const canGoNextFromStep1 = useMemo(() => {
+    if (eventNotInList) {
+      return (
+        customEventName.trim().length >= 3 &&
+        customEventDate.trim().length >= 6 &&
+        customEventLocation.trim().length >= 3 &&
+        ticketTitle.trim().length >= 3 &&
+        price !== '' &&
+        Number(price) > 0
+      );
+    }
+    return eventId && ticketTitle.trim().length >= 3 && price !== '' && Number(price) > 0;
+  }, [
+    eventNotInList,
+    customEventName,
+    customEventDate,
+    customEventLocation,
+    eventId,
+    ticketTitle,
+    price,
+  ]);
+
+  const goToStep = (n: Step) => {
+    setSaveError(null);
+    setStep(n);
+  };
+
+  const uploadTicketFile = async (ownerId: string) => {
+    if (!file) return null;
+
+    // Bucket recomendado: "tickets" (o el que estés usando)
+    const ext = file.name.split('.').pop() || 'file';
+    const safeExt = ext.toLowerCase();
+    const path = `${ownerId}/${crypto.randomUUID()}.${safeExt}`;
+
+    const { error } = await supabase.storage.from('tickets').upload(path, file, {
+      upsert: false,
+      cacheControl: '3600',
+    });
+
+    if (error) throw error;
+    return path;
+  };
+
+  const createSupportTicketIfNeeded = async (ticketId: string) => {
+    if (!eventNotInList) return;
+
+    const payload = {
+      type: 'missing_event',
+      status: 'open',
+      ticket_id: ticketId,
+      requested_event_name: customEventName.trim(),
+      requested_event_date: customEventDate.trim(),
+      requested_event_location: customEventLocation.trim(),
+      message: `Usuario publicó entrada con evento no listado. Crear evento y asociar entrada ${ticketId}.`,
     };
 
-    init();
-  }, [router, redirectTo]);
+    const { error } = await supabase.from('support_tickets').insert(payload);
+    if (error) throw error;
 
-  const eventOptions = useMemo(() => {
-    return events.map((e) => ({
-      value: e.id,
-      label: `${e.name} — ${new Date(e.date).toLocaleDateString('es-CL')} · ${e.location}`,
-    }));
-  }, [events]);
-
-  const canGoStep2 = useMemo(() => {
-    if (eventNotListed) {
-      return Boolean(newEventName.trim() && newEventDate && newEventLocation.trim() && title.trim() && price);
-    }
-    return Boolean(eventId && title.trim() && price);
-  }, [eventNotListed, newEventName, newEventDate, newEventLocation, eventId, title, price]);
-
-  const canSubmit = useMemo(() => {
-    // File is optional for now (pero recomendado)
-    return true;
-  }, []);
-
-  const money = (s: string) => {
-    const n = Number(String(s).replace(/[^0-9]/g, ''));
-    if (!Number.isFinite(n) || n <= 0) return null;
-    return n;
+    // Si después conectas correo, aquí disparas un endpoint /api/notify-support
   };
 
-  const onNext = () => {
-    setError(null);
-    setSuccess(null);
-    if (step === 1) {
-      if (!canGoStep2) {
-        setError('Te falta completar lo básico: evento + título + precio.');
-        return;
-      }
-      setStep(2);
-      return;
-    }
-    if (step === 2) {
-      setStep(3);
-    }
-  };
-
-  const onBack = () => {
-    setError(null);
-    setSuccess(null);
-    if (step === 3) return setStep(2);
-    if (step === 2) return setStep(1);
-  };
-
-  const handleSubmit = async () => {
-    setError(null);
-    setSuccess(null);
-    setSubmitting(true);
+  const handlePublish = async () => {
+    if (!userId) return;
+    setSaving(true);
+    setSaveError(null);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData.session;
-      if (!session) {
-        router.push(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
-        return;
+      const filePath = await uploadTicketFile(userId);
+
+      // Si no está en listado, lo dejamos sin event_id por ahora (null)
+      const finalEventId = eventNotInList ? null : eventId;
+
+      const insertPayload: any = {
+        event_id: finalEventId,
+        title: ticketTitle.trim(),
+        description: description.trim() || null,
+        sector: sector.trim() || null,
+        row: row.trim() || null,
+        seat: seat.trim() || null,
+        price: Number(price),
+        original_price: originalPrice === '' ? null : Number(originalPrice),
+        sale_type: saleType,
+        owner_id: userId,
+        status: 'published',
+        file_path: filePath,
+      };
+
+      // Datos extra para soporte si evento no existe
+      if (eventNotInList) {
+        insertPayload.requested_event_name = customEventName.trim();
+        insertPayload.requested_event_date = customEventDate.trim();
+        insertPayload.requested_event_location = customEventLocation.trim();
       }
 
-      const user = session.user;
-      const sellerName =
-        user?.user_metadata?.name || user?.user_metadata?.full_name || user?.email || 'Usuario';
-
-      // 1) Create event if not listed
-      let finalEventId = eventId;
-      if (eventNotListed) {
-        const { data: createdEvent, error: createEventError } = await supabase
-          .from('events')
-          .insert({
-            name: newEventName.trim(),
-            date: newEventDate,
-            location: newEventLocation.trim(),
-            category: 'Pendiente',
-          })
-          .select('id')
-          .single();
-
-        if (createEventError) {
-          throw new Error('No pude crear el evento.');
-        }
-        finalEventId = createdEvent.id;
-
-        // Aviso a soporte
-        await supabase.from('support_tickets').insert({
-          user_id: user.id,
-          category: 'Nuevo evento',
-          subject: `Crear/validar evento: ${newEventName.trim()}`,
-          message:
-            `Se creó un evento "Pendiente" desde /sell.\n` +
-            `Evento: ${newEventName.trim()}\n` +
-            `Fecha: ${newEventDate}\n` +
-            `Lugar: ${newEventLocation.trim()}\n` +
-            `User: ${sellerName} (${user.email})\n` +
-            `EventId: ${finalEventId}`,
-        });
-      }
-
-      if (!finalEventId) {
-        throw new Error('Selecciona un evento.');
-      }
-
-      const priceValue = money(price);
-      if (!priceValue) throw new Error('Precio inválido.');
-      const originalPriceValue = originalPrice ? money(originalPrice) : null;
-
-      // 2) Create ticket
-      const { data: insertedTicket, error: insertTicketError } = await supabase
+      const { data, error } = await supabase
         .from('tickets')
-        .insert({
-          event_id: finalEventId,
-          title: title.trim(),
-          description: description.trim() || null,
-          sector: sector.trim() || null,
-          row: row.trim() || null,
-          seat: seat.trim() || null,
-          price: priceValue,
-          original_price: originalPriceValue,
-          seller_id: user.id,
-          seller_name: sellerName,
-        })
+        .insert(insertPayload)
         .select('id')
         .single();
 
-      if (insertTicketError) {
-        // Si la tabla tiene nombres de columnas distintos, aquí va a reventar.
-        console.error(insertTicketError);
-        throw new Error('No se pudo crear la publicación.');
+      if (error) throw error;
+
+      const ticketId = data?.id as string;
+      await createSupportTicketIfNeeded(ticketId);
+
+      // Redirección: si el evento existe, al detalle del evento; si no, a /events con aviso
+      if (!eventNotInList && finalEventId) {
+        router.push(`/events/${finalEventId}`);
+      } else {
+        router.push(`/events?notice=published_without_event`);
       }
-
-      // 3) Upload file (optional) + avisar a soporte para validación
-      let uploadedPath: string | null = null;
-      if (file) {
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const path = `${user.id}/${insertedTicket.id}/${Date.now()}_${safeName}`;
-        const { error: uploadError } = await supabase.storage.from('tickets').upload(path, file, {
-          upsert: false,
-        });
-        if (!uploadError) uploadedPath = path;
-      }
-
-      await supabase.from('support_tickets').insert({
-        user_id: user.id,
-        category: 'Validación de entrada',
-        subject: `Validar entrada: ${title.trim()}`,
-        message:
-          `Nueva entrada publicada desde /sell.\n` +
-          `TicketId: ${insertedTicket.id}\n` +
-          `EventId: ${finalEventId}\n` +
-          `Vendedor: ${sellerName} (${user.email})\n` +
-          `Archivo: ${uploadedPath ?? 'No adjuntó archivo'}\n` +
-          `Precio: ${priceValue}`,
-      });
-
-      setSuccess('Listo 🟢 Tu entrada quedó publicada.');
-
-      // Redirigir al evento
-      router.push(`/events/${finalEventId}`);
     } catch (e: any) {
-      setError(e?.message || 'Algo salió mal.');
+      console.error('[sell] publish error:', e);
+      setSaveError(e?.message || 'No se pudo crear la publicación.');
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  if (loading) {
+  if (loadingUser) {
     return (
-      <main className="container mx-auto px-6 py-10">
-        <h1 className="text-3xl font-bold mb-2">Vender entrada</h1>
-        <p className="text-gray-600">Cargando...</p>
-      </main>
+      <div className="max-w-5xl mx-auto px-6 py-10">
+        <h1 className="text-3xl font-bold">Vender entrada</h1>
+        <p className="mt-6 text-gray-600">Cargando…</p>
+      </div>
     );
   }
 
   return (
-    <main className="container mx-auto px-6 py-10">
-      <h1 className="text-4xl font-bold mb-6">Vender entrada</h1>
+    <div className="max-w-5xl mx-auto px-6 py-10">
+      <h1 className="text-4xl font-bold">Vender entrada</h1>
 
       {/* Stepper */}
-      <div className="w-full bg-white rounded-xl shadow-sm border p-4 mb-6">
-        <div className="flex items-center justify-between text-sm text-gray-600">
-          <div className={`flex items-center gap-2 ${step === 1 ? 'font-semibold text-gray-900' : ''}`}>1 <span>Detalles</span></div>
-          <div className="flex-1 mx-3 h-px bg-gray-200" />
-          <div className={`flex items-center gap-2 ${step === 2 ? 'font-semibold text-gray-900' : ''}`}>2 <span>Archivo</span></div>
-          <div className="flex-1 mx-3 h-px bg-gray-200" />
-          <div className={`flex items-center gap-2 ${step === 3 ? 'font-semibold text-gray-900' : ''}`}>3 <span>Confirmar</span></div>
+      <div className="mt-8 border rounded-xl overflow-hidden">
+        <div className="grid grid-cols-3 text-sm">
+          <div className={`px-6 py-4 ${step === 1 ? 'font-semibold' : 'text-gray-600'}`}>
+            1&nbsp;&nbsp;Detalles
+          </div>
+          <div className={`px-6 py-4 text-center ${step === 2 ? 'font-semibold' : 'text-gray-600'}`}>
+            2&nbsp;&nbsp;Archivo
+          </div>
+          <div className={`px-6 py-4 text-right ${step === 3 ? 'font-semibold' : 'text-gray-600'}`}>
+            3&nbsp;&nbsp;Confirmar
+          </div>
         </div>
       </div>
 
-      {(error || success) && (
-        <div
-          className={`rounded-xl border p-4 mb-6 ${error ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'}`}
-        >
-          {error || success}
+      {/* Eventos error */}
+      {eventsError && (
+        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4">
+          <div className="font-medium text-red-800">{eventsError}</div>
+          <button
+            onClick={fetchEvents}
+            className="mt-3 inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium hover:bg-white"
+          >
+            Reintentar
+          </button>
         </div>
       )}
 
+      {/* Step 1 */}
       {step === 1 && (
-        <section className="bg-white rounded-xl shadow-sm border p-6">
-          <h2 className="text-2xl font-semibold mb-4">Detalles de la entrada</h2>
+        <div className="mt-8 border rounded-2xl p-8">
+          <h2 className="text-2xl font-bold">Detalles de la entrada</h2>
 
-          <div className="mb-4">
-            <label className="flex items-start gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={eventNotListed}
-                onChange={(e) => {
-                  setEventNotListed(e.target.checked);
-                  setEventId('');
-                }}
-              />
-              <div>
-                <div className="font-medium">Mi evento no está en el listado</div>
-                <div className="text-sm text-gray-600">Puedes publicarla igual y avisamos a soporte para completar el evento.</div>
+          <label className="mt-6 flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={eventNotInList}
+              onChange={(e) => {
+                setEventNotInList(e.target.checked);
+                setEventId('');
+              }}
+              className="mt-1"
+            />
+            <div>
+              <div className="font-medium">Mi evento no está en el listado</div>
+              <div className="text-gray-600">
+                Puedes publicarla igual y avisamos a soporte para completar el evento.
               </div>
-            </label>
-          </div>
+            </div>
+          </label>
 
-          {!eventNotListed ? (
-            <div className="mb-4">
-              <label className="block font-medium mb-2">Evento *</label>
+          {/* Evento */}
+          {!eventNotInList ? (
+            <div className="mt-6">
+              <label className="block text-sm font-medium">Evento *</label>
               <select
                 value={eventId}
                 onChange={(e) => setEventId(e.target.value)}
-                className="w-full border rounded-lg px-4 py-3"
+                className="mt-2 w-full rounded-xl border px-4 py-3"
+                disabled={eventsLoading}
               >
-                <option value="">Selecciona un evento...</option>
-                {eventOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
+                <option value="">{eventsLoading ? 'Cargando eventos…' : 'Selecciona un evento…'}</option>
+                {events.map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.title}
+                    {ev.date ? ` — ${new Date(ev.date).toLocaleDateString('es-CL')}` : ''}
+                    {ev.location ? ` — ${ev.location}` : ''}
                   </option>
                 ))}
               </select>
-              {events.length === 0 && (
-                <p className="text-sm text-red-600 mt-2">No hay eventos cargados. Crea uno en /admin/events.</p>
+
+              {!eventsLoading && events.length === 0 && (
+                <div className="mt-2 text-sm text-red-600">
+                  No hay eventos cargados. Crea uno en <span className="font-medium">/admin/events</span>.
+                </div>
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="mt-6 grid gap-4">
               <div>
-                <label className="block font-medium mb-2">Nombre del evento *</label>
+                <label className="block text-sm font-medium">Nombre del evento *</label>
                 <input
-                  value={newEventName}
-                  onChange={(e) => setNewEventName(e.target.value)}
-                  className="w-full border rounded-lg px-4 py-3"
-                  placeholder="Ej: Chayanne"
+                  value={customEventName}
+                  onChange={(e) => setCustomEventName(e.target.value)}
+                  className="mt-2 w-full rounded-xl border px-4 py-3"
+                  placeholder="Ej: Chayanne - Tour 2026"
                 />
               </div>
-              <div>
-                <label className="block font-medium mb-2">Fecha *</label>
-                <input
-                  type="date"
-                  value={newEventDate}
-                  onChange={(e) => setNewEventDate(e.target.value)}
-                  className="w-full border rounded-lg px-4 py-3"
-                />
-              </div>
-              <div>
-                <label className="block font-medium mb-2">Lugar *</label>
-                <input
-                  value={newEventLocation}
-                  onChange={(e) => setNewEventLocation(e.target.value)}
-                  className="w-full border rounded-lg px-4 py-3"
-                  placeholder="Ej: Movistar Arena, Santiago"
-                />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-medium">Fecha *</label>
+                  <input
+                    value={customEventDate}
+                    onChange={(e) => setCustomEventDate(e.target.value)}
+                    className="mt-2 w-full rounded-xl border px-4 py-3"
+                    placeholder="dd/mm/aaaa"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium">Lugar *</label>
+                  <input
+                    value={customEventLocation}
+                    onChange={(e) => setCustomEventLocation(e.target.value)}
+                    className="mt-2 w-full rounded-xl border px-4 py-3"
+                    placeholder="Ej: Movistar Arena, Santiago"
+                  />
+                </div>
               </div>
             </div>
           )}
 
-          <div className="mb-4">
-            <label className="block font-medium mb-2">Título de la entrada *</label>
+          {/* Título */}
+          <div className="mt-8">
+            <label className="block text-sm font-medium">Título de la entrada *</label>
             <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full border rounded-lg px-4 py-3"
+              value={ticketTitle}
+              onChange={(e) => setTicketTitle(e.target.value)}
+              className="mt-2 w-full rounded-xl border px-4 py-3"
               placeholder="Ej: Entrada General - Platea Alta"
             />
           </div>
 
-          <div className="mb-4">
-            <label className="block font-medium mb-2">Descripción</label>
+          {/* Descripción */}
+          <div className="mt-6">
+            <label className="block text-sm font-medium">Descripción</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full border rounded-lg px-4 py-3 min-h-[110px]"
+              className="mt-2 w-full rounded-xl border px-4 py-3 min-h-[110px]"
               placeholder="Ubicación específica, estado, restricciones, etc."
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          {/* Sector / Fila / Asiento */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block font-medium mb-2">Sector</label>
-              <input value={sector} onChange={(e) => setSector(e.target.value)} className="w-full border rounded-lg px-4 py-3" placeholder="Cancha, Platea..." />
+              <label className="block text-sm font-medium">Sector</label>
+              <input
+                value={sector}
+                onChange={(e) => setSector(e.target.value)}
+                className="mt-2 w-full rounded-xl border px-4 py-3"
+                placeholder="Cancha, Platea, etc."
+              />
             </div>
             <div>
-              <label className="block font-medium mb-2">Fila</label>
-              <input value={row} onChange={(e) => setRow(e.target.value)} className="w-full border rounded-lg px-4 py-3" placeholder="A, B, 1..." />
+              <label className="block text-sm font-medium">Fila</label>
+              <input
+                value={row}
+                onChange={(e) => setRow(e.target.value)}
+                className="mt-2 w-full rounded-xl border px-4 py-3"
+                placeholder="A, B, 1, 2..."
+              />
             </div>
             <div>
-              <label className="block font-medium mb-2">Asiento</label>
-              <input value={seat} onChange={(e) => setSeat(e.target.value)} className="w-full border rounded-lg px-4 py-3" placeholder="1, 2, 3..." />
+              <label className="block text-sm font-medium">Asiento</label>
+              <input
+                value={seat}
+                onChange={(e) => setSeat(e.target.value)}
+                className="mt-2 w-full rounded-xl border px-4 py-3"
+                placeholder="1, 2, 3..."
+              />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+          {/* Precios */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block font-medium mb-2">Precio de venta *</label>
+              <label className="block text-sm font-medium">Precio de venta *</label>
               <input
+                type="number"
                 value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                className="w-full border rounded-lg px-4 py-3"
-                placeholder="Ej: 50000"
-                inputMode="numeric"
+                onChange={(e) => setPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                className="mt-2 w-full rounded-xl border px-4 py-3"
+                placeholder="50000"
+                min={0}
               />
             </div>
             <div>
-              <label className="block font-medium mb-2">Precio original (opcional)</label>
+              <label className="block text-sm font-medium">Precio original (opcional)</label>
               <input
+                type="number"
                 value={originalPrice}
-                onChange={(e) => setOriginalPrice(e.target.value)}
-                className="w-full border rounded-lg px-4 py-3"
-                placeholder="Ej: 65000"
-                inputMode="numeric"
+                onChange={(e) => setOriginalPrice(e.target.value === '' ? '' : Number(e.target.value))}
+                className="mt-2 w-full rounded-xl border px-4 py-3"
+                placeholder="65000"
+                min={0}
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 mt-6">
+          {/* Tipo de venta */}
+          <div className="mt-6">
+            <label className="block text-sm font-medium">Tipo de venta</label>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={() => setSaleType('fixed')}
+                className={`text-left rounded-xl border p-4 hover:bg-gray-50 ${
+                  saleType === 'fixed' ? 'border-blue-500 ring-2 ring-blue-100' : ''
+                }`}
+              >
+                <div className="font-semibold">Precio fijo</div>
+                <div className="text-sm text-gray-600">Vende inmediatamente al precio que estableces.</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSaleType('auction')}
+                className={`text-left rounded-xl border p-4 hover:bg-gray-50 ${
+                  saleType === 'auction' ? 'border-blue-500 ring-2 ring-blue-100' : ''
+                }`}
+              >
+                <div className="font-semibold">Subasta (próximamente)</div>
+                <div className="text-sm text-gray-600">Los compradores podrán pujar por tu entrada.</div>
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-8 flex items-center justify-between">
             <button
-              onClick={() => router.push('/events')}
-              className="px-4 py-2 rounded-lg border"
+              onClick={() => router.push('/')}
+              className="rounded-xl border px-5 py-3 font-medium hover:bg-gray-50"
             >
               Cancelar
             </button>
             <button
-              onClick={onNext}
-              className="px-5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-              disabled={!canGoStep2}
+              disabled={!canGoNextFromStep1}
+              onClick={() => goToStep(2)}
+              className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:opacity-50"
             >
               Continuar
             </button>
           </div>
-        </section>
+        </div>
       )}
 
+      {/* Step 2 */}
       {step === 2 && (
-        <section className="bg-white rounded-xl shadow-sm border p-6">
-          <h2 className="text-2xl font-semibold mb-2">Archivo de la entrada</h2>
-          <p className="text-gray-600 mb-4">
-            Sube tu PDF / imagen. Esto nos ayuda a validar rápido (y te protege ante estafas).
+        <div className="mt-8 border rounded-2xl p-8">
+          <h2 className="text-2xl font-bold">Archivo</h2>
+          <p className="mt-2 text-gray-600">
+            Sube una foto o PDF de tu entrada para validación. (Mientras más claro, más rápido aprobamos)
           </p>
 
-          <input
-            type="file"
-            accept="application/pdf,image/*"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            className="w-full border rounded-lg px-4 py-3"
-          />
-
-          {file && (
-            <p className="text-sm text-gray-700 mt-3">
-              Archivo seleccionado: <span className="font-medium">{file.name}</span>
-            </p>
-          )}
-
-          <div className="flex items-center justify-between gap-3 mt-6">
-            <button onClick={onBack} className="px-4 py-2 rounded-lg border">
-              Volver
-            </button>
-            <button onClick={onNext} className="px-5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-              Continuar
-            </button>
-          </div>
-        </section>
-      )}
-
-      {step === 3 && (
-        <section className="bg-white rounded-xl shadow-sm border p-6">
-          <h2 className="text-2xl font-semibold mb-4">Confirmar publicación</h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="border rounded-lg p-4">
-              <div className="text-sm text-gray-600 mb-1">Evento</div>
-              <div className="font-medium">
-                {eventNotListed ? newEventName : events.find((e) => e.id === eventId)?.name}
+          <div className="mt-6">
+            <input
+              type="file"
+              accept="image/*,application/pdf"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="w-full rounded-xl border px-4 py-3"
+            />
+            {file && (
+              <div className="mt-2 text-sm text-gray-700">
+                Archivo seleccionado: <span className="font-medium">{file.name}</span>
               </div>
-              <div className="text-sm text-gray-600">
-                {eventNotListed
-                  ? `${newEventDate} · ${newEventLocation}`
-                  : `${events.find((e) => e.id === eventId)?.date ? new Date(events.find((e) => e.id === eventId)!.date).toLocaleDateString('es-CL') : ''} · ${events.find((e) => e.id === eventId)?.location ?? ''}`}
-              </div>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="text-sm text-gray-600 mb-1">Entrada</div>
-              <div className="font-medium">{title}</div>
-              <div className="text-sm text-gray-600">{description || '—'}</div>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="text-sm text-gray-600 mb-1">Ubicación</div>
-              <div className="text-sm">Sector: {sector || '—'}</div>
-              <div className="text-sm">Fila: {row || '—'}</div>
-              <div className="text-sm">Asiento: {seat || '—'}</div>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="text-sm text-gray-600 mb-1">Precio</div>
-              <div className="font-semibold">${money(price)?.toLocaleString('es-CL') ?? '—'}</div>
-              <div className="text-sm text-gray-600">
-                Original: {originalPrice ? `$${money(originalPrice)?.toLocaleString('es-CL') ?? '—'}` : '—'}
-              </div>
-              <div className="text-sm text-gray-600">Archivo: {file ? file.name : 'No adjuntó'}</div>
-            </div>
+            )}
           </div>
 
-          <div className="flex items-center justify-between gap-3 mt-6">
-            <button onClick={onBack} className="px-4 py-2 rounded-lg border" disabled={submitting}>
+          <div className="mt-8 flex items-center justify-between">
+            <button
+              onClick={() => goToStep(1)}
+              className="rounded-xl border px-5 py-3 font-medium hover:bg-gray-50"
+            >
               Volver
             </button>
             <button
-              onClick={handleSubmit}
-              className="px-5 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-60"
-              disabled={submitting || !canSubmit}
+              onClick={() => goToStep(3)}
+              className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white"
             >
-              {submitting ? 'Publicando…' : 'Publicar entrada'}
+              Confirmar
             </button>
           </div>
-        </section>
+        </div>
       )}
-    </main>
+
+      {/* Step 3 */}
+      {step === 3 && (
+        <div className="mt-8 border rounded-2xl p-8">
+          <h2 className="text-2xl font-bold">Confirmar</h2>
+
+          {saveError && (
+            <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-red-800">
+              {saveError}
+            </div>
+          )}
+
+          <div className="mt-6 grid gap-3 text-sm">
+            <div>
+              <span className="text-gray-600">Evento:</span>{' '}
+              {!eventNotInList
+                ? selectedEvent?.title || '—'
+                : `${customEventName} (${customEventDate}) — ${customEventLocation}`}
+            </div>
+            <div>
+              <span className="text-gray-600">Entrada:</span> {ticketTitle || '—'}
+            </div>
+            <div>
+              <span className="text-gray-600">Precio:</span> {price === '' ? '—' : `$${Number(price).toLocaleString('es-CL')}`}
+            </div>
+            <div>
+              <span className="text-gray-600">Archivo:</span> {file ? file.name : 'No adjuntado'}
+            </div>
+          </div>
+
+          <div className="mt-8 flex items-center justify-between">
+            <button
+              onClick={() => goToStep(2)}
+              className="rounded-xl border px-5 py-3 font-medium hover:bg-gray-50"
+            >
+              Volver
+            </button>
+
+            <button
+              disabled={saving}
+              onClick={handlePublish}
+              className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:opacity-60"
+            >
+              {saving ? 'Publicando…' : 'Publicar entrada'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
+
