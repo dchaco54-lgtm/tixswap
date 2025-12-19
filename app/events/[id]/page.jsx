@@ -3,54 +3,46 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { EVENTS } from "../../lib/events";
 
 export const revalidate = 30;
 
-async function getEventAndTickets(id) {
-  const { data: event, error: eventError } = await supabase
-    .from("events")
-    .select("id, name, date_display, venue, city")
-    .eq("id", id)
-    .single();
-
-  if (eventError || !event) {
-    console.error("Error cargando evento:", eventError);
-    return { event: null, tickets: [] };
-  }
-
-  const { data: tickets, error: ticketsError } = await supabase
+async function getTicketsByEvent(eventId) {
+  const { data, error } = await supabase
     .from("tickets")
-    .select(
-      "id, sector, row_label, seat_label, price, seller_name, seller_rating"
-    )
-    .eq("event_id", id)
+    .select("*")
+    .eq("event_id", eventId)
     .order("price", { ascending: true });
 
-  if (ticketsError) {
-    console.error("Error cargando tickets:", ticketsError);
+  if (error) {
+    console.error("Error cargando tickets:", error);
+    return [];
   }
 
-  return { event, tickets: tickets ?? [] };
+  return data ?? [];
 }
 
 export default async function EventPage({ params }) {
   const { id } = params;
-  const { event, tickets } = await getEventAndTickets(id);
 
-  if (!event) {
-    notFound();
-  }
+  const event = EVENTS.find((e) => e.id === id) || null;
+  if (!event) notFound();
 
-  const sectors = Array.from(new Set(tickets.map((t) => t.sector)));
+  const tickets = await getTicketsByEvent(id);
+
+  const sectors = Array.from(
+    new Set(
+      tickets
+        .map((t) => t.sector)
+        .filter(Boolean)
+        .map((s) => String(s))
+    )
+  );
 
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 py-8">
-        {/* Breadcrumb / volver */}
-        <Link
-          href="/events"
-          className="text-sm text-gray-500 hover:text-gray-700"
-        >
+        <Link href="/events" className="text-sm text-gray-500 hover:text-gray-700">
           ← Volver a eventos
         </Link>
 
@@ -59,12 +51,12 @@ export default async function EventPage({ params }) {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-2xl font-semibold text-gray-900">
-                {event.name}
+                {event.title}
               </h1>
               <p className="mt-2 text-gray-700">
-                📅 {event.date_display}
+                📅 {event.date}
                 <br />
-                📍 {event.venue} · {event.city}
+                📍 {event.location}
               </p>
             </div>
 
@@ -77,9 +69,8 @@ export default async function EventPage({ params }) {
           </div>
         </section>
 
-        {/* Contenido principal: listado de entradas + lateral */}
         <section className="mt-6 grid gap-6 md:grid-cols-[2fr,1fr]">
-          {/* Columna izquierda: entradas */}
+          {/* Lista tickets */}
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-gray-900">
@@ -87,7 +78,6 @@ export default async function EventPage({ params }) {
               </h2>
 
               <div className="flex flex-wrap gap-2 text-sm">
-                {/* Filtro por sector (solo UI de momento) */}
                 <select className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm">
                   <option>Todos los sectores</option>
                   {sectors.map((sector) => (
@@ -95,7 +85,6 @@ export default async function EventPage({ params }) {
                   ))}
                 </select>
 
-                {/* Orden por precio (solo UI de momento) */}
                 <select className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm">
                   <option>Precio: menor a mayor</option>
                   <option>Precio: mayor a menor</option>
@@ -106,12 +95,20 @@ export default async function EventPage({ params }) {
             <div className="space-y-3">
               {tickets.length > 0 ? (
                 tickets.map((ticket) => {
+                  const sector = ticket.sector || "Sector";
+                  const row = ticket.row_label ?? ticket.row ?? null;
+                  const seat = ticket.seat_label ?? ticket.seat ?? null;
+
                   const seatText =
-                    ticket.row_label || ticket.seat_label
-                      ? `Fila ${ticket.row_label ?? "-"}, asiento ${
-                          ticket.seat_label ?? "-"
-                        }`
+                    row || seat
+                      ? `Fila ${row ?? "-"}, asiento ${seat ?? "-"}`
                       : "Asientos sin numerar";
+
+                  const sellerName = ticket.seller_name || "Vendedor TixSwap";
+                  const sellerRating =
+                    ticket.seller_rating != null
+                      ? Number(ticket.seller_rating).toFixed(1)
+                      : null;
 
                   return (
                     <article
@@ -120,27 +117,20 @@ export default async function EventPage({ params }) {
                     >
                       <div>
                         <p className="text-sm font-medium text-gray-900">
-                          {ticket.sector} · {seatText}
+                          {sector} · {seatText}
                         </p>
+
                         <p className="mt-1 text-xs text-gray-500">
-                          {ticket.seller_name
-                            ? `Publicado por ${ticket.seller_name}`
-                            : "Vendedor TixSwap"}
-                          {ticket.seller_rating
-                            ? ` · ${Number(
-                                ticket.seller_rating
-                              ).toFixed(1)}★`
-                            : ""}
+                          Publicado por {sellerName}
+                          {sellerRating ? ` · ${sellerRating}★` : ""}
                         </p>
                       </div>
 
                       <div className="text-right">
                         <p className="text-base font-semibold text-emerald-600">
-                          $
-                          {ticket.price.toLocaleString("es-CL", {
-                            minimumFractionDigits: 0,
-                          })}
+                          ${Number(ticket.price).toLocaleString("es-CL")}
                         </p>
+
                         <button className="mt-2 rounded-full bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">
                           Comprar
                         </button>
@@ -156,7 +146,7 @@ export default async function EventPage({ params }) {
             </div>
           </div>
 
-          {/* Columna derecha: info / recomendaciones */}
+          {/* Sidebar */}
           <aside className="space-y-4">
             <div className="rounded-2xl bg-white p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-gray-900">
@@ -168,20 +158,10 @@ export default async function EventPage({ params }) {
                 <li>3. Si algo no calza, te devolvemos la plata.</li>
               </ol>
             </div>
-
-            <div className="rounded-2xl bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900">
-                Recomendaciones del vendedor
-              </h3>
-              <p className="mt-2 text-xs text-gray-600">
-                Aquí después vamos a mostrar el resumen de calificaciones del
-                vendedor, similar a Falabella / Mercado Libre: promedio, número
-                de ventas, comentarios, etc.
-              </p>
-            </div>
           </aside>
         </section>
       </div>
     </main>
   );
 }
+
