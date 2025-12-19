@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../lib/supabaseClient";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -233,7 +233,6 @@ export default function AdminPage() {
             </p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-              {/* Abiertos */}
               <div>
                 <h3 className="font-semibold text-gray-800 mb-2">
                   Abiertos ({ticketsByStatus.open.length})
@@ -245,34 +244,24 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* En proceso */}
               <div>
                 <h3 className="font-semibold text-gray-800 mb-2">
                   En proceso ({ticketsByStatus.in_progress.length})
                 </h3>
                 <div className="space-y-2">
                   {ticketsByStatus.in_progress.map((t) => (
-                    <TicketCard
-                      key={t.id}
-                      ticket={t}
-                      formatDate={formatDate}
-                    />
+                    <TicketCard key={t.id} ticket={t} formatDate={formatDate} />
                   ))}
                 </div>
               </div>
 
-              {/* Cerrados */}
               <div>
                 <h3 className="font-semibold text-gray-800 mb-2">
                   Cerrados ({ticketsByStatus.closed.length})
                 </h3>
                 <div className="space-y-2">
                   {ticketsByStatus.closed.map((t) => (
-                    <TicketCard
-                      key={t.id}
-                      ticket={t}
-                      formatDate={formatDate}
-                    />
+                    <TicketCard key={t.id} ticket={t} formatDate={formatDate} />
                   ))}
                 </div>
               </div>
@@ -290,9 +279,7 @@ function TicketCard({ ticket, formatDate }) {
       <p className="text-xs text-gray-500 mb-1">
         {ticket.email || "Usuario sin email"}
       </p>
-      <p className="text-gray-900 font-medium line-clamp-2">
-        {ticket.subject}
-      </p>
+      <p className="text-gray-900 font-medium line-clamp-2">{ticket.subject}</p>
       <p className="text-xs text-gray-500 mt-1">
         Creado: {formatDate(ticket.created_at)}
       </p>
