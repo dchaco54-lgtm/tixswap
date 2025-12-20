@@ -1,473 +1,568 @@
-'use client';
+"use client";
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
+import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "../lib/supabaseClient";
 
 type EventRow = {
   id: string;
   title: string;
-  date: string | null;
-  location: string | null;
-  category?: string | null;
+  starts_at: string | null;
+  venue: string | null;
+  city: string | null;
   image_url?: string | null;
 };
 
 type Step = 1 | 2 | 3;
 
+function formatEventLabel(e: EventRow) {
+  const date = e.starts_at
+    ? new Date(e.starts_at).toLocaleString("es-CL", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "Fecha por confirmar";
+
+  const place = [e.venue, e.city].filter(Boolean).join(" · ");
+  return `${e.title} — ${date}${place ? `, ${place}` : ""}`;
+}
+
 export default function SellPage() {
   const router = useRouter();
 
-  const [step, setStep] = useState<Step>(1);
-
+  // Auth
   const [userId, setUserId] = useState<string | null>(null);
-  const [loadingUser, setLoadingUser] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
 
+  // Events
   const [events, setEvents] = useState<EventRow[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
 
+  // Wizard
+  const [step, setStep] = useState<Step>(1);
+
+  // Form: Event selection
   const [eventNotInList, setEventNotInList] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState<string>("");
 
-  // Caso 1: evento existente
-  const [eventId, setEventId] = useState('');
+  // Form: manual event fields (when not in list)
+  const [manualEventName, setManualEventName] = useState("");
+  const [manualEventDate, setManualEventDate] = useState("");
+  const [manualEventLocation, setManualEventLocation] = useState("");
 
-  // Caso 2: evento no existente (solicitud a soporte)
-  const [customEventName, setCustomEventName] = useState('');
-  const [customEventDate, setCustomEventDate] = useState('');
-  const [customEventLocation, setCustomEventLocation] = useState('');
+  // Form: ticket fields
+  const [ticketTitle, setTicketTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [sector, setSector] = useState("");
+  const [row, setRow] = useState("");
+  const [seat, setSeat] = useState("");
+  const [price, setPrice] = useState("");
+  const [originalPrice, setOriginalPrice] = useState("");
 
-  // Datos entrada
-  const [ticketTitle, setTicketTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [sector, setSector] = useState('');
-  const [row, setRow] = useState('');
-  const [seat, setSeat] = useState('');
+  // File (PDF)
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
-  const [price, setPrice] = useState<number | ''>('');
-  const [originalPrice, setOriginalPrice] = useState<number | ''>('');
-  const [saleType, setSaleType] = useState<'fixed' | 'auction'>('fixed');
+  // UI
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  // Archivo
-  const [file, setFile] = useState<File | null>(null);
-
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
-  const selectedEvent = useMemo(
-    () => events.find((e) => e.id === eventId) || null,
-    [events, eventId]
-  );
-
+  // 1) Auth gate
   useEffect(() => {
-    (async () => {
-      setLoadingUser(true);
-      const { data, error } = await supabase.auth.getUser();
-      if (error) {
-        console.error('[sell] getUser error', error);
-      }
-      const u = data?.user ?? null;
+    let mounted = true;
 
-      if (!u) {
-        router.replace('/login?redirect=/sell');
+    (async () => {
+      setAuthLoading(true);
+      const { data, error } = await supabase.auth.getUser();
+      if (!mounted) return;
+
+      if (error || !data?.user) {
+        // misma lógica que vender: si no está logeado -> login
+        router.push("/login?redirect=/sell");
         return;
       }
 
-      setUserId(u.id);
-      setLoadingUser(false);
+      setUserId(data.user.id);
+      setAuthLoading(false);
     })();
+
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
-  const fetchEvents = async () => {
-    setEventsLoading(true);
-    setEventsError(null);
-    try {
-      const { data, error } = await supabase
-        .from('events')
-        .select('id,title,date,location,category,image_url')
-        .order('date', { ascending: true });
-
-      if (error) throw error;
-
-      setEvents((data as EventRow[]) || []);
-    } catch (e: any) {
-      console.error('[sell] fetchEvents error:', e);
-      setEvents([]);
-      setEventsError(e?.message || 'No pude cargar los eventos. Intenta de nuevo.');
-    } finally {
-      setEventsLoading(false);
-    }
-  };
-
+  // 2) Load events from Supabase
   useEffect(() => {
-    if (!loadingUser) fetchEvents();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingUser]);
-
-  const canGoNextFromStep1 = useMemo(() => {
-    if (eventNotInList) {
-      return (
-        customEventName.trim().length >= 3 &&
-        customEventDate.trim().length >= 6 &&
-        customEventLocation.trim().length >= 3 &&
-        ticketTitle.trim().length >= 3 &&
-        price !== '' &&
-        Number(price) > 0
-      );
-    }
-    return eventId && ticketTitle.trim().length >= 3 && price !== '' && Number(price) > 0;
-  }, [
-    eventNotInList,
-    customEventName,
-    customEventDate,
-    customEventLocation,
-    eventId,
-    ticketTitle,
-    price,
-  ]);
-
-  const goToStep = (n: Step) => {
-    setSaveError(null);
-    setStep(n);
-  };
-
-  const uploadTicketFile = async (ownerId: string) => {
-    if (!file) return null;
-
-    // Bucket recomendado: "tickets" (o el que estés usando)
-    const ext = file.name.split('.').pop() || 'file';
-    const safeExt = ext.toLowerCase();
-    const path = `${ownerId}/${crypto.randomUUID()}.${safeExt}`;
-
-    const { error } = await supabase.storage.from('tickets').upload(path, file, {
-      upsert: false,
-      cacheControl: '3600',
-    });
-
-    if (error) throw error;
-    return path;
-  };
-
-  const createSupportTicketIfNeeded = async (ticketId: string) => {
-    if (!eventNotInList) return;
-
-    const payload = {
-      type: 'missing_event',
-      status: 'open',
-      ticket_id: ticketId,
-      requested_event_name: customEventName.trim(),
-      requested_event_date: customEventDate.trim(),
-      requested_event_location: customEventLocation.trim(),
-      message: `Usuario publicó entrada con evento no listado. Crear evento y asociar entrada ${ticketId}.`,
-    };
-
-    const { error } = await supabase.from('support_tickets').insert(payload);
-    if (error) throw error;
-
-    // Si después conectas correo, aquí disparas un endpoint /api/notify-support
-  };
-
-  const handlePublish = async () => {
     if (!userId) return;
-    setSaving(true);
-    setSaveError(null);
+
+    let mounted = true;
+
+    (async () => {
+      setEventsLoading(true);
+      setEventsError(null);
+
+      const { data, error } = await supabase
+        .from("events")
+        .select("id,title,starts_at,venue,city,image_url")
+        .order("starts_at", { ascending: true });
+
+      if (!mounted) return;
+
+      if (error) {
+        setEvents([]);
+        setEventsError("No pude cargar los eventos. Intenta de nuevo.");
+      } else {
+        setEvents((data ?? []) as EventRow[]);
+      }
+
+      setEventsLoading(false);
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [userId]);
+
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === selectedEventId) ?? null,
+    [events, selectedEventId]
+  );
+
+  function validateStep1(): string | null {
+    if (eventNotInList) {
+      if (!manualEventName.trim()) return "Escribe el nombre del evento.";
+      // fecha/ubicación las dejo opcionales (pero recomendado)
+    } else {
+      if (!selectedEventId) return "Selecciona un evento del listado.";
+    }
+
+    if (!ticketTitle.trim()) return "Completa el título de la entrada.";
+    if (!price || Number(price) <= 0) return "Ingresa un precio de venta válido.";
+
+    return null;
+  }
+
+  function validatePdf(file: File | null): string | null {
+    if (!file) return "Debes adjuntar el PDF de la entrada.";
+    const isPdf =
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) return "El archivo debe ser PDF.";
+    return null;
+  }
+
+  function goNext() {
+    setGlobalError(null);
+
+    if (step === 1) {
+      const err = validateStep1();
+      if (err) return setGlobalError(err);
+      setStep(2);
+      return;
+    }
+
+    if (step === 2) {
+      const err = validatePdf(pdfFile);
+      setPdfError(err);
+      if (err) return setGlobalError(err);
+      setStep(3);
+      return;
+    }
+  }
+
+  function goBack() {
+    setGlobalError(null);
+    setPdfError(null);
+    setStep((s) => (s === 1 ? 1 : ((s - 1) as Step)));
+  }
+
+  async function submitListing() {
+    setGlobalError(null);
+    setSubmitting(true);
 
     try {
-      const filePath = await uploadTicketFile(userId);
+      if (!userId) {
+        router.push("/login?redirect=/sell");
+        return;
+      }
 
-      // Si no está en listado, lo dejamos sin event_id por ahora (null)
-      const finalEventId = eventNotInList ? null : eventId;
+      // Validaciones finales
+      const err1 = validateStep1();
+      if (err1) {
+        setGlobalError(err1);
+        setSubmitting(false);
+        return;
+      }
 
+      const errPdf = validatePdf(pdfFile);
+      setPdfError(errPdf);
+      if (errPdf) {
+        setGlobalError(errPdf);
+        setSubmitting(false);
+        return;
+      }
+
+      // 1) Crear ticket/publicación
       const insertPayload: any = {
-        event_id: finalEventId,
+        user_id: userId,
+        event_id: eventNotInList ? null : selectedEventId,
         title: ticketTitle.trim(),
-        description: description.trim() || null,
-        sector: sector.trim() || null,
-        row: row.trim() || null,
-        seat: seat.trim() || null,
+        description: description?.trim() || null,
+        sector: sector?.trim() || null,
+        row: row?.trim() || null,
+        seat: seat?.trim() || null,
         price: Number(price),
-        original_price: originalPrice === '' ? null : Number(originalPrice),
-        sale_type: saleType,
-        owner_id: userId,
-        status: 'published',
-        file_path: filePath,
+        original_price: originalPrice ? Number(originalPrice) : null,
+        sale_type: "fixed",
+        status: "published",
       };
 
-      // Datos extra para soporte si evento no existe
-      if (eventNotInList) {
-        insertPayload.requested_event_name = customEventName.trim();
-        insertPayload.requested_event_date = customEventDate.trim();
-        insertPayload.requested_event_location = customEventLocation.trim();
-      }
-
-      const { data, error } = await supabase
-        .from('tickets')
+      const { data: created, error: insertErr } = await supabase
+        .from("tickets")
         .insert(insertPayload)
-        .select('id')
+        .select("id")
         .single();
 
-      if (error) throw error;
+      if (insertErr || !created?.id) {
+        throw new Error(
+          insertErr?.message || "No se pudo crear la publicación."
+        );
+      }
 
-      const ticketId = data?.id as string;
-      await createSupportTicketIfNeeded(ticketId);
+      const ticketId = created.id as string;
 
-      // Redirección: si el evento existe, al detalle del evento; si no, a /events con aviso
-      if (!eventNotInList && finalEventId) {
-        router.push(`/events/${finalEventId}`);
+      // 2) Subir PDF a Storage (si existe bucket). Si falla, NO botamos la publicación.
+      //    Bucket recomendado: "tickets"
+      if (pdfFile) {
+        try {
+          const path = `tickets/${userId}/${ticketId}.pdf`;
+
+          const { error: upErr } = await supabase.storage
+            .from("tickets")
+            .upload(path, pdfFile, {
+              upsert: true,
+              contentType: "application/pdf",
+            });
+
+          // Si el bucket no existe o RLS/storage falla, seguimos igual.
+          if (!upErr) {
+            const { data: pub } = supabase.storage
+              .from("tickets")
+              .getPublicUrl(path);
+
+            const publicUrl = pub?.publicUrl;
+
+            // 3) Intentar guardar URL (si tu tabla tiene columna pdf_url / ticket_pdf_url, etc.)
+            //    Si no existe la columna, esta update fallará y lo ignoramos.
+            if (publicUrl) {
+              await supabase
+                .from("tickets")
+                .update({ pdf_url: publicUrl })
+                .eq("id", ticketId);
+            }
+          }
+        } catch {
+          // no-op
+        }
+      }
+
+      // 3) Si el evento no existe, abrir ticket a soporte para que creen el evento
+      if (eventNotInList) {
+        const msg = [
+          "📌 Solicitud de creación de evento (desde /sell)",
+          "",
+          `Evento: ${manualEventName || "-"}`,
+          `Fecha: ${manualEventDate || "-"}`,
+          `Ubicación: ${manualEventLocation || "-"}`,
+          "",
+          "🎫 Publicación ya creada:",
+          `Ticket ID: ${ticketId}`,
+          `Título entrada: ${ticketTitle}`,
+          `Precio: ${price}`,
+          `Sector: ${sector || "-"}`,
+          `Fila: ${row || "-"}`,
+          `Asiento: ${seat || "-"}`,
+          `Descripción: ${description || "-"}`,
+        ].join("\n");
+
+        await supabase.from("support_tickets").insert({
+          user_id: userId,
+          category: "Eventos",
+          subject: `Crear evento: ${manualEventName}`.slice(0, 120),
+          message: msg,
+          status: "open",
+        });
+      }
+
+      // listo: redirigir al evento si existe, si no, al dashboard
+      if (!eventNotInList && selectedEventId) {
+        router.push(`/events/${selectedEventId}`);
       } else {
-        router.push(`/events?notice=published_without_event`);
+        router.push("/dashboard");
       }
     } catch (e: any) {
-      console.error('[sell] publish error:', e);
-      setSaveError(e?.message || 'No se pudo crear la publicación.');
+      setGlobalError(e?.message || "Ocurrió un error al publicar.");
     } finally {
-      setSaving(false);
+      setSubmitting(false);
     }
-  };
+  }
 
-  if (loadingUser) {
+  // ---------- UI ----------
+  if (authLoading) {
     return (
-      <div className="max-w-5xl mx-auto px-6 py-10">
-        <h1 className="text-3xl font-bold">Vender entrada</h1>
-        <p className="mt-6 text-gray-600">Cargando…</p>
+      <div className="max-w-6xl mx-auto px-6 py-10">
+        <div className="text-gray-600">Cargando...</div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-10">
-      <h1 className="text-4xl font-bold">Vender entrada</h1>
+    <div className="max-w-6xl mx-auto px-6 py-10">
+      <h1 className="text-4xl font-extrabold tracking-tight mb-6">
+        Vender entrada
+      </h1>
 
-      {/* Stepper */}
-      <div className="mt-8 border rounded-xl overflow-hidden">
+      {/* Steps */}
+      <div className="border rounded-2xl bg-white shadow-sm overflow-hidden mb-6">
         <div className="grid grid-cols-3 text-sm">
-          <div className={`px-6 py-4 ${step === 1 ? 'font-semibold' : 'text-gray-600'}`}>
-            1&nbsp;&nbsp;Detalles
+          <div
+            className={`px-6 py-4 ${
+              step === 1 ? "font-semibold" : "text-gray-500"
+            }`}
+          >
+            <span
+              className={`inline-flex items-center justify-center w-6 h-6 rounded-full mr-2 ${
+                step === 1 ? "bg-black text-white" : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              1
+            </span>
+            Detalles
           </div>
-          <div className={`px-6 py-4 text-center ${step === 2 ? 'font-semibold' : 'text-gray-600'}`}>
-            2&nbsp;&nbsp;Archivo
+
+          <div
+            className={`px-6 py-4 text-center ${
+              step === 2 ? "font-semibold" : "text-gray-500"
+            }`}
+          >
+            <span
+              className={`inline-flex items-center justify-center w-6 h-6 rounded-full mr-2 ${
+                step === 2 ? "bg-black text-white" : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              2
+            </span>
+            Archivo
           </div>
-          <div className={`px-6 py-4 text-right ${step === 3 ? 'font-semibold' : 'text-gray-600'}`}>
-            3&nbsp;&nbsp;Confirmar
+
+          <div
+            className={`px-6 py-4 text-right ${
+              step === 3 ? "font-semibold" : "text-gray-500"
+            }`}
+          >
+            <span
+              className={`inline-flex items-center justify-center w-6 h-6 rounded-full mr-2 ${
+                step === 3 ? "bg-black text-white" : "bg-gray-200 text-gray-700"
+              }`}
+            >
+              3
+            </span>
+            Confirmar
           </div>
         </div>
       </div>
 
-      {/* Eventos error */}
-      {eventsError && (
-        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4">
-          <div className="font-medium text-red-800">{eventsError}</div>
-          <button
-            onClick={fetchEvents}
-            className="mt-3 inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium hover:bg-white"
-          >
-            Reintentar
-          </button>
+      {/* Errors */}
+      {(globalError || eventsError) && (
+        <div className="mb-6 border rounded-2xl p-4 bg-red-50 text-red-700">
+          {globalError || eventsError}
         </div>
       )}
 
-      {/* Step 1 */}
+      {/* STEP 1 */}
       {step === 1 && (
-        <div className="mt-8 border rounded-2xl p-8">
-          <h2 className="text-2xl font-bold">Detalles de la entrada</h2>
+        <div className="border rounded-2xl bg-white shadow-sm p-8">
+          <h2 className="text-2xl font-bold mb-6">Detalles de la entrada</h2>
 
-          <label className="mt-6 flex items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={eventNotInList}
-              onChange={(e) => {
-                setEventNotInList(e.target.checked);
-                setEventId('');
-              }}
-              className="mt-1"
-            />
-            <div>
-              <div className="font-medium">Mi evento no está en el listado</div>
-              <div className="text-gray-600">
-                Puedes publicarla igual y avisamos a soporte para completar el evento.
+          <div className="mb-5">
+            <label className="flex items-start gap-3 select-none">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={eventNotInList}
+                onChange={(e) => {
+                  setEventNotInList(e.target.checked);
+                  setSelectedEventId("");
+                }}
+              />
+              <div>
+                <div className="font-medium">Mi evento no está en el listado</div>
+                <div className="text-sm text-gray-600">
+                  Puedes publicarla igual y avisamos a soporte para completar el evento.
+                </div>
               </div>
-            </div>
-          </label>
+            </label>
+          </div>
 
-          {/* Evento */}
           {!eventNotInList ? (
-            <div className="mt-6">
-              <label className="block text-sm font-medium">Evento *</label>
+            <div className="mb-5">
+              <label className="block text-sm font-medium mb-2">
+                Evento <span className="text-red-600">*</span>
+              </label>
+
               <select
-                value={eventId}
-                onChange={(e) => setEventId(e.target.value)}
-                className="mt-2 w-full rounded-xl border px-4 py-3"
+                className="w-full border rounded-xl px-4 py-3 bg-white"
+                value={selectedEventId}
+                onChange={(e) => setSelectedEventId(e.target.value)}
                 disabled={eventsLoading}
               >
-                <option value="">{eventsLoading ? 'Cargando eventos…' : 'Selecciona un evento…'}</option>
+                <option value="">
+                  {eventsLoading ? "Cargando eventos..." : "Selecciona un evento..."}
+                </option>
                 {events.map((ev) => (
                   <option key={ev.id} value={ev.id}>
-                    {ev.title}
-                    {ev.date ? ` — ${new Date(ev.date).toLocaleDateString('es-CL')}` : ''}
-                    {ev.location ? ` — ${ev.location}` : ''}
+                    {formatEventLabel(ev)}
                   </option>
                 ))}
               </select>
 
               {!eventsLoading && events.length === 0 && (
-                <div className="mt-2 text-sm text-red-600">
+                <div className="text-sm text-red-600 mt-2">
                   No hay eventos cargados. Crea uno en <span className="font-medium">/admin/events</span>.
                 </div>
               )}
             </div>
           ) : (
-            <div className="mt-6 grid gap-4">
+            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium">Nombre del evento *</label>
+                <label className="block text-sm font-medium mb-2">
+                  Nombre del evento <span className="text-red-600">*</span>
+                </label>
                 <input
-                  value={customEventName}
-                  onChange={(e) => setCustomEventName(e.target.value)}
-                  className="mt-2 w-full rounded-xl border px-4 py-3"
-                  placeholder="Ej: Chayanne - Tour 2026"
+                  className="w-full border rounded-xl px-4 py-3"
+                  value={manualEventName}
+                  onChange={(e) => setManualEventName(e.target.value)}
+                  placeholder="Ej: Chayanne"
                 />
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-1">
-                  <label className="block text-sm font-medium">Fecha *</label>
-                  <input
-                    value={customEventDate}
-                    onChange={(e) => setCustomEventDate(e.target.value)}
-                    className="mt-2 w-full rounded-xl border px-4 py-3"
-                    placeholder="dd/mm/aaaa"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium">Lugar *</label>
-                  <input
-                    value={customEventLocation}
-                    onChange={(e) => setCustomEventLocation(e.target.value)}
-                    className="mt-2 w-full rounded-xl border px-4 py-3"
-                    placeholder="Ej: Movistar Arena, Santiago"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Fecha (opcional)</label>
+                <input
+                  className="w-full border rounded-xl px-4 py-3"
+                  value={manualEventDate}
+                  onChange={(e) => setManualEventDate(e.target.value)}
+                  placeholder="Ej: 08/02/2026 21:00"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium mb-2">
+                  Ubicación (opcional)
+                </label>
+                <input
+                  className="w-full border rounded-xl px-4 py-3"
+                  value={manualEventLocation}
+                  onChange={(e) => setManualEventLocation(e.target.value)}
+                  placeholder="Ej: Estadio Nacional, Santiago"
+                />
               </div>
             </div>
           )}
 
-          {/* Título */}
-          <div className="mt-8">
-            <label className="block text-sm font-medium">Título de la entrada *</label>
+          <div className="mb-5">
+            <label className="block text-sm font-medium mb-2">
+              Título de la entrada <span className="text-red-600">*</span>
+            </label>
             <input
+              className="w-full border rounded-xl px-4 py-3"
               value={ticketTitle}
               onChange={(e) => setTicketTitle(e.target.value)}
-              className="mt-2 w-full rounded-xl border px-4 py-3"
               placeholder="Ej: Entrada General - Platea Alta"
             />
           </div>
 
-          {/* Descripción */}
-          <div className="mt-6">
-            <label className="block text-sm font-medium">Descripción</label>
+          <div className="mb-5">
+            <label className="block text-sm font-medium mb-2">Descripción</label>
             <textarea
+              className="w-full border rounded-xl px-4 py-3 min-h-[110px]"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="mt-2 w-full rounded-xl border px-4 py-3 min-h-[110px]"
-              placeholder="Ubicación específica, estado, restricciones, etc."
+              placeholder="Describe tu entrada (ubicación específica, estado, restricciones, etc.)"
             />
           </div>
 
-          {/* Sector / Fila / Asiento */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
             <div>
-              <label className="block text-sm font-medium">Sector</label>
+              <label className="block text-sm font-medium mb-2">Sector</label>
               <input
+                className="w-full border rounded-xl px-4 py-3"
                 value={sector}
                 onChange={(e) => setSector(e.target.value)}
-                className="mt-2 w-full rounded-xl border px-4 py-3"
                 placeholder="Cancha, Platea, etc."
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">Fila</label>
+              <label className="block text-sm font-medium mb-2">Fila</label>
               <input
+                className="w-full border rounded-xl px-4 py-3"
                 value={row}
                 onChange={(e) => setRow(e.target.value)}
-                className="mt-2 w-full rounded-xl border px-4 py-3"
-                placeholder="A, B, 1, 2..."
+                placeholder="A, B, 1, 2, etc."
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">Asiento</label>
+              <label className="block text-sm font-medium mb-2">Asiento</label>
               <input
+                className="w-full border rounded-xl px-4 py-3"
                 value={seat}
                 onChange={(e) => setSeat(e.target.value)}
-                className="mt-2 w-full rounded-xl border px-4 py-3"
-                placeholder="1, 2, 3..."
+                placeholder="1, 2, 3, etc."
               />
             </div>
           </div>
 
-          {/* Precios */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <div>
-              <label className="block text-sm font-medium">Precio de venta *</label>
+              <label className="block text-sm font-medium mb-2">
+                Precio de venta <span className="text-red-600">*</span>
+              </label>
               <input
                 type="number"
+                className="w-full border rounded-xl px-4 py-3"
                 value={price}
-                onChange={(e) => setPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                className="mt-2 w-full rounded-xl border px-4 py-3"
+                onChange={(e) => setPrice(e.target.value)}
                 placeholder="50000"
                 min={0}
               />
             </div>
             <div>
-              <label className="block text-sm font-medium">Precio original (opcional)</label>
+              <label className="block text-sm font-medium mb-2">
+                Precio original (opcional)
+              </label>
               <input
                 type="number"
+                className="w-full border rounded-xl px-4 py-3"
                 value={originalPrice}
-                onChange={(e) => setOriginalPrice(e.target.value === '' ? '' : Number(e.target.value))}
-                className="mt-2 w-full rounded-xl border px-4 py-3"
+                onChange={(e) => setOriginalPrice(e.target.value)}
                 placeholder="65000"
                 min={0}
               />
             </div>
           </div>
 
-          {/* Tipo de venta */}
-          <div className="mt-6">
-            <label className="block text-sm font-medium">Tipo de venta</label>
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button
-                type="button"
-                onClick={() => setSaleType('fixed')}
-                className={`text-left rounded-xl border p-4 hover:bg-gray-50 ${
-                  saleType === 'fixed' ? 'border-blue-500 ring-2 ring-blue-100' : ''
-                }`}
-              >
-                <div className="font-semibold">Precio fijo</div>
-                <div className="text-sm text-gray-600">Vende inmediatamente al precio que estableces.</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSaleType('auction')}
-                className={`text-left rounded-xl border p-4 hover:bg-gray-50 ${
-                  saleType === 'auction' ? 'border-blue-500 ring-2 ring-blue-100' : ''
-                }`}
-              >
-                <div className="font-semibold">Subasta (próximamente)</div>
-                <div className="text-sm text-gray-600">Los compradores podrán pujar por tu entrada.</div>
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-8 flex items-center justify-between">
+          <div className="flex items-center justify-end gap-3">
             <button
-              onClick={() => router.push('/')}
-              className="rounded-xl border px-5 py-3 font-medium hover:bg-gray-50"
+              className="px-5 py-3 rounded-xl border hover:bg-gray-50"
+              onClick={() => router.push("/events")}
             >
               Cancelar
             </button>
             <button
-              disabled={!canGoNextFromStep1}
-              onClick={() => goToStep(2)}
-              className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:opacity-50"
+              className="px-5 py-3 rounded-xl bg-black text-white hover:bg-gray-900"
+              onClick={goNext}
             >
               Continuar
             </button>
@@ -475,93 +570,162 @@ export default function SellPage() {
         </div>
       )}
 
-      {/* Step 2 */}
+      {/* STEP 2 */}
       {step === 2 && (
-        <div className="mt-8 border rounded-2xl p-8">
-          <h2 className="text-2xl font-bold">Archivo</h2>
-          <p className="mt-2 text-gray-600">
-            Sube una foto o PDF de tu entrada para validación. (Mientras más claro, más rápido aprobamos)
+        <div className="border rounded-2xl bg-white shadow-sm p-8">
+          <h2 className="text-2xl font-bold mb-2">Archivo</h2>
+          <p className="text-gray-600 mb-6">
+            Adjunta el <span className="font-medium">PDF</span> de tu entrada. (Solo PDF)
           </p>
 
-          <div className="mt-6">
+          <div className="border rounded-2xl p-6 bg-gray-50">
+            <label className="block text-sm font-medium mb-3">
+              Subir PDF <span className="text-red-600">*</span>
+            </label>
+
             <input
               type="file"
-              accept="image/*,application/pdf"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="w-full rounded-xl border px-4 py-3"
+              accept="application/pdf,.pdf"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                setPdfFile(f);
+
+                const err = validatePdf(f);
+                setPdfError(err);
+                if (err) setGlobalError(err);
+                else setGlobalError(null);
+              }}
+              className="block w-full"
             />
-            {file && (
-              <div className="mt-2 text-sm text-gray-700">
-                Archivo seleccionado: <span className="font-medium">{file.name}</span>
+
+            {pdfFile && !pdfError && (
+              <div className="mt-3 text-sm text-green-700">
+                Listo: <span className="font-medium">{pdfFile.name}</span>
               </div>
             )}
+
+            {pdfError && (
+              <div className="mt-3 text-sm text-red-600">{pdfError}</div>
+            )}
+
+            <div className="mt-4 text-xs text-gray-500">
+              Tip: si tienes imagen (PNG/JPG) desde Puntoticket, conviértela a PDF y listo.
+            </div>
           </div>
 
-          <div className="mt-8 flex items-center justify-between">
+          <div className="flex items-center justify-end gap-3 mt-8">
             <button
-              onClick={() => goToStep(1)}
-              className="rounded-xl border px-5 py-3 font-medium hover:bg-gray-50"
+              className="px-5 py-3 rounded-xl border hover:bg-gray-50"
+              onClick={goBack}
             >
               Volver
             </button>
             <button
-              onClick={() => goToStep(3)}
-              className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white"
+              className="px-5 py-3 rounded-xl bg-black text-white hover:bg-gray-900"
+              onClick={goNext}
             >
-              Confirmar
+              Continuar
             </button>
           </div>
         </div>
       )}
 
-      {/* Step 3 */}
+      {/* STEP 3 */}
       {step === 3 && (
-        <div className="mt-8 border rounded-2xl p-8">
-          <h2 className="text-2xl font-bold">Confirmar</h2>
+        <div className="border rounded-2xl bg-white shadow-sm p-8">
+          <h2 className="text-2xl font-bold mb-6">Confirmar publicación</h2>
 
-          {saveError && (
-            <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-red-800">
-              {saveError}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div className="border rounded-2xl p-6 bg-gray-50">
+              <div className="text-sm text-gray-600 mb-1">Evento</div>
+              <div className="font-semibold">
+                {eventNotInList
+                  ? manualEventName || "(sin nombre)"
+                  : selectedEvent
+                  ? selectedEvent.title
+                  : "(sin seleccionar)"}
+              </div>
+              <div className="text-sm text-gray-600 mt-2">
+                {eventNotInList
+                  ? [manualEventDate, manualEventLocation].filter(Boolean).join(" · ") ||
+                    "Se completará con soporte"
+                  : selectedEvent
+                  ? [selectedEvent.venue, selectedEvent.city].filter(Boolean).join(" · ")
+                  : ""}
+              </div>
             </div>
-          )}
 
-          <div className="mt-6 grid gap-3 text-sm">
-            <div>
-              <span className="text-gray-600">Evento:</span>{' '}
-              {!eventNotInList
-                ? selectedEvent?.title || '—'
-                : `${customEventName} (${customEventDate}) — ${customEventLocation}`}
+            <div className="border rounded-2xl p-6 bg-gray-50">
+              <div className="text-sm text-gray-600 mb-1">Archivo</div>
+              <div className="font-semibold">
+                {pdfFile ? pdfFile.name : "(sin archivo)"}
+              </div>
+              <div className="text-sm text-gray-600 mt-2">
+                Solo PDF · Validación automática
+              </div>
             </div>
-            <div>
-              <span className="text-gray-600">Entrada:</span> {ticketTitle || '—'}
-            </div>
-            <div>
-              <span className="text-gray-600">Precio:</span> {price === '' ? '—' : `$${Number(price).toLocaleString('es-CL')}`}
-            </div>
-            <div>
-              <span className="text-gray-600">Archivo:</span> {file ? file.name : 'No adjuntado'}
+
+            <div className="border rounded-2xl p-6 bg-gray-50 lg:col-span-2">
+              <div className="font-semibold mb-3">Entrada</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-gray-600">Título:</span>{" "}
+                  <span className="font-medium">{ticketTitle}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Precio:</span>{" "}
+                  <span className="font-medium">${Number(price).toLocaleString("es-CL")}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Sector:</span>{" "}
+                  <span className="font-medium">{sector || "-"}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Fila/Asiento:</span>{" "}
+                  <span className="font-medium">
+                    {row || "-"} / {seat || "-"}
+                  </span>
+                </div>
+                {description && (
+                  <div className="md:col-span-2">
+                    <span className="text-gray-600">Descripción:</span>{" "}
+                    <span className="font-medium">{description}</span>
+                  </div>
+                )}
+              </div>
+
+              {eventNotInList && (
+                <div className="mt-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  Ojo: como el evento no está en el listado, vamos a crear un ticket a soporte para que lo agreguen.
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="mt-8 flex items-center justify-between">
+          <div className="flex items-center justify-end gap-3">
             <button
-              onClick={() => goToStep(2)}
-              className="rounded-xl border px-5 py-3 font-medium hover:bg-gray-50"
+              className="px-5 py-3 rounded-xl border hover:bg-gray-50"
+              onClick={goBack}
+              disabled={submitting}
             >
               Volver
             </button>
 
             <button
-              disabled={saving}
-              onClick={handlePublish}
-              className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:opacity-60"
+              className="px-5 py-3 rounded-xl bg-black text-white hover:bg-gray-900 disabled:opacity-60"
+              onClick={submitListing}
+              disabled={submitting}
             >
-              {saving ? 'Publicando…' : 'Publicar entrada'}
+              {submitting ? "Publicando..." : "Publicar entrada"}
             </button>
           </div>
         </div>
       )}
+
+      {/* Debug helpers (opcionales) */}
+      <div className="mt-6 text-xs text-gray-400">
+        {eventsLoading ? "Cargando eventos..." : `Eventos cargados: ${events.length}`}
+      </div>
     </div>
   );
 }
-
