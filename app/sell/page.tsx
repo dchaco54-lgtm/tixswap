@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 
@@ -33,7 +33,6 @@ function formatDateLine(ev: UiEvent) {
   const t = parseMaybeDate(ev.startsAt);
   if (!Number.isFinite(t)) return "";
   const d = new Date(t);
-  // Formato simple “07 feb 2026” + hora
   return d.toLocaleString("es-CL", {
     day: "2-digit",
     month: "short",
@@ -84,12 +83,7 @@ function Stepper({ step }: { step: Step }) {
 
             {idx < items.length - 1 && (
               <div className="hidden flex-1 items-center px-2 sm:flex">
-                <div
-                  className={[
-                    "h-1 w-full rounded-full",
-                    step > it.n ? "bg-white/70" : "bg-white/20",
-                  ].join(" ")}
-                />
+                <div className={["h-1 w-full rounded-full", step > it.n ? "bg-white/70" : "bg-white/20"].join(" ")} />
               </div>
             )}
           </React.Fragment>
@@ -99,27 +93,139 @@ function Stepper({ step }: { step: Step }) {
   );
 }
 
+/** ✅ Nuevo: selector con búsqueda (1 sola caja) */
+function EventCombobox({
+  disabled,
+  loading,
+  events,
+  value,
+  onChange,
+  placeholder = "Busca y selecciona un evento…",
+}: {
+  disabled?: boolean;
+  loading?: boolean;
+  events: UiEvent[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder?: string;
+}) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const selected = useMemo(() => events.find((e) => e.id === value) ?? null, [events, value]);
+
+  // Si cambia el value desde afuera, reflejamos el label en el input
+  useEffect(() => {
+    if (selected) setQuery(selected.title);
+    if (!selected && !open) setQuery("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return events;
+    return events.filter((e) => {
+      const hay = `${e.title} ${e.venue ?? ""} ${e.city ?? ""} ${e.category ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [events, query]);
+
+  // Cerrar al hacer click fuera
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          if (!open) setOpen(true);
+          // si el usuario edita, dejamos de “fijar” selección hasta que elija otra
+          if (value) onChange("");
+        }}
+        onFocus={() => setOpen(true)}
+        disabled={disabled}
+        placeholder={loading ? "Cargando eventos..." : placeholder}
+        className={[
+          "w-full rounded-xl border px-4 py-3 text-sm outline-none transition",
+          disabled
+            ? "border-slate-200 bg-slate-50 text-slate-400"
+            : "border-slate-200 bg-white text-slate-900 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100",
+        ].join(" ")}
+      />
+
+      {/* Dropdown */}
+      {open && !disabled && (
+        <div className="absolute z-20 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+          {loading ? (
+            <div className="px-4 py-3 text-sm text-slate-600">Cargando…</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-4 py-3 text-sm text-slate-600">No encontré eventos con ese texto.</div>
+          ) : (
+            filtered.map((ev) => {
+              const isSelected = ev.id === value;
+              return (
+                <button
+                  type="button"
+                  key={ev.id}
+                  onClick={() => {
+                    onChange(ev.id);
+                    setQuery(ev.title);
+                    setOpen(false);
+                  }}
+                  className={[
+                    "w-full px-4 py-3 text-left transition",
+                    "hover:bg-slate-50",
+                    isSelected ? "bg-indigo-50" : "bg-white",
+                  ].join(" ")}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
+                      <div className="mt-1 text-xs text-slate-600">
+                        {[ev.venue, ev.city, ev.startsAt ? formatDateLine(ev) : ""].filter(Boolean).join(" • ")}
+                      </div>
+                    </div>
+                    {isSelected && (
+                      <div className="mt-0.5 rounded-full bg-indigo-600 px-2 py-1 text-[10px] font-semibold text-white">
+                        Elegido
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SellPage() {
   const router = useRouter();
 
-  // --- Events ---
   const [events, setEvents] = useState<UiEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
   const [selectedEventId, setSelectedEventId] = useState("");
 
-  // --- Flow / UI ---
   const [step, setStep] = useState<Step>(1);
 
-  // “Crear evento” (mi evento no está)
   const [createEvent, setCreateEvent] = useState(false);
   const [customEventName, setCustomEventName] = useState("");
   const [customEventDate, setCustomEventDate] = useState("");
   const [customEventVenue, setCustomEventVenue] = useState("");
 
-  // Listing fields
   const [ticketTitle, setTicketTitle] = useState("");
   const [description, setDescription] = useState("");
   const [sector, setSector] = useState("");
@@ -131,13 +237,11 @@ export default function SellPage() {
   const [saleType, setSaleType] = useState<"fixed" | "auction">("fixed");
   const [emergencyAuction, setEmergencyAuction] = useState(false);
 
-  // PDF
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Carga eventos (resistente a nombres de columnas)
   useEffect(() => {
     let mounted = true;
 
@@ -147,13 +251,11 @@ export default function SellPage() {
 
       try {
         const { data, error } = await supabase.from("events").select("*");
-
         if (error) throw error;
 
         const mapped: UiEvent[] = (data ?? []).map((e: any) => {
           const startsAt =
-            pickFirst<string>(e, ["starts_at", "start_at", "date", "event_date", "datetime", "start_date"]) ??
-            null;
+            pickFirst<string>(e, ["starts_at", "start_at", "date", "event_date", "datetime", "start_date"]) ?? null;
 
           return {
             id: String(pickFirst(e, ["id"]) ?? ""),
@@ -168,9 +270,7 @@ export default function SellPage() {
 
         mapped.sort((a, b) => parseMaybeDate(a.startsAt) - parseMaybeDate(b.startsAt));
 
-        if (mounted) {
-          setEvents(mapped.filter((x) => x.id));
-        }
+        if (mounted) setEvents(mapped.filter((x) => x.id));
       } catch (err: any) {
         if (mounted) {
           setEvents([]);
@@ -186,23 +286,9 @@ export default function SellPage() {
     };
   }, []);
 
-  const filteredEvents = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return events;
-
-    return events.filter((e) => {
-      const hay = `${e.title} ${e.venue ?? ""} ${e.city ?? ""} ${e.category ?? ""}`.toLowerCase();
-      return hay.includes(q);
-    });
-  }, [events, search]);
-
-  const selectedEvent = useMemo(
-    () => events.find((e) => e.id === selectedEventId) ?? null,
-    [events, selectedEventId]
-  );
+  const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId) ?? null, [events, selectedEventId]);
 
   function moneyOnly(v: string) {
-    // deja solo dígitos
     return v.replace(/[^\d]/g, "");
   }
 
@@ -212,21 +298,11 @@ export default function SellPage() {
 
     if (!file) return;
 
-    const isPdf =
-      file.type === "application/pdf" ||
-      file.name.toLowerCase().endsWith(".pdf");
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) return setPdfError("El archivo debe ser PDF.");
 
-    if (!isPdf) {
-      setPdfError("El archivo debe ser PDF.");
-      return;
-    }
-
-    // Opcional: límite 10MB
     const max = 10 * 1024 * 1024;
-    if (file.size > max) {
-      setPdfError("El PDF es muy pesado (máx 10MB).");
-      return;
-    }
+    if (file.size > max) return setPdfError("El PDF es muy pesado (máx 10MB).");
 
     setPdfFile(file);
   }
@@ -236,7 +312,6 @@ export default function SellPage() {
 
     if (createEvent) {
       if (!customEventName.trim()) return setFormError("Pon el nombre del evento."), false;
-      // fecha/venue opcionales, pero recomendable
     } else {
       if (!selectedEventId) return setFormError("Selecciona un evento."), false;
     }
@@ -273,102 +348,56 @@ export default function SellPage() {
   }
 
   async function handlePublish() {
-    // Por ahora NO tocamos lógica pesada (para no “cagarla”).
-    // Acá después conectamos: crear ticket + subir PDF a Storage + etc.
-    alert("Listo ✨ (publicación pendiente de conectar). Mañana lo dejamos full pro.");
+    alert("Listo ✨ (publicación pendiente de conectar).");
     router.push("/");
   }
 
   return (
     <main className="min-h-screen bg-[#f5f7fb]">
       <div className="mx-auto max-w-5xl px-4 py-10">
-        {/* Título como en tu referencia */}
         <div className="mb-6">
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">
-            Vender entrada
-          </h1>
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">Vender entrada</h1>
           <p className="mt-2 text-base text-slate-600">
             Publica tu entrada con respaldo. Elige evento, completa detalles y sube tu PDF.
           </p>
         </div>
 
         <div className="overflow-hidden rounded-3xl bg-white shadow-lg ring-1 ring-black/5">
-          {/* Header degradado + stepper */}
           <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600 px-6 py-8 sm:px-10">
             <div className="text-3xl font-extrabold text-white">Vender entrada</div>
-            <div className="mt-2 text-sm text-white/85">
-              Completa los datos y publica con pago protegido.
-            </div>
+            <div className="mt-2 text-sm text-white/85">Completa los datos y publica con pago protegido.</div>
             <Stepper step={step} />
           </div>
 
-          {/* Body */}
           <div className="px-4 py-8 sm:px-10">
-            {/* Alerts */}
             {(eventsError || formError || pdfError) && (
               <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {formError ?? pdfError ?? eventsError}
               </div>
             )}
 
-            {/* STEP 1 */}
             {step === 1 && (
               <div className="space-y-8">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-900">
-                    Detalles de la entrada
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Completa la info básica para publicar tu ticket.
-                  </p>
+                  <h2 className="text-2xl font-bold text-slate-900">Detalles de la entrada</h2>
+                  <p className="mt-1 text-sm text-slate-600">Completa la info básica para publicar tu ticket.</p>
                 </div>
 
-                {/* Evento */}
                 <div className="space-y-3">
                   <label className="block text-sm font-semibold text-slate-900">
                     Evento <span className="text-red-500">*</span>
                   </label>
 
-                  {/* Buscar */}
-                  {!createEvent && (
-                    <input
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Escribe para buscar (ej: Chayanne, Doja Cat...)"
-                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                    />
-                  )}
-
-                  {/* Select */}
-                  <select
-                    disabled={createEvent || loadingEvents}
+                  {/* ✅ Cambiado: UN SOLO selector con búsqueda */}
+                  <EventCombobox
+                    disabled={createEvent}
+                    loading={loadingEvents}
+                    events={events}
                     value={selectedEventId}
-                    onChange={(e) => setSelectedEventId(e.target.value)}
-                    className={[
-                      "w-full rounded-xl border px-4 py-3 text-sm outline-none transition",
-                      createEvent
-                        ? "border-slate-200 bg-slate-50 text-slate-400"
-                        : "border-slate-200 bg-white text-slate-900 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100",
-                    ].join(" ")}
-                  >
-                    <option value="">
-                      {loadingEvents
-                        ? "Cargando eventos..."
-                        : filteredEvents.length
-                        ? "Selecciona un evento"
-                        : "No hay eventos disponibles"}
-                    </option>
-                    {filteredEvents.map((ev) => (
-                      <option key={ev.id} value={ev.id}>
-                        {ev.title}
-                        {ev.venue ? ` • ${ev.venue}` : ""}
-                        {ev.city ? ` • ${ev.city}` : ""}
-                        {ev.startsAt ? ` • ${formatDateLine(ev)}` : ""}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(id) => setSelectedEventId(id)}
+                    placeholder="Busca y selecciona un evento…"
+                  />
 
-                  {/* Crear evento */}
                   <label className="mt-2 flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <input
                       type="checkbox"
@@ -382,16 +411,11 @@ export default function SellPage() {
                       className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-200"
                     />
                     <div className="text-sm">
-                      <div className="font-semibold text-slate-900">
-                        Mi evento no está en el listado
-                      </div>
-                      <div className="text-slate-600">
-                        Dejas la solicitud y Soporte lo crea para completar el evento.
-                      </div>
+                      <div className="font-semibold text-slate-900">Mi evento no está en el listado</div>
+                      <div className="text-slate-600">Dejas la solicitud y Soporte lo crea para completar el evento.</div>
                     </div>
                   </label>
 
-                  {/* Campos cuando crea evento */}
                   {createEvent && (
                     <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:grid-cols-3">
                       <div className="sm:col-span-2">
@@ -406,9 +430,7 @@ export default function SellPage() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700">
-                          Fecha (opcional)
-                        </label>
+                        <label className="block text-xs font-semibold text-slate-700">Fecha (opcional)</label>
                         <input
                           value={customEventDate}
                           onChange={(e) => setCustomEventDate(e.target.value)}
@@ -417,9 +439,7 @@ export default function SellPage() {
                         />
                       </div>
                       <div className="sm:col-span-3">
-                        <label className="block text-xs font-semibold text-slate-700">
-                          Lugar (opcional)
-                        </label>
+                        <label className="block text-xs font-semibold text-slate-700">Lugar (opcional)</label>
                         <input
                           value={customEventVenue}
                           onChange={(e) => setCustomEventVenue(e.target.value)}
@@ -430,7 +450,6 @@ export default function SellPage() {
                     </div>
                   )}
 
-                  {/* Mini preview */}
                   {!createEvent && selectedEvent && (
                     <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
                       <div className="font-semibold text-slate-900">{selectedEvent.title}</div>
@@ -443,7 +462,6 @@ export default function SellPage() {
                   )}
                 </div>
 
-                {/* Título */}
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-slate-900">
                     Título de la entrada <span className="text-red-500">*</span>
@@ -456,7 +474,6 @@ export default function SellPage() {
                   />
                 </div>
 
-                {/* Descripción */}
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-slate-900">Descripción</label>
                   <textarea
@@ -468,7 +485,6 @@ export default function SellPage() {
                   />
                 </div>
 
-                {/* Sector/Fila/Asiento */}
                 <div className="grid gap-4 sm:grid-cols-3">
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold text-slate-900">Sector</label>
@@ -499,7 +515,6 @@ export default function SellPage() {
                   </div>
                 </div>
 
-                {/* Precios */}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold text-slate-900">
@@ -514,9 +529,7 @@ export default function SellPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-slate-900">
-                      Precio original (opcional)
-                    </label>
+                    <label className="block text-sm font-semibold text-slate-900">Precio original (opcional)</label>
                     <input
                       value={priceOriginal}
                       onChange={(e) => setPriceOriginal(moneyOnly(e.target.value))}
@@ -527,12 +540,10 @@ export default function SellPage() {
                   </div>
                 </div>
 
-                {/* Tipo de venta */}
                 <div className="space-y-3">
                   <div className="text-sm font-semibold text-slate-900">Tipo de venta</div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    {/* Precio fijo */}
                     <button
                       type="button"
                       onClick={() => setSaleType("fixed")}
@@ -544,19 +555,14 @@ export default function SellPage() {
                       ].join(" ")}
                     >
                       <div className="flex items-start gap-3">
-                        <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-100 text-emerald-700">
-                          $
-                        </div>
+                        <div className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-100 text-emerald-700">$</div>
                         <div>
                           <div className="font-semibold text-slate-900">Precio fijo</div>
-                          <div className="mt-1 text-sm text-slate-600">
-                            Vende inmediatamente al precio que estableciste
-                          </div>
+                          <div className="mt-1 text-sm text-slate-600">Vende inmediatamente al precio que estableciste</div>
                         </div>
                       </div>
                     </button>
 
-                    {/* Subasta */}
                     <button
                       type="button"
                       onClick={() => setSaleType("auction")}
@@ -566,13 +572,9 @@ export default function SellPage() {
                           ? "border-indigo-500 bg-indigo-50 ring-4 ring-indigo-100"
                           : "border-slate-200 bg-white hover:border-slate-300",
                       ].join(" ")}
-                      // Si quieres dejarlo “future”, descomenta esto:
-                      // disabled
                     >
                       <div className="flex items-start gap-3">
-                        <div className="grid h-9 w-9 place-items-center rounded-xl bg-orange-100 text-orange-700">
-                          ⏱
-                        </div>
+                        <div className="grid h-9 w-9 place-items-center rounded-xl bg-orange-100 text-orange-700">⏱</div>
                         <div>
                           <div className="flex items-center gap-2">
                             <div className="font-semibold text-slate-900">Subasta</div>
@@ -580,15 +582,12 @@ export default function SellPage() {
                               Próximamente
                             </span>
                           </div>
-                          <div className="mt-1 text-sm text-slate-600">
-                            Deja que los compradores pujen por tu entrada
-                          </div>
+                          <div className="mt-1 text-sm text-slate-600">Deja que los compradores pujen por tu entrada</div>
                         </div>
                       </div>
                     </button>
                   </div>
 
-                  {/* Subasta de emergencia */}
                   <label className="flex items-start gap-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3">
                     <input
                       type="checkbox"
@@ -597,18 +596,14 @@ export default function SellPage() {
                       className="mt-1 h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-200"
                     />
                     <div className="text-sm">
-                      <div className="font-semibold text-orange-800">
-                        Subasta automática de emergencia
-                      </div>
+                      <div className="font-semibold text-orange-800">Subasta automática de emergencia</div>
                       <div className="text-orange-700">
-                        Si tu entrada no se vende, se activa una subasta 2 horas antes del evento.
-                        (lo dejaremos funcionando después)
+                        Si tu entrada no se vende, se activa una subasta 2 horas antes del evento. (lo dejaremos funcionando después)
                       </div>
                     </div>
                   </label>
                 </div>
 
-                {/* Buttons */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <button
                     type="button"
@@ -629,23 +624,18 @@ export default function SellPage() {
               </div>
             )}
 
-            {/* STEP 2 */}
             {step === 2 && (
               <div className="space-y-8">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">Archivo</h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Adjunta tu ticket en PDF. (Validamos que sea PDF)
-                  </p>
+                  <p className="mt-1 text-sm text-slate-600">Adjunta tu ticket en PDF. (Validamos que sea PDF)</p>
                 </div>
 
                 <div className="rounded-2xl border border-slate-200 bg-white p-6">
                   <label className="block text-sm font-semibold text-slate-900">
                     PDF del ticket <span className="text-red-500">*</span>
                   </label>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Asegúrate de que el PDF sea legible y corresponda al evento.
-                  </p>
+                  <p className="mt-1 text-sm text-slate-600">Asegúrate de que el PDF sea legible y corresponda al evento.</p>
 
                   <div className="mt-4">
                     <input
@@ -685,21 +675,16 @@ export default function SellPage() {
               </div>
             )}
 
-            {/* STEP 3 */}
             {step === 3 && (
               <div className="space-y-8">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">Confirmar</h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Revisa los datos antes de publicar.
-                  </p>
+                  <p className="mt-1 text-sm text-slate-600">Revisa los datos antes de publicar.</p>
                 </div>
 
                 <div className="grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 sm:grid-cols-2">
                   <div className="sm:col-span-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Evento
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Evento</div>
                     <div className="mt-1 text-lg font-bold text-slate-900">
                       {createEvent ? customEventName : selectedEvent?.title ?? "—"}
                     </div>
@@ -713,48 +698,30 @@ export default function SellPage() {
                   </div>
 
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Título
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Título</div>
                     <div className="mt-1 font-semibold text-slate-900">{ticketTitle}</div>
                   </div>
 
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Precio de venta
-                    </div>
-                    <div className="mt-1 font-semibold text-slate-900">
-                      ${Number(priceSale || "0").toLocaleString("es-CL")}
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Precio de venta</div>
+                    <div className="mt-1 font-semibold text-slate-900">${Number(priceSale || "0").toLocaleString("es-CL")}</div>
                   </div>
 
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Ubicación
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ubicación</div>
                     <div className="mt-1 text-sm text-slate-700">
-                      {[sector, fila && `Fila ${fila}`, asiento && `Asiento ${asiento}`]
-                        .filter(Boolean)
-                        .join(" • ") || "—"}
+                      {[sector, fila && `Fila ${fila}`, asiento && `Asiento ${asiento}`].filter(Boolean).join(" • ") || "—"}
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Tipo de venta
-                    </div>
-                    <div className="mt-1 text-sm font-semibold text-slate-900">
-                      {saleType === "fixed" ? "Precio fijo" : "Subasta"}
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tipo de venta</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">{saleType === "fixed" ? "Precio fijo" : "Subasta"}</div>
                   </div>
 
                   <div className="sm:col-span-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      PDF
-                    </div>
-                    <div className="mt-1 text-sm text-slate-700">
-                      {pdfFile ? pdfFile.name : "—"}
-                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">PDF</div>
+                    <div className="mt-1 text-sm text-slate-700">{pdfFile ? pdfFile.name : "—"}</div>
                   </div>
                 </div>
 
@@ -780,10 +747,7 @@ export default function SellPage() {
           </div>
         </div>
 
-        {/* debug suave (por si estás en guerra) */}
-        <div className="mt-6 text-xs text-slate-400">
-          {loadingEvents ? "Cargando eventos..." : `${events.length} eventos cargados.`}
-        </div>
+        <div className="mt-6 text-xs text-slate-400">{loadingEvents ? "Cargando eventos..." : `${events.length} eventos cargados.`}</div>
       </div>
     </main>
   );
