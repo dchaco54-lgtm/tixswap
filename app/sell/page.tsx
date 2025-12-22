@@ -8,7 +8,6 @@ type SaleType = 'fixed' | 'auction';
 
 interface SellFormState {
   eventId: string;
-  title: string;
   description: string;
   sector: string;
   row: string;
@@ -29,7 +28,6 @@ function SellForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [state, setState] = useState<SellFormState>({
     eventId: '',
-    title: '',
     description: '',
     sector: '',
     row: '',
@@ -102,6 +100,12 @@ function SellForm() {
 
     if (!state.eventId) {
       alert('Selecciona un evento antes de continuar.');
+      return;
+    }
+
+    // ✅ ahora descripción es obligatoria
+    if (!state.description.trim()) {
+      alert('Completa la descripción de tu entrada.');
       return;
     }
 
@@ -201,7 +205,7 @@ function SellForm() {
                   </div>
                 </div>
 
-                {/* Select escondido REAL (para accesibilidad + required), pero IMPOSIBLE que se vea */}
+                {/* Select escondido REAL */}
                 <select
                   name="eventId"
                   value={state.eventId}
@@ -267,7 +271,7 @@ function SellForm() {
                   </div>
                 )}
 
-                {/* “Después” del selector: muestra evento elegido (sin cambiar estructura general) */}
+                {/* Muestra resumen del evento seleccionado */}
                 {selectedEvent && !isEventOpen && (
                   <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
                     <div className="text-sm font-semibold text-gray-900">
@@ -281,33 +285,19 @@ function SellForm() {
               </div>
             </div>
 
-            {/* Título */}
+            {/* ✅ Solo descripción (obligatoria) */}
             <div>
               <label className="block text-sm font-medium text-gray-900">
-                Título de la entrada <span className="text-red-500">*</span>
-              </label>
-              <input
-                name="title"
-                value={state.title}
-                onChange={handleChange}
-                placeholder="Ej: Entrada General - Platea Alta"
-                className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
-                required
-              />
-            </div>
-
-            {/* Descripción */}
-            <div>
-              <label className="block text-sm font-medium text-gray-900">
-                Descripción
+                Descripción <span className="text-red-500">*</span>
               </label>
               <textarea
                 name="description"
                 value={state.description}
                 onChange={handleChange}
-                placeholder="Describe tu entrada (ubicación específica, estado, restricciones, etc.)"
+                placeholder="Ej: Entrada General - Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
                 className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
                 rows={4}
+                required
               />
             </div>
 
@@ -415,7 +405,8 @@ function SellForm() {
                   className="cursor-not-allowed rounded-xl border border-gray-200 bg-gray-50 p-4 text-left opacity-70"
                 >
                   <div className="text-sm font-semibold text-gray-900">
-                    ⏱️ Subasta <span className="text-gray-500">(próximamente)</span>
+                    ⏱️ Subasta{' '}
+                    <span className="text-gray-500">(próximamente)</span>
                   </div>
                   <div className="mt-1 text-xs text-gray-600">
                     Deja que los compradores pujen por tu entrada
@@ -424,7 +415,7 @@ function SellForm() {
               </div>
             </div>
 
-            {/* Botón continuar (mvp) */}
+            {/* Botones */}
             <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
