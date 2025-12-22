@@ -119,374 +119,336 @@ function SellForm() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-10">
-      <div className="mx-auto max-w-5xl px-4">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-6">
-          Vender entrada
-        </h1>
+    <div className="mx-auto max-w-6xl px-4 py-10">
+      <h1 className="text-3xl font-bold text-gray-900">Vender entrada</h1>
 
-        <div className="mb-8 rounded-2xl bg-gradient-to-r from-indigo-500 to-blue-500 p-[1px]">
-          <div className="flex justify-between rounded-2xl bg-white px-6 py-4 text-sm font-medium">
-            <StepIndicator label="Detalles" step={1} activeStep={step} />
-            <StepIndicator label="Archivo" step={2} activeStep={step} />
-            <StepIndicator label="Confirmar" step={3} activeStep={step} />
+      <div className="mt-8 rounded-2xl border border-gray-200 bg-white shadow-sm">
+        {/* Steps (no tocar estructura) */}
+        <div className="px-6 pt-6">
+          <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white">
+                1
+              </span>
+              <span className="font-medium text-gray-900">Detalles</span>
+            </div>
+
+            <div className="flex items-center gap-2 opacity-70">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-gray-700">
+                2
+              </span>
+              <span>Archivo</span>
+            </div>
+
+            <div className="flex items-center gap-2 opacity-70">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-gray-700">
+                3
+              </span>
+              <span>Confirmar</span>
+            </div>
           </div>
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-2xl bg-white shadow-sm border border-gray-100 p-6 space-y-6"
-        >
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">
+        <div className="px-6 pb-8 pt-6">
+          <h2 className="text-2xl font-semibold text-gray-900">
             Detalles de la entrada
           </h2>
 
-          {/* ✅ EVENTO: SOLO BUSCADOR + DROPDOWN PRO (sin select feo visible) */}
-          <div className="space-y-2" ref={eventBoxRef}>
-            <label className="block text-sm font-medium text-gray-700">
-              Evento *
-            </label>
-            <p className="text-xs text-gray-500 -mt-1">
-              Haz click para desplegar. Escribe para filtrar y selecciona.
-            </p>
+          <form className="mt-6 space-y-6" onSubmit={handleSubmit}>
+            {/* EVENTO */}
+            <div>
+              <label className="block text-sm font-medium text-gray-900">
+                Evento <span className="text-red-500">*</span>
+              </label>
+              <p className="mt-1 text-xs text-gray-500">
+                Haz click para desplegar. Escribe para filtrar y selecciona.
+              </p>
 
-            <div className="relative">
-              <input
-                type="text"
-                value={eventQuery}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setEventQuery(v);
-                  setIsEventOpen(true);
+              {/* ✅ ÚNICO CONTROL visible: input + dropdown (estilo home) */}
+              <div className="relative mt-2" ref={eventBoxRef}>
+                <div className="relative">
+                  <input
+                    value={eventQuery}
+                    onChange={(e) => {
+                      setEventQuery(e.target.value);
+                      setIsEventOpen(true);
+                    }}
+                    onFocus={() => setIsEventOpen(true)}
+                    onClick={() => setIsEventOpen((v) => !v)}
+                    placeholder="Busca eventos, artistas, lugares..."
+                    className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 pr-12 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                    aria-label="Buscar evento"
+                    role="combobox"
+                    aria-expanded={isEventOpen}
+                    aria-controls="event-listbox"
+                    autoComplete="off"
+                  />
 
-                  // Solo borra selección si el usuario escribió algo distinto al título del seleccionado
-                  if (selectedEvent && v !== selectedEvent.title) {
-                    setState((prev) => ({ ...prev, eventId: '' }));
-                  }
-                  if (!selectedEvent) {
-                    setState((prev) => ({ ...prev, eventId: '' }));
-                  }
-                }}
-                onFocus={() => setIsEventOpen(true)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') setIsEventOpen(false);
-                }}
-                placeholder="Busca eventos, artistas, lugares..."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+                  {/* Flecha corporativa (recuadro + gradiente) */}
+                  <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 shadow-sm">
+                    <svg
+                      className="h-4 w-4 text-white"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </div>
+                </div>
 
-              {/* Chevron dentro del input (deja claro que es desplegable) */}
-              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
+                {/* Select escondido REAL (para accesibilidad + required), pero IMPOSIBLE que se vea */}
+                <select
+                  name="eventId"
+                  value={state.eventId}
+                  onChange={(e) => pickEvent(e.target.value)}
+                  required
+                  className="absolute -left-[9999px] top-0 h-px w-px opacity-0 pointer-events-none"
+                  tabIndex={-1}
                   aria-hidden="true"
                 >
-                  <path
-                    d="M7 10l5 5 5-5"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
+                  <option value="">Selecciona un evento</option>
+                  {EVENTS.map((ev) => (
+                    <option key={ev.id} value={ev.id}>
+                      {ev.title}
+                    </option>
+                  ))}
+                </select>
 
-              {/* Dropdown con ESPACIO antes y después */}
-              {isEventOpen && (
-                <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
-                  <div className="px-3 py-2 border-b border-gray-100 text-xs text-gray-500">
-                    {filteredEvents.length} evento(s)
+                {isEventOpen && (
+                  <div
+                    className="absolute z-20 mt-2 w-full overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl ring-1 ring-black/5"
+                    onMouseDown={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
+                      {filteredEvents.length} evento
+                      {filteredEvents.length === 1 ? '' : 's'}
+                    </div>
+
+                    <ul
+                      id="event-listbox"
+                      className="max-h-64 overflow-auto py-1"
+                      role="listbox"
+                    >
+                      {filteredEvents.length === 0 ? (
+                        <li className="px-4 py-3 text-sm text-gray-500">
+                          No encontramos eventos con ese criterio.
+                        </li>
+                      ) : (
+                        filteredEvents.map((ev) => {
+                          const active = ev.id === state.eventId;
+                          return (
+                            <li key={ev.id} role="option" aria-selected={active}>
+                              <button
+                                type="button"
+                                onClick={() => pickEvent(ev.id)}
+                                className={[
+                                  'w-full px-4 py-3 text-left',
+                                  'hover:bg-blue-50',
+                                  active ? 'bg-blue-50' : '',
+                                ].join(' ')}
+                              >
+                                <div className="text-sm font-semibold text-gray-900">
+                                  {ev.title}
+                                </div>
+                                <div className="mt-0.5 text-xs text-gray-600">
+                                  {ev.location} • {ev.date}
+                                </div>
+                              </button>
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
                   </div>
+                )}
 
-                  <div className="max-h-72 overflow-auto py-1">
-                    {filteredEvents.length === 0 ? (
-                      <div className="px-3 py-3 text-sm text-gray-500">
-                        No encontramos eventos con “{eventQuery}”.
-                      </div>
-                    ) : (
-                      filteredEvents.map((event) => {
-                        const isSelected = state.eventId === event.id;
-                        return (
-                          <button
-                            key={event.id}
-                            type="button"
-                            onClick={() => pickEvent(event.id)}
-                            className={`w-full px-3 py-3 text-left transition ${
-                              isSelected
-                                ? 'bg-blue-50'
-                                : 'hover:bg-gray-50'
-                            }`}
-                          >
-                            <div className="text-sm font-semibold text-gray-900">
-                              {event.title}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {event.date} — {event.location}
-                            </div>
-                          </button>
-                        );
-                      })
-                    )}
+                {/* “Después” del selector: muestra evento elegido (sin cambiar estructura general) */}
+                {selectedEvent && !isEventOpen && (
+                  <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+                    <div className="text-sm font-semibold text-gray-900">
+                      {selectedEvent.title}
+                    </div>
+                    <div className="mt-0.5 text-xs text-gray-600">
+                      {selectedEvent.location} • {selectedEvent.date}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-
-            {/* ✅ Hidden select SOLO para required del form (NO se ve, NO rompe UX) */}
-            <select
-              name="eventId"
-              value={state.eventId}
-              onChange={handleChange}
-              required
-              tabIndex={-1}
-              aria-hidden="true"
-              className="sr-only"
-            >
-              <option value="">Selecciona un evento</option>
-              {EVENTS.map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.title} — {event.date} — {event.location}
-                </option>
-              ))}
-            </select>
-
-            {/* Espacio “post” y confirmación visual suave */}
-            {selectedEvent && (
-              <div className="mt-3 rounded-lg border border-gray-200 bg-white px-3 py-2">
-                <div className="text-sm font-semibold text-gray-900">
-                  {selectedEvent.title}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {selectedEvent.date} — {selectedEvent.location}
-                </div>
+                )}
               </div>
-            )}
-          </div>
-
-          {/* Título entrada */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              Título de la entrada *
-            </label>
-            <input
-              type="text"
-              name="title"
-              value={state.title}
-              onChange={handleChange}
-              placeholder="Ej: Entrada General - Platea Alta"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              required
-            />
-          </div>
-
-          {/* Descripción */}
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">
-              Descripción
-            </label>
-            <textarea
-              name="description"
-              value={state.description}
-              onChange={handleChange}
-              rows={3}
-              placeholder="Describe tu entrada (ubicación específica, estado, restricciones, etc.)"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-          </div>
-
-          {/* Sector / Fila / Asiento */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Sector
-              </label>
-              <input
-                type="text"
-                name="sector"
-                value={state.sector}
-                onChange={handleChange}
-                placeholder="Campo, Platea, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
             </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Fila
-              </label>
-              <input
-                type="text"
-                name="row"
-                value={state.row}
-                onChange={handleChange}
-                placeholder="A, B, 1, 2, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Asiento
-              </label>
-              <input
-                type="text"
-                name="seat"
-                value={state.seat}
-                onChange={handleChange}
-                placeholder="1, 2, 3, etc."
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
 
-          {/* Precios */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Precio de venta *
+            {/* Título */}
+            <div>
+              <label className="block text-sm font-medium text-gray-900">
+                Título de la entrada <span className="text-red-500">*</span>
               </label>
               <input
-                type="number"
-                min={0}
-                name="salePrice"
-                value={state.salePrice}
+                name="title"
+                value={state.title}
                 onChange={handleChange}
-                placeholder="50000"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Ej: Entrada General - Platea Alta"
+                className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
                 required
               />
             </div>
-            <div className="space-y-1">
-              <label className="block text-sm font-medium text-gray-700">
-                Precio original (opcional)
+
+            {/* Descripción */}
+            <div>
+              <label className="block text-sm font-medium text-gray-900">
+                Descripción
               </label>
-              <input
-                type="number"
-                min={0}
-                name="originalPrice"
-                value={state.originalPrice}
+              <textarea
+                name="description"
+                value={state.description}
                 onChange={handleChange}
-                placeholder="60000"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Describe tu entrada (ubicación específica, estado, restricciones, etc.)"
+                className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                rows={4}
               />
             </div>
-          </div>
 
-          {/* Tipo de venta */}
-          <div className="space-y-3">
-            <label className="block text-sm font-medium text-gray-700">
-              Tipo de venta
-            </label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() =>
-                  setState((prev) => ({ ...prev, saleType: 'fixed' }))
-                }
-                className={`flex flex-col items-start rounded-xl border px-4 py-3 text-left text-sm transition ${
-                  state.saleType === 'fixed'
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 bg-white hover:bg-gray-50'
-                }`}
-              >
-                <span className="font-semibold text-gray-900">Precio fijo</span>
-                <span className="text-gray-500 text-xs">
-                  Vende inmediatamente al precio que estableces.
-                </span>
-              </button>
-
-              <button
-                type="button"
-                disabled
-                className="flex flex-col items-start rounded-xl border border-gray-200 px-4 py-3 text-left text-sm bg-gray-50 cursor-not-allowed opacity-60"
-              >
-                <span className="font-semibold text-gray-900">
-                  Subasta (próximamente)
-                </span>
-                <span className="text-gray-500 text-xs">
-                  Los compradores podrán pujar por tu entrada.
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {/* Subasta emergencia (deshabilitada por ahora) */}
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 space-y-2 opacity-60 cursor-not-allowed">
-            <div className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                disabled
-                name="emergencyAuction"
-                checked={state.emergencyAuction}
-                onChange={handleChange}
-                className="mt-[2px]"
-              />
+            {/* Sector/Fila/Asiento */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <div>
-                <p className="font-semibold">
-                  Subasta automática de emergencia (próximamente)
-                </p>
-                <p>
-                  Si tu entrada no se vende, se activará automáticamente una
-                  subasta pocas horas antes del evento.
-                </p>
+                <label className="block text-sm font-medium text-gray-900">
+                  Sector
+                </label>
+                <input
+                  name="sector"
+                  value={state.sector}
+                  onChange={handleChange}
+                  placeholder="Campo, Platea, etc."
+                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900">
+                  Fila
+                </label>
+                <input
+                  name="row"
+                  value={state.row}
+                  onChange={handleChange}
+                  placeholder="A, B, 1, 2, etc."
+                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900">
+                  Asiento
+                </label>
+                <input
+                  name="seat"
+                  value={state.seat}
+                  onChange={handleChange}
+                  placeholder="1, 2, 3, etc."
+                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                />
               </div>
             </div>
+
+            {/* Precios */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-900">
+                  Precio de venta <span className="text-red-500">*</span>
+                </label>
+                <input
+                  name="salePrice"
+                  value={state.salePrice}
+                  onChange={handleChange}
+                  placeholder="50000"
+                  inputMode="numeric"
+                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900">
+                  Precio original (opcional)
+                </label>
+                <input
+                  name="originalPrice"
+                  value={state.originalPrice}
+                  onChange={handleChange}
+                  placeholder="60000"
+                  inputMode="numeric"
+                  className="mt-2 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+            </div>
+
+            {/* Tipo de venta */}
+            <div>
+              <label className="block text-sm font-medium text-gray-900">
+                Tipo de venta
+              </label>
+
+              <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setState((p) => ({ ...p, saleType: 'fixed' }))
+                  }
+                  className={[
+                    'rounded-xl border p-4 text-left transition',
+                    state.saleType === 'fixed'
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 bg-white hover:bg-gray-50',
+                  ].join(' ')}
+                >
+                  <div className="text-sm font-semibold text-gray-900">
+                    💲 Precio fijo
+                  </div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    Vende inmediatamente al precio que estableciste
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled
+                  className="cursor-not-allowed rounded-xl border border-gray-200 bg-gray-50 p-4 text-left opacity-70"
+                >
+                  <div className="text-sm font-semibold text-gray-900">
+                    ⏱️ Subasta <span className="text-gray-500">(próximamente)</span>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    Deja que los compradores pujen por tu entrada
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Botón continuar (mvp) */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                className="rounded-xl border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                onClick={() => history.back()}
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {isSubmitting ? 'Guardando...' : 'Continuar'}
+              </button>
+            </div>
+          </form>
+
+          <div className="mt-8 text-center text-xs text-gray-400">
+            {EVENTS.length} eventos cargados.
           </div>
-
-          {/* Botones */}
-          <div className="flex justify-between pt-4">
-            <button
-              type="button"
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              onClick={() => router.back()}
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              {isSubmitting ? 'Guardando...' : 'Continuar'}
-            </button>
-          </div>
-        </form>
+        </div>
       </div>
-    </div>
-  );
-}
-
-interface StepProps {
-  label: string;
-  step: number;
-  activeStep: number;
-}
-
-function StepIndicator({ label, step, activeStep }: StepProps) {
-  const isActive = step === activeStep;
-  const isCompleted = step < activeStep;
-
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
-          isActive
-            ? 'bg-blue-600 text-white'
-            : isCompleted
-            ? 'bg-green-500 text-white'
-            : 'bg-gray-200 text-gray-600'
-        }`}
-      >
-        {step}
-      </div>
-      <span
-        className={`text-sm ${
-          isActive ? 'text-gray-900 font-semibold' : 'text-gray-500'
-        }`}
-      >
-        {label}
-      </span>
     </div>
   );
 }
