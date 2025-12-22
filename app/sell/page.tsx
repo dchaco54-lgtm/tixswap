@@ -1,394 +1,494 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import supabase from "../lib/supabaseClient";
+import { useRouter } from "next/navigation";
+import { supabase } from "../lib/supabaseClient"; // ✅ FIX: named export (no default)
 
 type EventItem = {
   id: string | number;
-  name: string;
+  title: string;
   venue?: string | null;
   city?: string | null;
-  date?: string | null;
+  country?: string | null;
+  starts_at?: string | null;
 };
 
-function formatEventDate(date?: string | null) {
-  if (!date) return "";
-  try {
-    const d = new Date(date);
-    // Formato simple para Chile
-    return d.toLocaleDateString("es-CL", { year: "numeric", month: "short", day: "numeric" });
-  } catch {
-    return "";
-  }
-}
+type FormState = {
+  selectedEvent: EventItem | null;
+  search: string;
+  description: string;
+  sector: string;
+  row: string;
+  seat: string;
+  salePrice: string;
+  originalPrice: string;
+  saleType: "fixed" | "auction";
+};
 
 export default function SellPage() {
-  // Data
+  const router = useRouter();
+
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
 
-  // Event selector (combobox)
-  const [eventOpen, setEventOpen] = useState(false);
-  const [eventQuery, setEventQuery] = useState("");
-  const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
-  const [eventNotListed, setEventNotListed] = useState(false);
+  const [openList, setOpenList] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  // Form
-  const [description, setDescription] = useState("");
-  const [sector, setSector] = useState("");
-  const [row, setRow] = useState("");
-  const [seat, setSeat] = useState("");
-  const [price, setPrice] = useState("");
-  const [originalPrice, setOriginalPrice] = useState("");
-  const [saleType, setSaleType] = useState<"fixed" | "auction">("fixed");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const comboRef = useRef<HTMLDivElement | null>(null);
+  const [state, setState] = useState<FormState>({
+    selectedEvent: null,
+    search: "",
+    description: "",
+    sector: "",
+    row: "",
+    seat: "",
+    salePrice: "",
+    originalPrice: "",
+    saleType: "fixed",
+  });
 
+  // ---------- Fetch eventos ----------
   useEffect(() => {
-    const fetchEvents = async () => {
+    let mounted = true;
+
+    async function loadEvents() {
       setLoadingEvents(true);
-      const { data, error } = await supabase
-        .from("events")
-        .select("id,name,venue,city,date")
-        .order("date", { ascending: true });
+      try {
+        const { data, error } = await supabase
+          .from("events")
+          .select("id,title,venue,city,country,starts_at")
+          .order("starts_at", { ascending: true });
 
-      if (!error && data) {
-        setEvents(data as EventItem[]);
-      }
-      setLoadingEvents(false);
-    };
+        if (error) throw error;
 
-    fetchEvents();
-  }, []);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    function onDocClick(e: MouseEvent) {
-      if (!comboRef.current) return;
-      if (!comboRef.current.contains(e.target as Node)) {
-        setEventOpen(false);
+        if (mounted) setEvents((data as EventItem[]) ?? []);
+      } catch {
+        // fallback (por si hay env vars o tabla)
+        if (mounted) {
+          setEvents([
+            {
+              id: "demo-1",
+              title: "My Chemical Romance",
+              venue: "Estadio Bicentenario de La Florida",
+              city: "Santiago",
+              country: "Chile",
+              starts_at: "2026-01-29T21:00:00Z",
+            },
+            {
+              id: "demo-2",
+              title: "Chayanne",
+              venue: "Estadio Nacional",
+              city: "Santiago",
+              country: "Chile",
+              starts_at: "2026-02-11T21:00:00Z",
+            },
+          ]);
+        }
+      } finally {
+        if (mounted) setLoadingEvents(false);
       }
     }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+
+    loadEvents();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
+  // ---------- Close dropdown on outside click ----------
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (!listRef.current) return;
+      if (!listRef.current.contains(target)) setOpenList(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  // ---------- Filtrado ----------
   const filteredEvents = useMemo(() => {
-    const q = eventQuery.trim().toLowerCase();
+    const q = state.search.trim().toLowerCase();
     if (!q) return events;
+
     return events.filter((ev) => {
-      const hay =
-        `${ev.name ?? ""} ${ev.venue ?? ""} ${ev.city ?? ""}`.toLowerCase();
+      const hay = `${ev.title} ${ev.venue ?? ""} ${ev.city ?? ""} ${ev.country ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
-  }, [events, eventQuery]);
+  }, [events, state.search]);
+
+  // ---------- Helpers ----------
+  function fmtDate(iso?: string | null) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("es-CL", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+
+  function handleChange(
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) {
+    const { name, value } = e.target;
+    setState((prev) => ({ ...prev, [name]: value }));
+  }
+
+  function selectEvent(ev: EventItem) {
+    setState((prev) => ({
+      ...prev,
+      selectedEvent: ev,
+      search: ev.title,
+    }));
+    setOpenList(false);
+  }
 
   const canContinue =
-    (!!selectedEvent || eventNotListed) &&
-    description.trim().length > 0 &&
-    price.trim().length > 0 &&
-    saleType === "fixed"; // subasta no disponible
+    !!state.selectedEvent &&
+    state.description.trim().length >= 3 &&
+    Number(state.salePrice) > 0;
 
-  // Handlers
-  const onPickEvent = (ev: EventItem) => {
-    setSelectedEvent(ev);
-    setEventQuery(ev.name);
-    setEventOpen(false);
-    setEventNotListed(false);
-  };
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canContinue) return;
 
-  const onToggleNotListed = (v: boolean) => {
-    setEventNotListed(v);
-    if (v) {
-      setSelectedEvent(null);
-      setEventQuery("");
-      setEventOpen(false);
+    setIsSubmitting(true);
+    try {
+      // Acá después conectamos al paso 2 (PDF) y guardado real.
+      // Por ahora solo demo:
+      // console.log("FORM", state);
+      router.push("/sell?step=2");
+    } finally {
+      setIsSubmitting(false);
     }
-  };
+  }
+
+  const inputBase =
+    "w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm " +
+    "placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
 
   return (
-    <div className="min-h-screen bg-[#F6F9FF]">
-      <div className="mx-auto max-w-5xl px-4 py-10">
-        {/* Título arriba, como tu referencia */}
-        <h1 className="mb-6 text-3xl font-extrabold tracking-tight text-slate-900">
-          Vender entrada
-        </h1>
-
-        <div className="tix-card overflow-hidden">
-          {/* Header gradient */}
-          <div className="tix-header-gradient px-8 py-8 text-white">
-            <div className="text-3xl font-extrabold">Vender entrada</div>
+    <main className="min-h-screen bg-gray-50">
+      <div className="mx-auto w-full max-w-5xl px-4 py-10">
+        {/* Shell Card */}
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          {/* Header (como tu imagen 1) */}
+          <div className="bg-gradient-to-r from-blue-500 to-purple-600 px-8 py-8">
+            <h1 className="text-3xl font-extrabold tracking-tight text-white">
+              Vender entrada
+            </h1>
 
             {/* Stepper */}
-            <div className="mt-6 flex items-center gap-6">
-              {/* Step 1 active */}
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-blue-600 font-bold">
-                  1
-                </div>
-                <div className="font-semibold">Detalles</div>
-              </div>
-
-              <div className="h-[2px] flex-1 bg-white/35" />
-
-              {/* Step 2 */}
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white font-bold">
-                  2
-                </div>
-                <div className="font-semibold text-white/90">Archivo</div>
-              </div>
-
-              <div className="h-[2px] flex-1 bg-white/35" />
-
-              {/* Step 3 */}
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 text-white font-bold">
-                  3
-                </div>
-                <div className="font-semibold text-white/90">Confirmar</div>
-              </div>
+            <div className="mt-6 flex items-center gap-4">
+              <StepPill label="Detalles" step={1} activeStep={1} />
+              <div className="h-[2px] flex-1 rounded bg-white/30" />
+              <StepPill label="Archivo" step={2} activeStep={1} />
+              <div className="h-[2px] flex-1 rounded bg-white/30" />
+              <StepPill label="Confirmar" step={3} activeStep={1} />
             </div>
           </div>
 
           {/* Body */}
-          <div className="px-8 py-10">
-            <h2 className="text-3xl font-extrabold text-slate-900">Detalles de la entrada</h2>
+          <div className="px-8 py-8">
+            <h2 className="text-2xl font-bold text-slate-900">
+              Detalles de la entrada
+            </h2>
 
-            <div className="mt-8 space-y-6">
+            <form onSubmit={onSubmit} className="mt-6 space-y-6">
               {/* Evento */}
-              <div>
-                <div className="mb-2 text-sm font-semibold text-slate-900">
+              <div className="space-y-2" ref={listRef}>
+                <label className="block text-sm font-semibold text-slate-800">
                   Evento <span className="text-blue-600">*</span>
-                </div>
+                </label>
+                <p className="text-xs text-slate-500">
+                  Haz click para desplegar. Escribe para filtrar y selecciona.
+                </p>
 
-                <div className="mb-3 flex items-start gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <div className="relative">
                   <input
-                    type="checkbox"
-                    checked={eventNotListed}
-                    onChange={(e) => onToggleNotListed(e.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-slate-300"
+                    type="text"
+                    name="search"
+                    value={state.search}
+                    onChange={(e) =>
+                      setState((prev) => ({
+                        ...prev,
+                        search: e.target.value,
+                        selectedEvent: null,
+                      }))
+                    }
+                    onFocus={() => setOpenList(true)}
+                    placeholder="Busca eventos, artistas, lugares..."
+                    className={inputBase + " pr-11"}
+                    autoComplete="off"
                   />
-                  <div>
-                    <div className="font-semibold text-slate-900">Mi evento no está en el listado</div>
-                    <div className="text-sm text-slate-600">
-                      Dejas la solicitud y Soporte lo crea para completar el evento.
-                    </div>
-                  </div>
-                </div>
 
-                {/* Combobox */}
-                <div ref={comboRef} className="relative">
-                  <div className="relative">
-                    <input
-                      disabled={eventNotListed}
-                      value={eventQuery}
-                      onChange={(e) => {
-                        setEventQuery(e.target.value);
-                        setSelectedEvent(null);
-                        if (!eventNotListed) setEventOpen(true);
-                      }}
-                      onFocus={() => {
-                        if (!eventNotListed) setEventOpen(true);
-                      }}
-                      placeholder={eventNotListed ? "Evento no listado" : "Busca eventos, artistas, lugares..."}
-                      className={`tix-input pr-12 ${eventNotListed ? "opacity-60" : ""}`}
-                    />
-
-                    {/* Botón flecha “bonito” */}
-                    <button
-                      type="button"
-                      disabled={eventNotListed}
-                      onClick={() => !eventNotListed && setEventOpen((s) => !s)}
-                      className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700 hover:bg-slate-100 transition ${
-                        eventNotListed ? "opacity-60" : ""
-                      }`}
-                      aria-label="Desplegar eventos"
+                  {/* chevron */}
+                  <button
+                    type="button"
+                    onClick={() => setOpenList((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-slate-500 hover:bg-slate-50"
+                    aria-label="Abrir lista de eventos"
+                  >
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className={`transition ${openList ? "rotate-180" : ""}`}
                     >
-                      <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
-                        <path
-                          d="M6 8l4 4 4-4"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </button>
-                  </div>
+                      <path
+                        d="M6 9l6 6 6-6"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                </div>
 
-                  {/* Dropdown */}
-                  {eventOpen && !eventNotListed && (
-                    <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft">
-                      <div className="max-h-72 overflow-auto p-2">
-                        {loadingEvents ? (
-                          <div className="px-3 py-3 text-sm text-slate-600">
-                            Cargando eventos...
-                          </div>
-                        ) : filteredEvents.length === 0 ? (
-                          <div className="px-3 py-3 text-sm text-slate-600">
-                            No encontré eventos con “{eventQuery}”.
-                          </div>
-                        ) : (
-                          filteredEvents.map((ev) => (
-                            <button
-                              key={ev.id}
-                              type="button"
-                              onClick={() => onPickEvent(ev)}
-                              className="w-full rounded-xl px-3 py-3 text-left hover:bg-blue-50 transition"
-                            >
-                              <div className="font-semibold text-slate-900">{ev.name}</div>
-                              <div className="text-sm text-slate-600">
-                                {(ev.venue ? ev.venue : "—")}
-                                {" — "}
-                                {(ev.city ? ev.city : "Chile")}
-                                {ev.date ? ` • ${formatEventDate(ev.date)}` : ""}
-                              </div>
-                            </button>
-                          ))
-                        )}
-                      </div>
+                {openList && (
+                  <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <div className="max-h-72 overflow-auto">
+                      {loadingEvents ? (
+                        <div className="px-4 py-3 text-sm text-slate-500">
+                          Cargando eventos...
+                        </div>
+                      ) : filteredEvents.length === 0 ? (
+                        <div className="px-4 py-3 text-sm text-slate-500">
+                          No encontramos eventos con ese texto.
+                        </div>
+                      ) : (
+                        filteredEvents.map((ev) => (
+                          <button
+                            key={String(ev.id)}
+                            type="button"
+                            onClick={() => selectEvent(ev)}
+                            className="w-full px-4 py-3 text-left transition hover:bg-slate-50"
+                          >
+                            <p className="text-sm font-semibold text-slate-900">
+                              {ev.title}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {(ev.venue ? ev.venue : "—")}
+                              {ev.city ? ` — ${ev.city}` : ""}
+                              {ev.country ? `, ${ev.country}` : ""}
+                              {ev.starts_at ? ` • ${fmtDate(ev.starts_at)}` : ""}
+                            </p>
+                          </button>
+                        ))
+                      )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
-              {/* Descripción (único campo “texto” como UX mejor) */}
-              <div>
-                <div className="mb-2 text-sm font-semibold text-slate-900">
+              {/* ✅ Cambio UX: Solo Descripción (sin Título) */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-slate-800">
                   Descripción <span className="text-blue-600">*</span>
-                </div>
+                </label>
                 <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  name="description"
+                  value={state.description}
+                  onChange={handleChange}
                   placeholder="Ej: Entrada General - Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
-                  className="tix-textarea min-h-[130px]"
+                  className={inputBase + " min-h-[120px] resize-y"}
+                  required
                 />
+                <p className="text-xs text-slate-500">
+                  Tip: con “Sector / Fila / Asiento + estado” ya está perfecto.
+                </p>
               </div>
 
-              {/* Sector / Fila / Asiento */}
+              {/* Ubicación */}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div>
-                  <div className="mb-2 text-sm font-semibold text-slate-900">Sector</div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-800">
+                    Sector
+                  </label>
                   <input
-                    value={sector}
-                    onChange={(e) => setSector(e.target.value)}
+                    type="text"
+                    name="sector"
+                    value={state.sector}
+                    onChange={handleChange}
                     placeholder="Campo, Platea, etc."
-                    className="tix-input"
+                    className={inputBase}
                   />
                 </div>
-                <div>
-                  <div className="mb-2 text-sm font-semibold text-slate-900">Fila</div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-800">
+                    Fila
+                  </label>
                   <input
-                    value={row}
-                    onChange={(e) => setRow(e.target.value)}
+                    type="text"
+                    name="row"
+                    value={state.row}
+                    onChange={handleChange}
                     placeholder="A, B, 1, 2, etc."
-                    className="tix-input"
+                    className={inputBase}
                   />
                 </div>
-                <div>
-                  <div className="mb-2 text-sm font-semibold text-slate-900">Asiento</div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-800">
+                    Asiento
+                  </label>
                   <input
-                    value={seat}
-                    onChange={(e) => setSeat(e.target.value)}
+                    type="text"
+                    name="seat"
+                    value={state.seat}
+                    onChange={handleChange}
                     placeholder="1, 2, 3, etc."
-                    className="tix-input"
+                    className={inputBase}
                   />
                 </div>
               </div>
 
               {/* Precios */}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <div className="mb-2 text-sm font-semibold text-slate-900">
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-800">
                     Precio de venta <span className="text-blue-600">*</span>
-                  </div>
+                  </label>
                   <input
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
+                    type="number"
+                    min={0}
+                    name="salePrice"
+                    value={state.salePrice}
+                    onChange={handleChange}
                     placeholder="50000"
-                    inputMode="numeric"
-                    className="tix-input"
+                    className={inputBase}
+                    required
                   />
                 </div>
-                <div>
-                  <div className="mb-2 text-sm font-semibold text-slate-900">
-                    Precio original <span className="text-slate-500 font-medium">(opcional)</span>
-                  </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-800">
+                    Precio original (opcional)
+                  </label>
                   <input
-                    value={originalPrice}
-                    onChange={(e) => setOriginalPrice(e.target.value)}
+                    type="number"
+                    min={0}
+                    name="originalPrice"
+                    value={state.originalPrice}
+                    onChange={handleChange}
                     placeholder="60000"
-                    inputMode="numeric"
-                    className="tix-input"
+                    className={inputBase}
                   />
                 </div>
               </div>
 
               {/* Tipo de venta */}
-              <div>
-                <div className="mb-3 text-sm font-semibold text-slate-900">Tipo de venta</div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {/* Precio fijo */}
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-slate-800">
+                  Tipo de venta
+                </label>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <button
                     type="button"
-                    onClick={() => setSaleType("fixed")}
-                    className={`rounded-2xl border p-5 text-left transition ${
-                      saleType === "fixed"
-                        ? "border-blue-500 bg-blue-50 shadow-soft"
+                    onClick={() =>
+                      setState((prev) => ({ ...prev, saleType: "fixed" }))
+                    }
+                    className={`flex flex-col items-start rounded-xl border px-4 py-4 text-left text-sm shadow-sm transition ${
+                      state.saleType === "fixed"
+                        ? "border-blue-500 bg-blue-50 ring-4 ring-blue-100"
                         : "border-slate-200 bg-white hover:bg-slate-50"
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="text-green-600 font-bold text-xl">$</div>
-                      <div className="text-lg font-extrabold text-slate-900">Precio fijo</div>
-                    </div>
-                    <div className="mt-1 text-sm text-slate-600">
+                    <span className="flex items-center gap-2 font-semibold text-slate-900">
+                      <span className="text-green-600">$</span> Precio fijo
+                    </span>
+                    <span className="mt-1 text-xs text-slate-500">
                       Vende inmediatamente al precio que estableciste
-                    </div>
+                    </span>
                   </button>
 
-                  {/* Subasta (deshabilitado) */}
                   <button
                     type="button"
-                    onClick={() => setSaleType("auction")}
                     disabled
-                    className="rounded-2xl border border-slate-200 bg-white p-5 text-left opacity-70 cursor-not-allowed"
+                    className="flex flex-col items-start rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 text-left text-sm shadow-sm opacity-70 cursor-not-allowed"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="text-orange-500 font-bold text-xl">⏱</div>
-                      <div className="text-lg font-extrabold text-slate-900">
-                        Subasta <span className="ml-2 text-sm font-semibold text-slate-500">(próximamente)</span>
-                      </div>
-                    </div>
-                    <div className="mt-1 text-sm text-slate-600">
+                    <span className="flex items-center gap-2 font-semibold text-slate-900">
+                      <span className="text-orange-500">⏱</span> Subasta{" "}
+                      <span className="text-xs font-semibold text-slate-500">
+                        (próximamente)
+                      </span>
+                    </span>
+                    <span className="mt-1 text-xs text-slate-500">
                       Deja que los compradores pujen por tu entrada
-                    </div>
+                    </span>
                   </button>
                 </div>
               </div>
 
-              {/* Footer actions */}
-              <div className="flex items-center justify-end gap-3 pt-3">
-                <button type="button" className="tix-btn-secondary">
-                  Cancelar
-                </button>
+              {/* Acciones */}
+              <div className="flex items-center justify-between pt-2">
                 <button
                   type="button"
-                  className={`tix-btn-primary ${!canContinue ? "opacity-60 cursor-not-allowed" : ""}`}
-                  disabled={!canContinue}
+                  onClick={() => router.back()}
+                  className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
                 >
-                  Continuar
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={!canContinue || isSubmitting}
+                  className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:opacity-60 disabled:hover:bg-blue-600"
+                >
+                  {isSubmitting ? "Guardando..." : "Continuar"}
                 </button>
               </div>
 
               <div className="pt-2 text-center text-xs text-slate-400">
                 {events.length} eventos cargados.
               </div>
-            </div>
+            </form>
           </div>
         </div>
+      </div>
+    </main>
+  );
+}
+
+function StepPill({
+  label,
+  step,
+  activeStep,
+}: {
+  label: string;
+  step: number;
+  activeStep: number;
+}) {
+  const isActive = step === activeStep;
+  const isCompleted = step < activeStep;
+
+  return (
+    <div className="flex items-center gap-3">
+      <div
+        className={[
+          "flex h-8 w-8 items-center justify-center rounded-full text-sm font-extrabold",
+          isActive
+            ? "bg-white text-blue-600"
+            : isCompleted
+            ? "bg-white/80 text-emerald-700"
+            : "bg-white/25 text-white",
+        ].join(" ")}
+      >
+        {step}
+      </div>
+      <div
+        className={[
+          "text-sm font-semibold",
+          isActive ? "text-white" : "text-white/80",
+        ].join(" ")}
+      >
+        {label}
       </div>
     </div>
   );
