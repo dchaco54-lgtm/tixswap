@@ -26,6 +26,7 @@ function SellForm() {
   const router = useRouter();
   const [step] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [state, setState] = useState<SellFormState>({
     eventId: '',
     description: '',
@@ -57,7 +58,7 @@ function SellForm() {
     });
   }, [eventQuery]);
 
-  // si hay evento seleccionado, el input muestra el título (pero sin romper filtrado)
+  // Si hay evento seleccionado y el dropdown está cerrado, mostramos su título en el input
   useEffect(() => {
     if (selectedEvent && !isEventOpen) {
       setEventQuery(selectedEvent.title);
@@ -65,6 +66,7 @@ function SellForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.eventId]);
 
+  // Cierra dropdown al click afuera
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (!eventBoxRef.current) return;
@@ -103,7 +105,6 @@ function SellForm() {
       return;
     }
 
-    // ✅ ahora descripción es obligatoria
     if (!state.description.trim()) {
       alert('Completa la descripción de tu entrada.');
       return;
@@ -124,36 +125,26 @@ function SellForm() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      <h1 className="text-3xl font-bold text-gray-900">Vender entrada</h1>
+      {/* Card principal */}
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        {/* ✅ HEADER DEGRADADO (como tu imagen) */}
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-8 text-white">
+          <h1 className="text-4xl font-extrabold tracking-tight">
+            Vender entrada
+          </h1>
 
-      <div className="mt-8 rounded-2xl border border-gray-200 bg-white shadow-sm">
-        {/* Steps (no tocar estructura) */}
-        <div className="px-6 pt-6">
-          <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
-            <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white">
-                1
-              </span>
-              <span className="font-medium text-gray-900">Detalles</span>
-            </div>
-
-            <div className="flex items-center gap-2 opacity-70">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-gray-700">
-                2
-              </span>
-              <span>Archivo</span>
-            </div>
-
-            <div className="flex items-center gap-2 opacity-70">
-              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-200 text-gray-700">
-                3
-              </span>
-              <span>Confirmar</span>
-            </div>
+          {/* Stepper dentro del banner */}
+          <div className="mt-6 flex items-center gap-4">
+            <StepPill active={step === 1} number={1} label="Detalles" />
+            <div className="h-[2px] flex-1 bg-white/35" />
+            <StepPill active={step === 2} number={2} label="Archivo" />
+            <div className="h-[2px] flex-1 bg-white/35" />
+            <StepPill active={step === 3} number={3} label="Confirmar" />
           </div>
         </div>
 
-        <div className="px-6 pb-8 pt-6">
+        {/* CONTENIDO */}
+        <div className="px-8 pb-10 pt-10">
           <h2 className="text-2xl font-semibold text-gray-900">
             Detalles de la entrada
           </h2>
@@ -168,7 +159,6 @@ function SellForm() {
                 Haz click para desplegar. Escribe para filtrar y selecciona.
               </p>
 
-              {/* ✅ ÚNICO CONTROL visible: input + dropdown (estilo home) */}
               <div className="relative mt-2" ref={eventBoxRef}>
                 <div className="relative">
                   <input
@@ -271,7 +261,7 @@ function SellForm() {
                   </div>
                 )}
 
-                {/* Muestra resumen del evento seleccionado */}
+                {/* Resumen evento seleccionado */}
                 {selectedEvent && !isEventOpen && (
                   <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
                     <div className="text-sm font-semibold text-gray-900">
@@ -285,7 +275,7 @@ function SellForm() {
               </div>
             </div>
 
-            {/* ✅ Solo descripción (obligatoria) */}
+            {/* Solo descripción */}
             <div>
               <label className="block text-sm font-medium text-gray-900">
                 Descripción <span className="text-red-500">*</span>
@@ -440,6 +430,33 @@ function SellForm() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Step pill estilo banner (como el diseño) */
+function StepPill({
+  active,
+  number,
+  label,
+}: {
+  active: boolean;
+  number: number;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className={[
+          'flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold',
+          active ? 'bg-white text-blue-700' : 'bg-white/25 text-white',
+        ].join(' ')}
+      >
+        {number}
+      </span>
+      <span className={active ? 'font-semibold text-white' : 'text-white/80'}>
+        {label}
+      </span>
     </div>
   );
 }
