@@ -24,11 +24,11 @@ function formatEventDate(starts_at?: string | null) {
 }
 
 export default function SellPage() {
-  // steps
+  // Steps
   const steps = ["Detalles", "Archivo", "Confirmar"];
-  const [currentStep] = useState(0); // (por ahora fijo en 0, después lo conectamos al flujo)
+  const [currentStep] = useState(0);
 
-  // events
+  // Events
   const [events, setEvents] = useState<EventItem[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export default function SellPage() {
 
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
-  // form fields
+  // Form fields
   const [description, setDescription] = useState("");
   const [sector, setSector] = useState("");
   const [fila, setFila] = useState("");
@@ -87,9 +87,7 @@ export default function SellPage() {
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (!dropdownRef.current) return;
-      if (!dropdownRef.current.contains(e.target as Node)) {
-        setEventOpen(false);
-      }
+      if (!dropdownRef.current.contains(e.target as Node)) setEventOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -110,17 +108,21 @@ export default function SellPage() {
     setEventOpen(false);
   }
 
-  // helpers
-  const inputBase = "tix-input";
-  const textareaBase = "tix-textarea";
-  const labelBase = "text-sm font-medium text-slate-700";
+  // UI classes (100% Tailwind, cero tix-*)
+  const label = "text-sm font-semibold text-slate-700";
+  const input =
+    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none " +
+    "focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition";
+  const textarea =
+    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none " +
+    "focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition min-h-[120px] resize-y";
 
   return (
-    <div className="min-h-[calc(100vh-64px)] px-4 py-8">
-      <div className="tix-container max-w-5xl">
-        {/* ✅ Header / Stepper (NO transparente, estilo imagen 2) */}
-        <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
-          <div className="tix-header-gradient px-8 py-10">
+    <main className="min-h-[calc(100vh-64px)] bg-slate-50">
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        {/* ✅ Stepper PRO (igual vibe imagen 2) */}
+        <div className="mb-8 overflow-hidden rounded-3xl shadow-xl">
+          <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-8 py-10">
             <h1 className="text-4xl font-bold text-white">Vender entrada</h1>
 
             <div className="mt-7 flex items-center">
@@ -130,16 +132,15 @@ export default function SellPage() {
 
                 return (
                   <div key={s} className="flex items-center flex-1">
-                    {/* Paso */}
                     <div className="flex items-center gap-4">
                       <div
                         className={[
-                          "flex h-12 w-12 items-center justify-center rounded-full text-base font-bold",
+                          "flex h-12 w-12 items-center justify-center rounded-full text-base font-extrabold",
                           active
                             ? "bg-white text-blue-700"
                             : done
                             ? "bg-white/80 text-blue-800"
-                            : "bg-blue-400/60 text-white",
+                            : "bg-white/25 text-white",
                         ].join(" ")}
                       >
                         {i + 1}
@@ -148,7 +149,6 @@ export default function SellPage() {
                       <div className="text-lg font-semibold text-white">{s}</div>
                     </div>
 
-                    {/* Conector */}
                     {i < steps.length - 1 && (
                       <div className="mx-6 h-[3px] flex-1 rounded-full bg-white/25">
                         <div
@@ -167,108 +167,106 @@ export default function SellPage() {
         </div>
 
         {/* ✅ Card principal */}
-        <div className="tix-card p-8">
-          <h2 className="text-2xl font-semibold text-slate-900">Detalles de la entrada</h2>
+        <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-lg">
+          <h2 className="text-2xl font-bold text-slate-900">Detalles de la entrada</h2>
           <p className="mt-1 text-sm text-slate-500">
             Completa la info básica para publicar tu ticket.
           </p>
 
           {/* Evento */}
-          <div className="mt-8">
-            <label className={labelBase}>
+          <div className="mt-8" ref={dropdownRef}>
+            <label className={label}>
               Evento <span className="text-red-500">*</span>
             </label>
 
-            <div className="mt-2" ref={dropdownRef}>
-              <div className="relative">
-                <input
-                  className={inputBase + " pr-10"}
-                  placeholder="Busca eventos, artistas, lugares..."
-                  value={eventQuery}
-                  onChange={(e) => {
-                    setEventQuery(e.target.value);
-                    setEventOpen(true);
-                  }}
-                  onFocus={() => setEventOpen(true)}
-                />
-                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                    <path
-                      d="M6 8l4 4 4-4"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+            <div className="relative mt-2">
+              <input
+                className={input + " pr-10"}
+                placeholder="Busca eventos, artistas, lugares..."
+                value={eventQuery}
+                onChange={(e) => {
+                  setEventQuery(e.target.value);
+                  setEventOpen(true);
+                }}
+                onFocus={() => setEventOpen(true)}
+              />
+              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path
+                    d="M6 8l4 4 4-4"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+            </div>
+
+            {eventOpen && (
+              <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
+                {eventsLoading ? (
+                  <div className="px-4 py-3 text-sm text-slate-500">Cargando eventos…</div>
+                ) : eventsError ? (
+                  <div className="px-4 py-3 text-sm text-red-600">{eventsError}</div>
+                ) : filteredEvents.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-slate-500">
+                    No encontré eventos con “{eventQuery}”.
+                  </div>
+                ) : (
+                  <div className="max-h-72 overflow-auto">
+                    {filteredEvents.map((ev) => {
+                      const dateLabel = formatEventDate(ev.starts_at);
+                      const meta = [
+                        ev.venue?.trim() ? ev.venue : null,
+                        ev.city?.trim() ? ev.city : null,
+                        ev.country?.trim() ? ev.country : null,
+                        dateLabel ? dateLabel : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" • ");
+
+                      const isSelected = selectedEvent?.id === ev.id;
+
+                      return (
+                        <button
+                          key={String(ev.id)}
+                          type="button"
+                          onClick={() => selectEvent(ev)}
+                          className={[
+                            "w-full px-4 py-3 text-left transition",
+                            isSelected ? "bg-blue-50" : "hover:bg-slate-50",
+                          ].join(" ")}
+                        >
+                          <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
+                          {meta ? <div className="mt-0.5 text-xs text-slate-600">{meta}</div> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {selectedEvent && !eventOpen ? (
+              <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-sm font-semibold text-slate-900">{selectedEvent.title}</div>
+                <div className="mt-0.5 text-xs text-slate-600">
+                  {[selectedEvent.venue, selectedEvent.city, selectedEvent.country, formatEventDate(selectedEvent.starts_at)]
+                    .filter(Boolean)
+                    .join(" • ")}
                 </div>
               </div>
-
-              {eventOpen && (
-                <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                  {eventsLoading ? (
-                    <div className="px-4 py-3 text-sm text-slate-500">Cargando eventos…</div>
-                  ) : eventsError ? (
-                    <div className="px-4 py-3 text-sm text-red-600">{eventsError}</div>
-                  ) : filteredEvents.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-slate-500">
-                      No encontré eventos con “{eventQuery}”.
-                    </div>
-                  ) : (
-                    <div className="max-h-72 overflow-auto">
-                      {filteredEvents.map((ev) => {
-                        const dateLabel = formatEventDate(ev.starts_at);
-                        const meta = [
-                          ev.venue?.trim() ? ev.venue : null,
-                          ev.city?.trim() ? ev.city : null,
-                          ev.country?.trim() ? ev.country : null,
-                          dateLabel ? dateLabel : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" • ");
-
-                        const isSelected = selectedEvent?.id === ev.id;
-
-                        return (
-                          <button
-                            key={String(ev.id)}
-                            type="button"
-                            onClick={() => selectEvent(ev)}
-                            className={[
-                              "w-full text-left px-4 py-3 transition",
-                              isSelected ? "bg-blue-50" : "hover:bg-slate-50",
-                            ].join(" ")}
-                          >
-                            <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
-                            {meta ? <div className="mt-0.5 text-xs text-slate-600">{meta}</div> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {selectedEvent && !eventOpen ? (
-                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="text-sm font-semibold text-slate-900">{selectedEvent.title}</div>
-                  <div className="mt-0.5 text-xs text-slate-600">
-                    {[selectedEvent.venue, selectedEvent.city, selectedEvent.country, formatEventDate(selectedEvent.starts_at)]
-                      .filter(Boolean)
-                      .join(" • ")}
-                  </div>
-                </div>
-              ) : null}
-            </div>
+            ) : null}
           </div>
 
           {/* Descripción */}
           <div className="mt-6">
-            <label className={labelBase}>
+            <label className={label}>
               Descripción <span className="text-red-500">*</span>
             </label>
             <textarea
-              className={textareaBase + " min-h-[120px] resize-y"}
+              className={textarea}
               placeholder="Ej: Entrada General - Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -278,27 +276,27 @@ export default function SellPage() {
           {/* Sector/Fila/Asiento */}
           <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
-              <label className={labelBase}>Sector</label>
+              <label className={label}>Sector</label>
               <input
-                className={inputBase}
+                className={input}
                 placeholder="Campo, Platea, etc."
                 value={sector}
                 onChange={(e) => setSector(e.target.value)}
               />
             </div>
             <div>
-              <label className={labelBase}>Fila</label>
+              <label className={label}>Fila</label>
               <input
-                className={inputBase}
+                className={input}
                 placeholder="A, B, 1, 2, etc."
                 value={fila}
                 onChange={(e) => setFila(e.target.value)}
               />
             </div>
             <div>
-              <label className={labelBase}>Asiento</label>
+              <label className={label}>Asiento</label>
               <input
-                className={inputBase}
+                className={input}
                 placeholder="1, 2, 3, etc."
                 value={asiento}
                 onChange={(e) => setAsiento(e.target.value)}
@@ -309,20 +307,20 @@ export default function SellPage() {
           {/* Precios */}
           <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className={labelBase}>
+              <label className={label}>
                 Precio de venta <span className="text-red-500">*</span>
               </label>
               <input
-                className={inputBase}
+                className={input}
                 inputMode="numeric"
                 value={price}
                 onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))}
               />
             </div>
             <div>
-              <label className={labelBase}>Precio original (opcional)</label>
+              <label className={label}>Precio original (opcional)</label>
               <input
-                className={inputBase}
+                className={input}
                 inputMode="numeric"
                 value={originalPrice}
                 onChange={(e) => setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))}
@@ -332,7 +330,8 @@ export default function SellPage() {
 
           {/* Tipo de venta */}
           <div className="mt-8">
-            <div className={labelBase}>Tipo de venta</div>
+            <div className={label}>Tipo de venta</div>
+
             <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
               <button
                 type="button"
@@ -360,7 +359,6 @@ export default function SellPage() {
               <button
                 type="button"
                 disabled
-                onClick={() => setSaleType("auction")}
                 className="cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-50 p-5 text-left"
                 title="Próximamente"
               >
@@ -383,14 +381,17 @@ export default function SellPage() {
           </div>
 
           {/* Acciones */}
-          <div className="mt-8 flex items-center justify-between">
-            <button type="button" className="tix-btn-secondary">
+          <div className="mt-10 flex items-center justify-between">
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+            >
               Cancelar
             </button>
 
             <button
               type="button"
-              className="tix-btn-primary"
+              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-7 py-3 text-sm font-semibold text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:hover:bg-blue-600"
               disabled={!selectedEvent || description.trim().length < 6}
               title={
                 !selectedEvent || description.trim().length < 6
@@ -405,8 +406,8 @@ export default function SellPage() {
           <div className="mt-6 text-center text-xs text-slate-400">
             {eventsLoading ? "Cargando eventos..." : `${events.length} eventos cargados.`}
           </div>
-        </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
