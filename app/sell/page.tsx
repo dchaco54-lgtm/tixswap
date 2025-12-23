@@ -24,11 +24,11 @@ function formatEventDate(starts_at?: string | null) {
 }
 
 export default function SellPage() {
-  // Steps
+  // steps
   const steps = ["Detalles", "Archivo", "Confirmar"];
   const [currentStep] = useState(0);
 
-  // Events
+  // events
   const [events, setEvents] = useState<EventItem[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export default function SellPage() {
 
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
-  // Form fields
+  // form fields
   const [description, setDescription] = useState("");
   const [sector, setSector] = useState("");
   const [fila, setFila] = useState("");
@@ -55,6 +55,7 @@ export default function SellPage() {
       setEventsLoading(true);
       setEventsError(null);
 
+      // OJO: mismos campos que tu homepage (app/page.js)
       const { data, error } = await supabase
         .from("events")
         .select("id, title, starts_at, venue, city, country")
@@ -87,7 +88,9 @@ export default function SellPage() {
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (!dropdownRef.current) return;
-      if (!dropdownRef.current.contains(e.target as Node)) setEventOpen(false);
+      if (!dropdownRef.current.contains(e.target as Node)) {
+        setEventOpen(false);
+      }
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -97,7 +100,8 @@ export default function SellPage() {
     const q = eventQuery.trim().toLowerCase();
     if (!q) return events;
     return events.filter((ev) => {
-      const hay = `${ev.title ?? ""} ${ev.venue ?? ""} ${ev.city ?? ""} ${ev.country ?? ""}`.toLowerCase();
+      const hay =
+        `${ev.title ?? ""} ${ev.venue ?? ""} ${ev.city ?? ""} ${ev.country ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
   }, [events, eventQuery]);
@@ -108,19 +112,15 @@ export default function SellPage() {
     setEventOpen(false);
   }
 
-  // UI classes (100% Tailwind, cero tix-*)
-  const label = "text-sm font-semibold text-slate-700";
-  const input =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none " +
-    "focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition";
-  const textarea =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none " +
-    "focus:border-blue-500 focus:ring-4 focus:ring-blue-100 transition min-h-[120px] resize-y";
+  // ui helpers
+  const inputBase =
+    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
+  const labelBase = "text-sm font-medium text-slate-700";
 
   return (
-    <main className="min-h-[calc(100vh-64px)] bg-slate-50">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        {/* ✅ Stepper PRO (igual vibe imagen 2) */}
+    <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
+      <div className="mx-auto max-w-5xl">
+        {/* Header / Stepper (sólido, estilo imagen 2) */}
         <div className="mb-8 overflow-hidden rounded-3xl shadow-xl">
           <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-8 py-10">
             <h1 className="text-4xl font-bold text-white">Vender entrada</h1>
@@ -165,108 +165,119 @@ export default function SellPage() {
             </div>
           </div>
         </div>
-
-        {/* ✅ Card principal */}
-        <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-lg">
-          <h2 className="text-2xl font-bold text-slate-900">Detalles de la entrada</h2>
+{/* Card */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+          <h2 className="text-2xl font-semibold text-slate-900">Detalles de la entrada</h2>
           <p className="mt-1 text-sm text-slate-500">
             Completa la info básica para publicar tu ticket.
           </p>
 
           {/* Evento */}
-          <div className="mt-8" ref={dropdownRef}>
-            <label className={label}>
+          <div className="mt-8">
+            <label className={labelBase}>
               Evento <span className="text-red-500">*</span>
             </label>
-
-            <div className="relative mt-2">
-              <input
-                className={input + " pr-10"}
-                placeholder="Busca eventos, artistas, lugares..."
-                value={eventQuery}
-                onChange={(e) => {
-                  setEventQuery(e.target.value);
-                  setEventOpen(true);
-                }}
-                onFocus={() => setEventOpen(true)}
-              />
-              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                  <path
-                    d="M6 8l4 4 4-4"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            {eventOpen && (
-              <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-                {eventsLoading ? (
-                  <div className="px-4 py-3 text-sm text-slate-500">Cargando eventos…</div>
-                ) : eventsError ? (
-                  <div className="px-4 py-3 text-sm text-red-600">{eventsError}</div>
-                ) : filteredEvents.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-slate-500">
-                    No encontré eventos con “{eventQuery}”.
-                  </div>
-                ) : (
-                  <div className="max-h-72 overflow-auto">
-                    {filteredEvents.map((ev) => {
-                      const dateLabel = formatEventDate(ev.starts_at);
-                      const meta = [
-                        ev.venue?.trim() ? ev.venue : null,
-                        ev.city?.trim() ? ev.city : null,
-                        ev.country?.trim() ? ev.country : null,
-                        dateLabel ? dateLabel : null,
-                      ]
-                        .filter(Boolean)
-                        .join(" • ");
-
-                      const isSelected = selectedEvent?.id === ev.id;
-
-                      return (
-                        <button
-                          key={String(ev.id)}
-                          type="button"
-                          onClick={() => selectEvent(ev)}
-                          className={[
-                            "w-full px-4 py-3 text-left transition",
-                            isSelected ? "bg-blue-50" : "hover:bg-slate-50",
-                          ].join(" ")}
-                        >
-                          <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
-                          {meta ? <div className="mt-0.5 text-xs text-slate-600">{meta}</div> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedEvent && !eventOpen ? (
-              <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="text-sm font-semibold text-slate-900">{selectedEvent.title}</div>
-                <div className="mt-0.5 text-xs text-slate-600">
-                  {[selectedEvent.venue, selectedEvent.city, selectedEvent.country, formatEventDate(selectedEvent.starts_at)]
-                    .filter(Boolean)
-                    .join(" • ")}
+            <div className="mt-2" ref={dropdownRef}>
+              {/* Input + flecha (1 solo control, NO select aparte) */}
+              <div className="relative">
+                <input
+                  className={inputBase + " pr-10"}
+                  placeholder="Busca eventos, artistas, lugares..."
+                  value={eventQuery}
+                  onChange={(e) => {
+                    setEventQuery(e.target.value);
+                    setEventOpen(true);
+                  }}
+                  onFocus={() => setEventOpen(true)}
+                />
+                <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                  {/* chevron */}
+                  <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                    <path
+                      d="M6 8l4 4 4-4"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </div>
               </div>
-            ) : null}
+
+              {/* Dropdown */}
+              {eventOpen && (
+                <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                  {eventsLoading ? (
+                    <div className="px-4 py-3 text-sm text-slate-500">Cargando eventos…</div>
+                  ) : eventsError ? (
+                    <div className="px-4 py-3 text-sm text-red-600">{eventsError}</div>
+                  ) : filteredEvents.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-slate-500">
+                      No encontré eventos con “{eventQuery}”.
+                    </div>
+                  ) : (
+                    <div className="max-h-72 overflow-auto">
+                      {filteredEvents.map((ev) => {
+                        const dateLabel = formatEventDate(ev.starts_at);
+                        const meta = [
+                          ev.venue?.trim() ? ev.venue : null,
+                          ev.city?.trim() ? ev.city : null,
+                          ev.country?.trim() ? ev.country : null,
+                          dateLabel ? dateLabel : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" • ");
+
+                        const isSelected = selectedEvent?.id === ev.id;
+
+                        return (
+                          <button
+                            key={String(ev.id)}
+                            type="button"
+                            onClick={() => selectEvent(ev)}
+                            className={[
+                              "w-full text-left px-4 py-3 transition",
+                              isSelected ? "bg-blue-50" : "hover:bg-slate-50",
+                            ].join(" ")}
+                          >
+                            <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
+                            {meta ? (
+                              <div className="mt-0.5 text-xs text-slate-600">{meta}</div>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Selected pill / helper */}
+              {selectedEvent && !eventOpen ? (
+                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-sm font-semibold text-slate-900">{selectedEvent.title}</div>
+                  <div className="mt-0.5 text-xs text-slate-600">
+                    {[
+                      selectedEvent.venue,
+                      selectedEvent.city,
+                      selectedEvent.country,
+                      formatEventDate(selectedEvent.starts_at),
+                    ]
+                      .filter(Boolean)
+                      .join(" • ")}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          {/* Descripción */}
+          {/* Descripción (dejamos solo esto para que no sea redundante con título) */}
           <div className="mt-6">
-            <label className={label}>
+            <label className={labelBase}>
               Descripción <span className="text-red-500">*</span>
             </label>
             <textarea
-              className={textarea}
+              className={inputBase + " min-h-[120px] resize-y"}
               placeholder="Ej: Entrada General - Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -276,27 +287,27 @@ export default function SellPage() {
           {/* Sector/Fila/Asiento */}
           <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
             <div>
-              <label className={label}>Sector</label>
+              <label className={labelBase}>Sector</label>
               <input
-                className={input}
+                className={inputBase}
                 placeholder="Campo, Platea, etc."
                 value={sector}
                 onChange={(e) => setSector(e.target.value)}
               />
             </div>
             <div>
-              <label className={label}>Fila</label>
+              <label className={labelBase}>Fila</label>
               <input
-                className={input}
+                className={inputBase}
                 placeholder="A, B, 1, 2, etc."
                 value={fila}
                 onChange={(e) => setFila(e.target.value)}
               />
             </div>
             <div>
-              <label className={label}>Asiento</label>
+              <label className={labelBase}>Asiento</label>
               <input
-                className={input}
+                className={inputBase}
                 placeholder="1, 2, 3, etc."
                 value={asiento}
                 onChange={(e) => setAsiento(e.target.value)}
@@ -307,20 +318,20 @@ export default function SellPage() {
           {/* Precios */}
           <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className={label}>
+              <label className={labelBase}>
                 Precio de venta <span className="text-red-500">*</span>
               </label>
               <input
-                className={input}
+                className={inputBase}
                 inputMode="numeric"
                 value={price}
                 onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))}
               />
             </div>
             <div>
-              <label className={label}>Precio original (opcional)</label>
+              <label className={labelBase}>Precio original (opcional)</label>
               <input
-                className={input}
+                className={inputBase}
                 inputMode="numeric"
                 value={originalPrice}
                 onChange={(e) => setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))}
@@ -330,8 +341,7 @@ export default function SellPage() {
 
           {/* Tipo de venta */}
           <div className="mt-8">
-            <div className={label}>Tipo de venta</div>
-
+            <div className={labelBase}>Tipo de venta</div>
             <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
               <button
                 type="button"
@@ -359,6 +369,7 @@ export default function SellPage() {
               <button
                 type="button"
                 disabled
+                onClick={() => setSaleType("auction")}
                 className="cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-50 p-5 text-left"
                 title="Próximamente"
               >
@@ -368,8 +379,7 @@ export default function SellPage() {
                   </div>
                   <div>
                     <div className="font-semibold text-slate-900">
-                      Subasta{" "}
-                      <span className="text-sm font-medium text-slate-500">(próximamente)</span>
+                      Subasta <span className="text-sm font-medium text-slate-500">(próximamente)</span>
                     </div>
                     <div className="mt-0.5 text-sm text-slate-600">
                       Deja que los compradores pujen por tu entrada
@@ -380,24 +390,20 @@ export default function SellPage() {
             </div>
           </div>
 
-          {/* Acciones */}
-          <div className="mt-10 flex items-center justify-between">
+          {/* Footer actions */}
+          <div className="mt-8 flex items-center justify-between">
             <button
               type="button"
-              className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+              className="rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
             >
               Cancelar
             </button>
-
             <button
               type="button"
-              className="inline-flex items-center justify-center rounded-full bg-blue-600 px-7 py-3 text-sm font-semibold text-white hover:bg-blue-700 transition disabled:opacity-60 disabled:hover:bg-blue-600"
+              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              // En el paso 1 no avanzamos si no hay evento + descripción (tu lógica real la enchufamos después)
               disabled={!selectedEvent || description.trim().length < 6}
-              title={
-                !selectedEvent || description.trim().length < 6
-                  ? "Completa evento y descripción"
-                  : ""
-              }
+              title={!selectedEvent || description.trim().length < 6 ? "Completa evento y descripción" : ""}
             >
               Continuar
             </button>
@@ -406,8 +412,8 @@ export default function SellPage() {
           <div className="mt-6 text-center text-xs text-slate-400">
             {eventsLoading ? "Cargando eventos..." : `${events.length} eventos cargados.`}
           </div>
-        </section>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }
