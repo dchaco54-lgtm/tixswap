@@ -203,22 +203,22 @@ export default function SellFilePage() {
                 const done = i < currentStep;
 
                 return (
-                  <div key={s} className="flex flex-1 items-center">
-                    <div className="flex items-center gap-4">
+                  <div key={s} ="flex flex-1 items-center">
+                    <div ="flex items-center gap-4">
                       <div
-                        className={[
+                        ={[
                           "flex h-12 w-12 items-center justify-center rounded-full text-base font-extrabold",
                           active ? "bg-white text-blue-700" : done ? "bg-white/80 text-blue-800" : "bg-white/25 text-white",
                         ].join(" ")}
                       >
                         {i + 1}
                       </div>
-                      <div className="text-lg font-semibold text-white">{s}</div>
+                      <div ="text-lg font-semibold text-white">{s}</div>
                     </div>
 
                     {i < steps.length - 1 && (
-                      <div className="mx-6 h-[3px] flex-1 rounded-full bg-white/25">
-                        <div className={["h-[3px] rounded-full bg-white transition-all duration-300", i < currentStep ? "w-full" : "w-0"].join(" ")} />
+                      <div ="mx-6 h-[3px] flex-1 rounded-full bg-white/25">
+                        <div ={["h-[3px] rounded-full bg-white transition-all duration-300", i < currentStep ? "w-full" : "w-0"].join(" ")} />
                       </div>
                     )}
                   </div>
@@ -228,22 +228,22 @@ export default function SellFilePage() {
           </div>
 
           {/* Card contenido */}
-          <div className="p-8">
-            <h2 className="text-2xl font-semibold text-slate-900">Archivo</h2>
-            <p className="mt-1 text-sm text-slate-500">Sube el PDF del ticket. Validaremos formato y evitaremos duplicados.</p>
+          <div ="p-8">
+            <h2 ="text-2xl font-semibold text-slate-900">Archivo</h2>
+            <p ="mt-1 text-sm text-slate-500">Sube el PDF del ticket. Validaremos formato y evitaremos duplicados.</p>
 
             {/* checkbox nominada */}
-            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <label className="flex items-start gap-3">
+            <div ="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <label ="flex items-start gap-3">
                 <input
                   type="checkbox"
-                  className="mt-1 h-4 w-4 accent-indigo-600"
+                  ="mt-1 h-4 w-4 accent-indigo-600"
                   checked={isNominated}
                   onChange={(e) => setIsNominated(e.target.checked)}
                 />
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">Es nominada</div>
-                  <p className="mt-1 text-sm text-slate-600">
+                  <div ="text-sm font-semibold text-slate-900">Es nominada</div>
+                  <p ="mt-1 text-sm text-slate-600">
                     Si es nominada, al momento de la compra se abrirá un chat comprador↔vendedor para coordinar la nominación y subir el PDF re-nominado.
                   </p>
                 </div>
@@ -251,8 +251,8 @@ export default function SellFilePage() {
             </div>
 
             {/* upload */}
-            <div className="mt-6">
-              <label className="text-sm font-medium text-slate-700">Subir PDF del ticket</label>
+            <div ="mt-6">
+              <label ="text-sm font-medium text-slate-700">Subir PDF del ticket</label>
               <input
                 type="file"
                 accept="application/pdf"
@@ -261,48 +261,39 @@ export default function SellFilePage() {
               />
               <p className="mt-2 text-xs text-slate-500">Máx 8MB. Validamos PDF real + anti-duplicado.</p>
             </div>
+      {/* acciones */}
+<div className="mt-6 flex items-center justify-between">
+  <button type="button" className="tix-btn-secondary" onClick={() => router.push("/sell")}>
+    Volver
+  </button>
 
-            {/* acciones */}
-            <div className="mt-6 flex items-center justify-between">
-              <button type="button" className="tix-btn-secondary" onClick={() => router.push("/sell")}>
-                Volver
-              </button>
+  <div className="flex items-center gap-3">
+    {/* VALIDAR */}
+    <button
+      type="button"
+      className={status === "done" ? "tix-btn-secondary" : "tix-btn-primary"}
+      disabled={!file || status === "checking" || status === "uploading" || status === "done"}
+      onClick={handleValidateAndUpload}
+      title={status === "done" ? "Ya está validado" : "Valida y sube el PDF para continuar"}
+    >
+      {status === "checking"
+        ? "Validando..."
+        : status === "uploading"
+        ? "Subiendo..."
+        : status === "done"
+        ? "Validado ✅"
+        : "Validar y subir"}
+    </button>
 
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  className="tix-btn-primary"
-                  disabled={!file || status === "checking" || status === "uploading"}
-                  onClick={handleValidateAndUpload}
-                >
-                  {status === "checking" ? "Validando..." : status === "uploading" ? "Subiendo..." : "Validar y subir"}
-                </button>
-
-                <button
-                  type="button"
-                  className="tix-btn-primary"
-                  disabled={!canContinue}
-                  onClick={() => router.push("/sell/confirm")}
-                  title="Primero valida y sube el PDF"
-                >
-                  Continuar
-                </button>
-              </div>
-            </div>
-
-            {message && (
-              <div
-                className={[
-                  "mt-4 rounded-xl px-4 py-3 text-sm border",
-                  status === "error" ? "bg-red-50 text-red-700 border-red-200" : "bg-green-50 text-green-700 border-green-200",
-                ].join(" ")}
-              >
-                {message}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+    {/* CONTINUAR */}
+    <button
+      type="button"
+      className={status === "done" ? "tix-btn-primary" : "tix-btn-secondary"}
+      disabled={status !== "done"}
+      onClick={() => router.push("/sell/confirm")}
+      title={status !== "done" ? "Primero valida y sube el PDF" : "Listo, pasemos al paso 3"}
+    >
+      Continuar
+    </button>
+  </div>
+</div>
