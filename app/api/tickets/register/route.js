@@ -14,13 +14,19 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function toBool(v) {
+  const s = String(v ?? "").toLowerCase().trim();
+  return s === "true" || s === "1" || s === "on" || s === "yes";
+}
+
 export async function POST(req) {
   try {
     const supabase = getSupabaseAdmin();
     const formData = await req.formData();
 
     const file = formData.get("file");
-    const isNominada = formData.get("isNominada") === "true";
+    // ✅ acá va la lógica de nominada (NO body, porque es FormData)
+    const isNominada = toBool(formData.get("isNominada"));
     const sellerId = formData.get("sellerId") || null;
 
     if (!file || typeof file === "string") {
@@ -32,13 +38,14 @@ export async function POST(req) {
     if (!mime.includes("pdf")) {
       return NextResponse.json({ error: "El archivo debe ser PDF" }, { status: 400 });
     }
+
     const arrayBuffer = await file.arrayBuffer();
     const bytes = Buffer.from(arrayBuffer);
 
-    // Hash para anti-duplicado
+    // Hash anti-duplicado
     const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
 
-    // 1) Ver si ya existe
+    // 1) Ver si ya existe por hash
     const { data: existing, error: findErr } = await supabase
       .from("ticket_uploads")
       .select("id, storage_path, sha256")
@@ -61,12 +68,10 @@ export async function POST(req) {
     const fileNameSafe = (file.name || "ticket.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
     const storagePath = `tickets/${sha256}/${Date.now()}_${fileNameSafe}`;
 
-    const { error: uploadErr } = await supabase.storage
-      .from(bucket)
-      .upload(storagePath, bytes, {
-        contentType: "application/pdf",
-        upsert: false,
-      });
+    const { error: uploadErr } = await supabase.storage.from(bucket).upload(storagePath, bytes, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
 
     if (uploadErr) {
       return NextResponse.json(
@@ -75,7 +80,7 @@ export async function POST(req) {
       );
     }
 
-    // 3) Registrar en tabla (anti-duplicado)
+    // 3) Registrar en tabla
     const { data: inserted, error: insErr } = await supabase
       .from("ticket_uploads")
       .insert({
@@ -85,7 +90,7 @@ export async function POST(req) {
         original_name: file.name || null,
         mime_type: "application/pdf",
         file_size: bytes.length,
-        is_nominada: isNominada,
+        is_nominada: isNominada, // ✅ si no hay check => false (por defecto)
         seller_id: sellerId,
         status: "uploaded",
       })
@@ -93,7 +98,7 @@ export async function POST(req) {
       .single();
 
     if (insErr) {
-      // Si falló DB, intentamos limpiar el storage para no dejar basura
+      // Si falla DB, limpiamos Storage para no dejar basura
       await supabase.storage.from(bucket).remove([storagePath]).catch(() => {});
       return NextResponse.json({ error: "DB insert error", details: insErr.message }, { status: 500 });
     }
@@ -103,6 +108,7 @@ export async function POST(req) {
       ticketUploadId: inserted.id,
       sha256: inserted.sha256,
       storagePath: inserted.storage_path,
+      isNominada: isNominada,
     });
   } catch (e) {
     return NextResponse.json(
