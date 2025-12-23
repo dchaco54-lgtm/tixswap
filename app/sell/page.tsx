@@ -26,7 +26,7 @@ function formatEventDate(starts_at?: string | null) {
 export default function SellPage() {
   // steps
   const steps = ["Detalles", "Archivo", "Confirmar"];
-  const [currentStep] = useState(0);
+  const [currentStep] = useState(0); // (por ahora fijo en 0, después lo conectamos al flujo)
 
   // events
   const [events, setEvents] = useState<EventItem[]>([]);
@@ -99,8 +99,7 @@ export default function SellPage() {
     const q = eventQuery.trim().toLowerCase();
     if (!q) return events;
     return events.filter((ev) => {
-      const hay =
-        `${ev.title ?? ""} ${ev.venue ?? ""} ${ev.city ?? ""} ${ev.country ?? ""}`.toLowerCase();
+      const hay = `${ev.title ?? ""} ${ev.venue ?? ""} ${ev.city ?? ""} ${ev.country ?? ""}`.toLowerCase();
       return hay.includes(q);
     });
   }, [events, eventQuery]);
@@ -111,15 +110,15 @@ export default function SellPage() {
     setEventOpen(false);
   }
 
-  // ui helpers
-  const inputBase =
-    "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100";
+  // helpers
+  const inputBase = "tix-input";
+  const textareaBase = "tix-textarea";
   const labelBase = "text-sm font-medium text-slate-700";
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
-      <div className="mx-auto max-w-5xl">
-        {/* Header / Stepper (estilo imagen 2, NO transparente) */}
+    <div className="min-h-[calc(100vh-64px)] px-4 py-8">
+      <div className="tix-container max-w-5xl">
+        {/* ✅ Header / Stepper (NO transparente, estilo imagen 2) */}
         <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
           <div className="tix-header-gradient px-8 py-10">
             <h1 className="text-4xl font-bold text-white">Vender entrada</h1>
@@ -167,8 +166,8 @@ export default function SellPage() {
           </div>
         </div>
 
-        {/* Card */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        {/* ✅ Card principal */}
+        <div className="tix-card p-8">
           <h2 className="text-2xl font-semibold text-slate-900">Detalles de la entrada</h2>
           <p className="mt-1 text-sm text-slate-500">
             Completa la info básica para publicar tu ticket.
@@ -179,8 +178,8 @@ export default function SellPage() {
             <label className={labelBase}>
               Evento <span className="text-red-500">*</span>
             </label>
+
             <div className="mt-2" ref={dropdownRef}>
-              {/* Input + flecha */}
               <div className="relative">
                 <input
                   className={inputBase + " pr-10"}
@@ -205,7 +204,6 @@ export default function SellPage() {
                 </div>
               </div>
 
-              {/* Dropdown */}
               {eventOpen && (
                 <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
                   {eventsLoading ? (
@@ -242,9 +240,7 @@ export default function SellPage() {
                             ].join(" ")}
                           >
                             <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
-                            {meta ? (
-                              <div className="mt-0.5 text-xs text-slate-600">{meta}</div>
-                            ) : null}
+                            {meta ? <div className="mt-0.5 text-xs text-slate-600">{meta}</div> : null}
                           </button>
                         );
                       })}
@@ -253,17 +249,11 @@ export default function SellPage() {
                 </div>
               )}
 
-              {/* Selected pill */}
               {selectedEvent && !eventOpen ? (
                 <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div className="text-sm font-semibold text-slate-900">{selectedEvent.title}</div>
                   <div className="mt-0.5 text-xs text-slate-600">
-                    {[
-                      selectedEvent.venue,
-                      selectedEvent.city,
-                      selectedEvent.country,
-                      formatEventDate(selectedEvent.starts_at),
-                    ]
+                    {[selectedEvent.venue, selectedEvent.city, selectedEvent.country, formatEventDate(selectedEvent.starts_at)]
                       .filter(Boolean)
                       .join(" • ")}
                   </div>
@@ -278,7 +268,7 @@ export default function SellPage() {
               Descripción <span className="text-red-500">*</span>
             </label>
             <textarea
-              className={inputBase + " min-h-[120px] resize-y"}
+              className={textareaBase + " min-h-[120px] resize-y"}
               placeholder="Ej: Entrada General - Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -335,9 +325,7 @@ export default function SellPage() {
                 className={inputBase}
                 inputMode="numeric"
                 value={originalPrice}
-                onChange={(e) =>
-                  setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))
-                }
+                onChange={(e) => setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))}
               />
             </div>
           </div>
@@ -383,9 +371,7 @@ export default function SellPage() {
                   <div>
                     <div className="font-semibold text-slate-900">
                       Subasta{" "}
-                      <span className="text-sm font-medium text-slate-500">
-                        (próximamente)
-                      </span>
+                      <span className="text-sm font-medium text-slate-500">(próximamente)</span>
                     </div>
                     <div className="mt-0.5 text-sm text-slate-600">
                       Deja que los compradores pujen por tu entrada
@@ -396,17 +382,15 @@ export default function SellPage() {
             </div>
           </div>
 
-          {/* Footer actions */}
+          {/* Acciones */}
           <div className="mt-8 flex items-center justify-between">
-            <button
-              type="button"
-              className="rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-            >
+            <button type="button" className="tix-btn-secondary">
               Cancelar
             </button>
+
             <button
               type="button"
-              className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
+              className="tix-btn-primary"
               disabled={!selectedEvent || description.trim().length < 6}
               title={
                 !selectedEvent || description.trim().length < 6
