@@ -37,6 +37,13 @@ export default function SellPage() {
   const [eventQuery, setEventQuery] = useState("");
   const [eventOpen, setEventOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
+
+  // ✅ Evento no creado: solicitud a soporte
+  const [requestEvent, setRequestEvent] = useState(false);
+  const [requestedEventName, setRequestedEventName] = useState("");
+  const [requestedEventExtra, setRequestedEventExtra] = useState("");
+  const [requestSending, setRequestSending] = useState(false);
+
   const dropdownRef = useRef(null);
 
   const [description, setDescription] = useState("");
@@ -55,10 +62,7 @@ export default function SellPage() {
       setEventsError(null);
 
       // ✅ A prueba de columnas: trae todo
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .limit(300);
+      const { data, error } = await supabase.from("events").select("*").limit(300);
 
       if (!alive) return;
 
@@ -102,52 +106,132 @@ export default function SellPage() {
   const filteredEvents = useMemo(() => {
     const q = eventQuery.trim().toLowerCase();
     if (!q) return events;
-    return events.filter((ev) => {
-      const hay = `${ev.title ?? ""} ${ev.venue ?? ""} ${ev.city ?? ""} ${ev.country ?? ""}`.toLowerCase();
-      return hay.includes(q);
-    });
+    return events.filter((ev) =>
+      [ev.title, ev.venue, ev.city, formatEventDate(ev.starts_at)]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
   }, [events, eventQuery]);
 
-  function selectEvent(ev) {
-    setSelectedEvent(ev);
-    setEventQuery(ev.title ?? "");
-    setEventOpen(false);
+  async function handleRequestSupport() {
+    if (requestSending) return;
+
+    const name = requestedEventName.trim();
+    if (!name || name.length < 3) {
+      alert("Pon el nombre del evento para solicitarlo a soporte 🙏");
+      return;
+    }
+    if (description.trim().length < 6) {
+      alert("Agrega una descripción más completa 🙏");
+      return;
+    }
+
+    setRequestSending(true);
+    try {
+      // Intentamos traer usuario (si está logueado)
+      let userId = null;
+      let userEmail = null;
+      try {
+        const { data } = await supabase.auth.getUser();
+        userId = data?.user?.id ?? null;
+        userEmail = data?.user?.email ?? null;
+      } catch {}
+
+      // ✅ Payload: guarda todo lo ingresado (y deja listo para sumar Paso 2/3 cuando existan)
+      const payload = {
+        requestEvent: true,
+        requestedEventName: name,
+        requestedEventExtra: requestedEventExtra.trim() || null,
+        userId,
+        userEmail,
+
+        // Paso 1 (actual)
+        description: description.trim(),
+        sector: sector.trim() || null,
+        fila: fila.trim() || null,
+        asiento: asiento.trim() || null,
+        price: price ? Number(price) : null,
+        originalPrice: originalPrice ? Number(originalPrice) : null,
+        saleType: saleType || null,
+
+        // Placeholder (para cuando sumes Paso 2/3)
+        step2: null,
+        step3: null,
+      };
+
+      const res = await fetch("/api/support/sell-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data?.error || "No se pudo enviar la solicitud 😭");
+        return;
+      }
+
+      // Si el correo falla pero se guardó en DB, igual es OK
+      if (data?.emailSent === false && data?.emailError) {
+        alert(
+          "Solicitud guardada ✅ (ojo: el correo a soporte falló).\n\nRevisa RESEND_API_KEY / RESEND_FROM."
+        );
+      } else {
+        alert("Listo ✅ Enviamos tu solicitud a soporte. Te avisaremos cuando esté creado el evento.");
+      }
+
+      // Limpieza suave (sin tocar estructura)
+      setRequestEvent(false);
+      setRequestedEventName("");
+      setRequestedEventExtra("");
+    } finally {
+      setRequestSending(false);
+    }
   }
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
-      <div className="mx-auto max-w-5xl">
-        {/* Stepper (como imagen 2, sólido, NO transparente) */}
-        <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
-          <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-8 py-10">
-            <h1 className="text-4xl font-bold text-white">Vender entrada</h1>
+    <div className="tix-section">
+      <div className="tix-container">
+        {/* Header / title */}
+        <div className="tix-card p-6 tix-header-gradient">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="tix-title">Vender entrada</h1>
+              <p className="tix-subtitle">Publica tu ticket en 3 pasos, rápido y seguro.</p>
+            </div>
+            <a href="/market" className="tix-btn-secondary">
+              Volver al market
+            </a>
+          </div>
 
-            <div className="mt-7 flex items-center">
-              {steps.map((s, i) => {
-                const active = i === currentStep;
-                const done = i < currentStep;
-
+          {/* Stepper */}
+          <div className="mt-6">
+            <div className="flex items-center gap-4">
+              {steps.map((label, i) => {
+                const isActive = i === currentStep;
+                const isDone = i < currentStep;
                 return (
-                  <div key={s} className="flex flex-1 items-center">
-                    <div className="flex items-center gap-4">
+                  <div key={label} className="flex-1">
+                    <div className="flex items-center gap-3">
                       <div
                         className={[
-                          "flex h-12 w-12 items-center justify-center rounded-full text-base font-extrabold",
-                          active
-                            ? "bg-white text-blue-700"
-                            : done
-                            ? "bg-white/80 text-blue-800"
-                            : "bg-white/25 text-white",
+                          "h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold",
+                          isDone
+                            ? "bg-white/90 text-slate-900"
+                            : isActive
+                            ? "bg-white text-slate-900"
+                            : "bg-white/40 text-white",
                         ].join(" ")}
                       >
                         {i + 1}
                       </div>
-
-                      <div className="text-lg font-semibold text-white">{s}</div>
+                      <div className="text-white font-semibold">{label}</div>
                     </div>
 
                     {i < steps.length - 1 && (
-                      <div className="mx-6 h-[3px] flex-1 rounded-full bg-white/25">
+                      <div className="mt-4 h-[3px] rounded-full bg-white/25 overflow-hidden">
                         <div
                           className={[
                             "h-[3px] rounded-full bg-white transition-all duration-300",
@@ -166,9 +250,7 @@ export default function SellPage() {
         {/* Form card */}
         <div className="tix-card p-8">
           <h2 className="text-2xl font-semibold text-slate-900">Detalles de la entrada</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Completa la info básica para publicar tu ticket.
-          </p>
+          <p className="mt-1 text-sm text-slate-500">Completa la info básica para publicar tu ticket.</p>
 
           {/* Evento */}
           <div className="mt-8" ref={dropdownRef}>
@@ -179,13 +261,18 @@ export default function SellPage() {
             <div className="mt-2 relative">
               <input
                 className="tix-input pr-10"
-                placeholder="Busca eventos, artistas, lugares..."
+                placeholder={requestEvent ? "Evento no creado (solicitud a soporte)..." : "Busca eventos, artistas, lugares..."}
                 value={eventQuery}
+                disabled={requestEvent}
                 onChange={(e) => {
+                  if (requestEvent) return;
                   setEventQuery(e.target.value);
-                  setEventOpen(true);
+
+                  if (!eventOpen) setEventOpen(true);
                 }}
-                onFocus={() => setEventOpen(true)}
+                onFocus={() => {
+                  if (!requestEvent) setEventOpen(true);
+                }}
               />
               <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
                 <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
@@ -200,44 +287,42 @@ export default function SellPage() {
               </div>
             </div>
 
-            {eventOpen && (
+            {eventOpen && !requestEvent && (
               <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
                 {eventsLoading ? (
-                  <div className="px-4 py-3 text-sm text-slate-500">Cargando eventos…</div>
+                  <div className="p-4 text-sm text-slate-500">Cargando eventos...</div>
                 ) : eventsError ? (
-                  <div className="px-4 py-3 text-sm text-red-600">{eventsError}</div>
-                ) : filteredEvents.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-slate-500">
-                    No encontré eventos con “{eventQuery}”.
+                  <div className="p-4 text-sm text-red-600">
+                    {eventsError}
+                    <div className="mt-1 text-xs text-slate-500">
+                      Tip: revisa RLS o columnas del schema en Supabase.
+                    </div>
                   </div>
+                ) : filteredEvents.length === 0 ? (
+                  <div className="p-4 text-sm text-slate-500">No encontramos eventos con ese texto.</div>
                 ) : (
                   <div className="max-h-72 overflow-auto">
-                    {filteredEvents.map((ev) => {
-                      const meta = [
-                        ev.venue,
-                        ev.city,
-                        ev.country,
-                        formatEventDate(ev.starts_at),
-                      ]
-                        .filter(Boolean)
-                        .join(" • ");
-
+                    {filteredEvents.slice(0, 40).map((ev) => {
+                      const date = formatEventDate(ev.starts_at);
+                      const meta = [date, ev.venue, ev.city].filter(Boolean).join(" · ");
                       const isSelected = selectedEvent?.id === ev.id;
 
                       return (
                         <button
-                          key={String(ev.id)}
+                          key={ev.id}
                           type="button"
-                          onClick={() => selectEvent(ev)}
+                          onClick={() => {
+                            setSelectedEvent(ev);
+                            setEventQuery(ev.title);
+                            setEventOpen(false);
+                          }}
                           className={[
-                            "w-full text-left px-4 py-3 transition",
-                            isSelected ? "bg-blue-50" : "hover:bg-slate-50",
+                            "w-full text-left px-4 py-3 hover:bg-slate-50 transition",
+                            isSelected ? "bg-slate-50" : "",
                           ].join(" ")}
                         >
                           <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
-                          {meta ? (
-                            <div className="mt-0.5 text-xs text-slate-600">{meta}</div>
-                          ) : null}
+                          {meta ? <div className="mt-0.5 text-xs text-slate-500">{meta}</div> : null}
                         </button>
                       );
                     })}
@@ -245,112 +330,126 @@ export default function SellPage() {
                 )}
               </div>
             )}
+
+          {/* Solicitar evento (cuando no existe) */}
+          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-start gap-3">
+              <input
+                id="requestEvent"
+                type="checkbox"
+                checked={requestEvent}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setRequestEvent(checked);
+
+                  // Si activan solicitud, limpiamos selección y búsqueda
+                  if (checked) {
+                    setSelectedEvent(null);
+                    setEventQuery("");
+                    setEventOpen(false);
+                  } else {
+                    setRequestedEventName("");
+                    setRequestedEventExtra("");
+                  }
+                }}
+                className="mt-1 h-4 w-4 accent-indigo-600"
+              />
+
+              <div className="min-w-0">
+                <label htmlFor="requestEvent" className="block text-sm font-semibold text-slate-900">
+                  Evento no creado — solicitar a soporte
+                </label>
+                <p className="mt-1 text-sm text-slate-600">
+                  No se publicará automáticamente. Soporte creará el evento y dejará tu publicación lista con los mismos datos.
+                </p>
+              </div>
+            </div>
+
+            {requestEvent && (
+              <div className="mt-4 grid gap-3">
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Nombre del evento <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    className="tix-input mt-2"
+                    value={requestedEventName}
+                    onChange={(e) => setRequestedEventName(e.target.value)}
+                    placeholder="Ej: Ricky Martin - Santiago"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Tip: agrega ciudad/recinto si lo sabes, para que soporte lo cree más rápido.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">
+                    Fecha / Recinto (opcional)
+                  </label>
+                  <input
+                    className="tix-input mt-2"
+                    value={requestedEventExtra}
+                    onChange={(e) => setRequestedEventExtra(e.target.value)}
+                    placeholder="Ej: 12/03/2026, Movistar Arena"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
           </div>
 
           {/* Descripción */}
-          <div className="mt-6">
+          <div className="mt-8">
             <label className="text-sm font-medium text-slate-700">
               Descripción <span className="text-red-500">*</span>
             </label>
             <textarea
-              className="tix-textarea mt-2 min-h-[120px] resize-y"
-              placeholder="Ej: Entrada General - Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
+              className="tix-textarea mt-2"
+              placeholder="Ej: Entrada General – Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              rows={4}
             />
           </div>
 
-          {/* Sector/Fila/Asiento */}
-          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+          {/* Sector / Fila / Asiento */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="text-sm font-medium text-slate-700">Sector</label>
-              <input
-                className="tix-input mt-2"
-                placeholder="Campo, Platea, etc."
-                value={sector}
-                onChange={(e) => setSector(e.target.value)}
-              />
+              <input className="tix-input mt-2" value={sector} onChange={(e) => setSector(e.target.value)} placeholder="Campo / Platea / Galería" />
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">Fila</label>
-              <input
-                className="tix-input mt-2"
-                placeholder="A, B, 1, 2, etc."
-                value={fila}
-                onChange={(e) => setFila(e.target.value)}
-              />
+              <input className="tix-input mt-2" value={fila} onChange={(e) => setFila(e.target.value)} placeholder="A, B, 1, 2..." />
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700">Asiento</label>
-              <input
-                className="tix-input mt-2"
-                placeholder="1, 2, 3, etc."
-                value={asiento}
-                onChange={(e) => setAsiento(e.target.value)}
-              />
+              <input className="tix-input mt-2" value={asiento} onChange={(e) => setAsiento(e.target.value)} placeholder="1, 2, 10..." />
             </div>
           </div>
 
-          {/* Precios */}
-          <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+          {/* Precio */}
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="text-sm font-medium text-slate-700">
-                Precio de venta <span className="text-red-500">*</span>
-              </label>
-              <input
-                className="tix-input mt-2"
-                inputMode="numeric"
-                value={price}
-                onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))}
-              />
+              <label className="text-sm font-medium text-slate-700">Tipo de venta</label>
+              <select className="tix-select mt-2" value={saleType} onChange={(e) => setSaleType(e.target.value)}>
+                <option value="fixed">Precio fijo</option>
+                <option value="negotiable">Negociable</option>
+              </select>
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-700">Precio original (opcional)</label>
-              <input
-                className="tix-input mt-2"
-                inputMode="numeric"
-                value={originalPrice}
-                onChange={(e) => setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))}
-              />
+              <label className="text-sm font-medium text-slate-700">Precio de venta</label>
+              <input className="tix-input mt-2" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="50000" />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-700">Precio original</label>
+              <input className="tix-input mt-2" value={originalPrice} onChange={(e) => setOriginalPrice(e.target.value)} placeholder="60000" />
             </div>
           </div>
 
-          {/* Tipo de venta */}
-          <div className="mt-8">
-            <div className="text-sm font-medium text-slate-700">Tipo de venta</div>
-            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setSaleType("fixed")}
-                className={[
-                  "rounded-2xl border p-5 text-left transition",
-                  saleType === "fixed"
-                    ? "border-blue-500 bg-blue-50 ring-4 ring-blue-100"
-                    : "border-slate-200 hover:bg-slate-50",
-                ].join(" ")}
-              >
-                <div className="font-semibold text-slate-900">Precio fijo</div>
-                <div className="mt-1 text-sm text-slate-600">
-                  Vende inmediatamente al precio que estableciste
-                </div>
-              </button>
-
-              <button
-                type="button"
-                disabled
-                className="cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-50 p-5 text-left"
-                title="Próximamente"
-              >
-                <div className="font-semibold text-slate-900">Subasta (próximamente)</div>
-                <div className="mt-1 text-sm text-slate-600">
-                  Deja que los compradores pujen por tu entrada
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Acciones */}
-          <div className="mt-8 flex items-center justify-between">
+          {/* Footer buttons */}
+          <div className="mt-10 flex items-center justify-between">
             <button type="button" className="tix-btn-secondary">
               Cancelar
             </button>
@@ -358,10 +457,26 @@ export default function SellPage() {
             <button
               type="button"
               className="tix-btn-primary"
-              disabled={!selectedEvent || description.trim().length < 6}
-              title={!selectedEvent || description.trim().length < 6 ? "Completa evento y descripción" : ""}
+              disabled={
+                requestSending ||
+                description.trim().length < 6 ||
+                (!requestEvent && !selectedEvent) ||
+                (requestEvent && requestedEventName.trim().length < 3)
+              }
+              title={
+                requestEvent
+                  ? "Completa nombre del evento y descripción"
+                  : "Completa evento y descripción"
+              }
+              onClick={() => {
+                if (requestEvent) {
+                  handleRequestSupport();
+                } else {
+                  // ⚠️ flujo normal (por ahora se mantiene igual)
+                }
+              }}
             >
-              Continuar
+              {requestSending ? "Enviando..." : "Continuar"}
             </button>
           </div>
         </div>
