@@ -3,7 +3,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Header from "./components/Header";
 import Hero from "./components/Hero";
 import EventGrid from "./components/EventGrid";
 import Categories from "./components/Categories";
@@ -105,10 +104,9 @@ export default function HomePage() {
   };
 
   return (
-    <main className="min-h-screen bg-white">
-      <Header />
+    <main className="min-h-screen">
+      {/* Header viene desde app/layout.jsx, NO se renderiza acá */}
 
-      {/* Imagen 2: buscador con memoria (dropdown) */}
       <Hero
         query={query}
         onQueryChange={setQuery}
@@ -117,7 +115,6 @@ export default function HomePage() {
         onSelectSuggestion={handleSelectSuggestion}
       />
 
-      {/* Imagen 3: cards + “Todos los eventos” arriba a la derecha */}
       <EventGrid title="Eventos destacados" events={events} />
 
       <div id="como-funciona">
