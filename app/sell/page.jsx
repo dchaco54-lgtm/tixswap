@@ -1,4 +1,3 @@
-// app/sell/page.jsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,6 +12,18 @@ function formatEventDate(starts_at) {
     month: "short",
     year: "numeric",
   });
+}
+
+// 🔥 Esto evita que la web dependa de nombres exactos de columnas
+function normalizeEventRow(e) {
+  return {
+    id: e.id ?? e.event_id ?? e.uuid ?? e.slug ?? String(Math.random()),
+    title: e.title ?? e.name ?? e.event_name ?? e.nombre ?? "Evento sin nombre",
+    starts_at: e.starts_at ?? e.start_at ?? e.date ?? e.start_date ?? e.fecha ?? null,
+    venue: e.venue ?? e.place ?? e.location ?? e.venue_name ?? e.lugar ?? null,
+    city: e.city ?? e.ciudad ?? null,
+    country: e.country ?? e.pais ?? null,
+  };
 }
 
 export default function SellPage() {
@@ -43,10 +54,10 @@ export default function SellPage() {
       setEventsLoading(true);
       setEventsError(null);
 
+      // ✅ A prueba de columnas: trae todo
       const { data, error } = await supabase
         .from("events")
-        .select("id, title, starts_at, venue, city, country")
-        .order("starts_at", { ascending: true })
+        .select("*")
         .limit(300);
 
       if (!alive) return;
@@ -54,14 +65,22 @@ export default function SellPage() {
       if (error) {
         console.error("[sell] supabase events error:", error);
         setEvents([]);
-        setEventsError(
-          "No pude cargar los eventos (revisa RLS/policies o nombres de columnas en Supabase)."
-        );
+        // ✅ muestra el error REAL (para cachar al tiro si es RLS o columnas)
+        setEventsError(error.message || "Error cargando eventos");
         setEventsLoading(false);
         return;
       }
 
-      setEvents(data || []);
+      const normalized = (data || []).map(normalizeEventRow);
+
+      // ✅ Ordenamos en JS (para no depender de starts_at en SQL)
+      normalized.sort((a, b) => {
+        const ta = a.starts_at ? new Date(a.starts_at).getTime() : 0;
+        const tb = b.starts_at ? new Date(b.starts_at).getTime() : 0;
+        return ta - tb;
+      });
+
+      setEvents(normalized);
       setEventsLoading(false);
     }
 
@@ -216,7 +235,9 @@ export default function SellPage() {
                           ].join(" ")}
                         >
                           <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
-                          {meta ? <div className="mt-0.5 text-xs text-slate-600">{meta}</div> : null}
+                          {meta ? (
+                            <div className="mt-0.5 text-xs text-slate-600">{meta}</div>
+                          ) : null}
                         </button>
                       );
                     })}
