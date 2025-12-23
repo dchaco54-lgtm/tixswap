@@ -1,485 +1,159 @@
+// app/events/page.jsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
+import { supabase } from "../lib/supabaseClient";
 
-function formatEventDate(starts_at) {
-  if (!starts_at) return "";
-  const d = new Date(starts_at);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("es-CL", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+function norm(str) {
+  return (str || "")
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
 }
 
-// 🔥 Esto evita que la web dependa de nombres exactos de columnas
-function normalizeEventRow(e) {
-  return {
-    id: e.id ?? e.event_id ?? e.uuid ?? e.slug ?? String(Math.random()),
-    title: e.title ?? e.name ?? e.event_name ?? e.nombre ?? "Evento sin nombre",
-    starts_at: e.starts_at ?? e.start_at ?? e.date ?? e.start_date ?? e.fecha ?? null,
-    venue: e.venue ?? e.place ?? e.location ?? e.venue_name ?? e.lugar ?? null,
-    city: e.city ?? e.ciudad ?? null,
-    country: e.country ?? e.pais ?? null,
-  };
+function formatEventDate(iso) {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return new Intl.DateTimeFormat("es-CL", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(d);
+  } catch {
+    return String(iso);
+  }
 }
 
-export default function SellPage() {
-  const steps = ["Detalles", "Archivo", "Confirmar"];
-  const [currentStep] = useState(0);
+export default function EventsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
 
+  const [userChecked, setUserChecked] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState([]);
-  const [eventsLoading, setEventsLoading] = useState(true);
-  const [eventsError, setEventsError] = useState(null);
+  const [query, setQuery] = useState("");
 
-  const [eventQuery, setEventQuery] = useState("");
-  const [eventOpen, setEventOpen] = useState(false);
-  const [selectedEvent, setSelectedEvent] = useState(null);
-
-  // ✅ Evento no creado: solicitud a soporte
-  const [requestEvent, setRequestEvent] = useState(false);
-  const [requestedEventName, setRequestedEventName] = useState("");
-  const [requestedEventExtra, setRequestedEventExtra] = useState("");
-  const [requestSending, setRequestSending] = useState(false);
-
-  const dropdownRef = useRef(null);
-
-  const [description, setDescription] = useState("");
-  const [sector, setSector] = useState("");
-  const [fila, setFila] = useState("");
-  const [asiento, setAsiento] = useState("");
-  const [price, setPrice] = useState("50000");
-  const [originalPrice, setOriginalPrice] = useState("60000");
-  const [saleType, setSaleType] = useState("fixed");
-
+  // Auth guard: si no hay sesión -> login y después vuelve a /events
   useEffect(() => {
-    let alive = true;
-
-    async function loadEvents() {
-      setEventsLoading(true);
-      setEventsError(null);
-
-      // ✅ A prueba de columnas: trae todo
-      const { data, error } = await supabase.from("events").select("*").limit(300);
-
-      if (!alive) return;
-
-      if (error) {
-        console.error("[sell] supabase events error:", error);
-        setEvents([]);
-        // ✅ muestra el error REAL (para cachar al tiro si es RLS o columnas)
-        setEventsError(error.message || "Error cargando eventos");
-        setEventsLoading(false);
+    const guard = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!data?.user) {
+        router.replace(`/login?redirectTo=${encodeURIComponent(pathname || "/events")}`);
         return;
       }
-
-      const normalized = (data || []).map(normalizeEventRow);
-
-      // ✅ Ordenamos en JS (para no depender de starts_at en SQL)
-      normalized.sort((a, b) => {
-        const ta = a.starts_at ? new Date(a.starts_at).getTime() : 0;
-        const tb = b.starts_at ? new Date(b.starts_at).getTime() : 0;
-        return ta - tb;
-      });
-
-      setEvents(normalized);
-      setEventsLoading(false);
-    }
-
-    loadEvents();
-    return () => {
-      alive = false;
+      setUserChecked(true);
     };
-  }, []);
+    guard();
+  }, [router, pathname]);
 
   useEffect(() => {
-    function onDocClick(e) {
-      if (!dropdownRef.current) return;
-      if (!dropdownRef.current.contains(e.target)) setEventOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
+    if (!userChecked) return;
 
-  const filteredEvents = useMemo(() => {
-    const q = eventQuery.trim().toLowerCase();
+    const load = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("events")
+        .select("*")
+        .order("starts_at", { ascending: true });
+
+      if (!error) setEvents(Array.isArray(data) ? data : []);
+      setLoading(false);
+    };
+
+    load();
+  }, [userChecked]);
+
+  const filtered = useMemo(() => {
+    const q = norm(query);
     if (!q) return events;
-    return events.filter((ev) =>
-      [ev.title, ev.venue, ev.city, formatEventDate(ev.starts_at)]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q)
-    );
-  }, [events, eventQuery]);
 
-  async function handleRequestSupport() {
-    if (requestSending) return;
+    return (events || []).filter((ev) => {
+      const hay = norm(
+        `${ev?.title || ev?.name || ""} ${ev?.venue || ev?.location || ""} ${ev?.city || ""}`
+      );
+      return hay.includes(q);
+    });
+  }, [query, events]);
 
-    const name = requestedEventName.trim();
-    if (!name || name.length < 3) {
-      alert("Pon el nombre del evento para solicitarlo a soporte 🙏");
-      return;
-    }
-    if (description.trim().length < 6) {
-      alert("Agrega una descripción más completa 🙏");
-      return;
-    }
-
-    setRequestSending(true);
-    try {
-      // Intentamos traer usuario (si está logueado)
-      let userId = null;
-      let userEmail = null;
-      try {
-        const { data } = await supabase.auth.getUser();
-        userId = data?.user?.id ?? null;
-        userEmail = data?.user?.email ?? null;
-      } catch {}
-
-      // ✅ Payload: guarda todo lo ingresado (y deja listo para sumar Paso 2/3 cuando existan)
-      const payload = {
-        requestEvent: true,
-        requestedEventName: name,
-        requestedEventExtra: requestedEventExtra.trim() || null,
-        userId,
-        userEmail,
-
-        // Paso 1 (actual)
-        description: description.trim(),
-        sector: sector.trim() || null,
-        fila: fila.trim() || null,
-        asiento: asiento.trim() || null,
-        price: price ? Number(price) : null,
-        originalPrice: originalPrice ? Number(originalPrice) : null,
-        saleType: saleType || null,
-
-        // Placeholder (para cuando sumes Paso 2/3)
-        step2: null,
-        step3: null,
-      };
-
-      const res = await fetch("/api/support/sell-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data?.error || "No se pudo enviar la solicitud 😭");
-        return;
-      }
-
-      // Si el correo falla pero se guardó en DB, igual es OK
-      if (data?.emailSent === false && data?.emailError) {
-        alert(
-          "Solicitud guardada ✅ (ojo: el correo a soporte falló).\n\nRevisa RESEND_API_KEY / RESEND_FROM."
-        );
-      } else {
-        alert("Listo ✅ Enviamos tu solicitud a soporte. Te avisaremos cuando esté creado el evento.");
-      }
-
-      // Limpieza suave (sin tocar estructura)
-      setRequestEvent(false);
-      setRequestedEventName("");
-      setRequestedEventExtra("");
-    } finally {
-      setRequestSending(false);
-    }
+  if (!userChecked) {
+    return <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando…</div>;
   }
 
   return (
-    <div className="tix-section">
-      <div className="tix-container">
-        {/* Header / title */}
-        <div className="tix-card p-6 tix-header-gradient">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="tix-title">Vender entrada</h1>
-              <p className="tix-subtitle">Publica tu ticket en 3 pasos, rápido y seguro.</p>
-            </div>
-            <a href="/market" className="tix-btn-secondary">
-              Volver al market
-            </a>
-          </div>
+    <div className="max-w-6xl mx-auto px-4 py-12">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          {/* ✅ Esto es EXACTO el “texto + link” como tu recuadro rojo */}
+          <Link href="/" className="text-sm text-slate-600 hover:text-blue-600">
+            ← Volver al inicio
+          </Link>
 
-          {/* Stepper */}
-          <div className="mt-6">
-            <div className="flex items-center gap-4">
-              {steps.map((label, i) => {
-                const isActive = i === currentStep;
-                const isDone = i < currentStep;
-                return (
-                  <div key={label} className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={[
-                          "h-10 w-10 rounded-full flex items-center justify-center text-sm font-semibold",
-                          isDone
-                            ? "bg-white/90 text-slate-900"
-                            : isActive
-                            ? "bg-white text-slate-900"
-                            : "bg-white/40 text-white",
-                        ].join(" ")}
-                      >
-                        {i + 1}
-                      </div>
-                      <div className="text-white font-semibold">{label}</div>
-                    </div>
-
-                    {i < steps.length - 1 && (
-                      <div className="mt-4 h-[3px] rounded-full bg-white/25 overflow-hidden">
-                        <div
-                          className={[
-                            "h-[3px] rounded-full bg-white transition-all duration-300",
-                            i < currentStep ? "w-full" : "w-0",
-                          ].join(" ")}
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <h1 className="mt-2 text-3xl font-bold text-slate-900">Eventos disponibles</h1>
+          <p className="mt-2 text-slate-600">
+            Elige un evento para ver las entradas publicadas por otros usuarios.
+          </p>
         </div>
 
-        {/* Form card */}
-        <div className="tix-card p-8">
-          <h2 className="text-2xl font-semibold text-slate-900">Detalles de la entrada</h2>
-          <p className="mt-1 text-sm text-slate-500">Completa la info básica para publicar tu ticket.</p>
+        <button
+          onClick={() => router.push("/sell")}
+          className="bg-green-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
+        >
+          Publicar entrada
+        </button>
+      </div>
 
-          {/* Evento */}
-          <div className="mt-8" ref={dropdownRef}>
-            <label className="text-sm font-medium text-slate-700">
-              Evento <span className="text-red-500">*</span>
-            </label>
+      <div className="mt-8">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar evento (artista, recinto, ciudad...)"
+          className="w-full border rounded-xl px-5 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+        />
+      </div>
 
-            <div className="mt-2 relative">
-              <input
-                className="tix-input pr-10"
-                placeholder={requestEvent ? "Evento no creado (solicitud a soporte)..." : "Busca eventos, artistas, lugares..."}
-                value={eventQuery}
-                disabled={requestEvent}
-                onChange={(e) => {
-                  if (requestEvent) return;
-                  setEventQuery(e.target.value);
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+        {loading ? (
+          <p className="text-slate-600">Cargando eventos…</p>
+        ) : filtered.length === 0 ? (
+          <p className="text-slate-600">No hay eventos que coincidan con tu búsqueda.</p>
+        ) : (
+          filtered.map((ev) => {
+            const title = ev?.title || ev?.name || "Evento";
+            const date = formatEventDate(ev?.starts_at || ev?.date);
+            const venue = ev?.venue || ev?.location || "";
+            const city = ev?.city || "";
 
-                  if (!eventOpen) setEventOpen(true);
-                }}
-                onFocus={() => {
-                  if (!requestEvent) setEventOpen(true);
-                }}
-              />
-              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-                  <path
-                    d="M6 8l4 4 4-4"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            {eventOpen && !requestEvent && (
-              <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                {eventsLoading ? (
-                  <div className="p-4 text-sm text-slate-500">Cargando eventos...</div>
-                ) : eventsError ? (
-                  <div className="p-4 text-sm text-red-600">
-                    {eventsError}
-                    <div className="mt-1 text-xs text-slate-500">
-                      Tip: revisa RLS o columnas del schema en Supabase.
-                    </div>
-                  </div>
-                ) : filteredEvents.length === 0 ? (
-                  <div className="p-4 text-sm text-slate-500">No encontramos eventos con ese texto.</div>
-                ) : (
-                  <div className="max-h-72 overflow-auto">
-                    {filteredEvents.slice(0, 40).map((ev) => {
-                      const date = formatEventDate(ev.starts_at);
-                      const meta = [date, ev.venue, ev.city].filter(Boolean).join(" · ");
-                      const isSelected = selectedEvent?.id === ev.id;
-
-                      return (
-                        <button
-                          key={ev.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedEvent(ev);
-                            setEventQuery(ev.title);
-                            setEventOpen(false);
-                          }}
-                          className={[
-                            "w-full text-left px-4 py-3 hover:bg-slate-50 transition",
-                            isSelected ? "bg-slate-50" : "",
-                          ].join(" ")}
-                        >
-                          <div className="text-sm font-semibold text-slate-900">{ev.title}</div>
-                          {meta ? <div className="mt-0.5 text-xs text-slate-500">{meta}</div> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-          {/* Solicitar evento (cuando no existe) */}
-          <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-start gap-3">
-              <input
-                id="requestEvent"
-                type="checkbox"
-                checked={requestEvent}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setRequestEvent(checked);
-
-                  // Si activan solicitud, limpiamos selección y búsqueda
-                  if (checked) {
-                    setSelectedEvent(null);
-                    setEventQuery("");
-                    setEventOpen(false);
-                  } else {
-                    setRequestedEventName("");
-                    setRequestedEventExtra("");
-                  }
-                }}
-                className="mt-1 h-4 w-4 accent-indigo-600"
-              />
-
-              <div className="min-w-0">
-                <label htmlFor="requestEvent" className="block text-sm font-semibold text-slate-900">
-                  Evento no creado — solicitar a soporte
-                </label>
-                <p className="mt-1 text-sm text-slate-600">
-                  No se publicará automáticamente. Soporte creará el evento y dejará tu publicación lista con los mismos datos.
-                </p>
-              </div>
-            </div>
-
-            {requestEvent && (
-              <div className="mt-4 grid gap-3">
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    Nombre del evento <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    className="tix-input mt-2"
-                    value={requestedEventName}
-                    onChange={(e) => setRequestedEventName(e.target.value)}
-                    placeholder="Ej: Ricky Martin - Santiago"
-                  />
-                  <p className="mt-1 text-xs text-slate-500">
-                    Tip: agrega ciudad/recinto si lo sabes, para que soporte lo cree más rápido.
-                  </p>
+            return (
+              <div key={ev.id} className="bg-white border rounded-xl p-6 shadow-sm">
+                <h3 className="text-xl font-bold text-slate-900">{title}</h3>
+                <div className="mt-3 text-slate-700 space-y-1">
+                  {date && <p>📅 {date}</p>}
+                  {(venue || city) && (
+                    <p>
+                      📍 {venue}
+                      {venue && city ? " · " : ""}
+                      {city}
+                    </p>
+                  )}
                 </div>
 
-                <div>
-                  <label className="text-sm font-medium text-slate-700">
-                    Fecha / Recinto (opcional)
-                  </label>
-                  <input
-                    className="tix-input mt-2"
-                    value={requestedEventExtra}
-                    onChange={(e) => setRequestedEventExtra(e.target.value)}
-                    placeholder="Ej: 12/03/2026, Movistar Arena"
-                  />
-                </div>
+                <Link
+                  href={`/events/${ev.id}`}
+                  className="mt-5 inline-block text-blue-600 font-semibold hover:underline"
+                >
+                  Ver entradas disponibles →
+                </Link>
               </div>
-            )}
-          </div>
-
-          </div>
-
-          {/* Descripción */}
-          <div className="mt-8">
-            <label className="text-sm font-medium text-slate-700">
-              Descripción <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              className="tix-textarea mt-2"
-              placeholder="Ej: Entrada General – Platea Alta. Indica ubicación exacta, estado, restricciones, etc."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-            />
-          </div>
-
-          {/* Sector / Fila / Asiento */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="text-sm font-medium text-slate-700">Sector</label>
-              <input className="tix-input mt-2" value={sector} onChange={(e) => setSector(e.target.value)} placeholder="Campo / Platea / Galería" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">Fila</label>
-              <input className="tix-input mt-2" value={fila} onChange={(e) => setFila(e.target.value)} placeholder="A, B, 1, 2..." />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">Asiento</label>
-              <input className="tix-input mt-2" value={asiento} onChange={(e) => setAsiento(e.target.value)} placeholder="1, 2, 10..." />
-            </div>
-          </div>
-
-          {/* Precio */}
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="text-sm font-medium text-slate-700">Tipo de venta</label>
-              <select className="tix-select mt-2" value={saleType} onChange={(e) => setSaleType(e.target.value)}>
-                <option value="fixed">Precio fijo</option>
-                <option value="negotiable">Negociable</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">Precio de venta</label>
-              <input className="tix-input mt-2" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="50000" />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">Precio original</label>
-              <input className="tix-input mt-2" value={originalPrice} onChange={(e) => setOriginalPrice(e.target.value)} placeholder="60000" />
-            </div>
-          </div>
-
-          {/* Footer buttons */}
-          <div className="mt-10 flex items-center justify-between">
-            <button type="button" className="tix-btn-secondary">
-              Cancelar
-            </button>
-
-            <button
-              type="button"
-              className="tix-btn-primary"
-              disabled={
-                requestSending ||
-                description.trim().length < 6 ||
-                (!requestEvent && !selectedEvent) ||
-                (requestEvent && requestedEventName.trim().length < 3)
-              }
-              title={
-                requestEvent
-                  ? "Completa nombre del evento y descripción"
-                  : "Completa evento y descripción"
-              }
-              onClick={() => {
-                if (requestEvent) {
-                  handleRequestSupport();
-                } else {
-                  // ⚠️ flujo normal (por ahora se mantiene igual)
-                }
-              }}
-            >
-              {requestSending ? "Enviando..." : "Continuar"}
-            </button>
-          </div>
-        </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
