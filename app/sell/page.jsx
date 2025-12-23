@@ -27,133 +27,177 @@ function formatEventDate(iso) {
       minute: "2-digit",
     }).format(d);
   } catch {
-    return String(iso);
+    return "";
   }
+}
+
+// Normaliza filas del table events, por si cambian nombres de columnas
+function normalizeEventRow(e) {
+  return {
+    id: e.id ?? e.event_id ?? e.uuid ?? e.slug,
+    title: e.title ?? e.name ?? e.event_name ?? e.nombre ?? "Evento",
+    starts_at: e.starts_at ?? e.start_at ?? e.date ?? e.start_date ?? e.fecha ?? null,
+    venue: e.venue ?? e.place ?? e.location ?? e.venue_name ?? e.lugar ?? null,
+    city: e.city ?? e.ciudad ?? null,
+  };
 }
 
 export default function EventsPage() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [userChecked, setUserChecked] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState([]);
   const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  // Auth guard: si no hay sesión -> login y después vuelve a /events
+  // auth (si no está logueado -> login)
   useEffect(() => {
-    const guard = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data?.user) {
-        router.replace(`/login?redirectTo=${encodeURIComponent(pathname || "/events")}`);
-        return;
+    let alive = true;
+
+    async function ensureAuth() {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!data?.user) {
+          router.push(`/login?redirect=${encodeURIComponent(pathname || "/events")}`);
+        }
+      } catch {
+        router.push(`/login?redirect=${encodeURIComponent(pathname || "/events")}`);
       }
-      setUserChecked(true);
+    }
+
+    ensureAuth();
+    return () => {
+      alive = false;
     };
-    guard();
   }, [router, pathname]);
 
+  // load events
   useEffect(() => {
-    if (!userChecked) return;
+    let alive = true;
 
-    const load = async () => {
+    async function load() {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .order("starts_at", { ascending: true });
 
-      if (!error) setEvents(Array.isArray(data) ? data : []);
+      const { data, error } = await supabase.from("events").select("*").limit(300);
+
+      if (!alive) return;
+
+      if (error) {
+        console.error("[events] load error:", error);
+        setEvents([]);
+        setLoading(false);
+        return;
+      }
+
+      const normalized = (data || []).map(normalizeEventRow);
+
+      // Ordena por fecha si existe
+      normalized.sort((a, b) => {
+        const ta = a.starts_at ? new Date(a.starts_at).getTime() : 0;
+        const tb = b.starts_at ? new Date(b.starts_at).getTime() : 0;
+        return ta - tb;
+      });
+
+      setEvents(normalized);
       setLoading(false);
-    };
+    }
 
     load();
-  }, [userChecked]);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const filtered = useMemo(() => {
     const q = norm(query);
     if (!q) return events;
 
-    return (events || []).filter((ev) => {
-      const hay = norm(
-        `${ev?.title || ev?.name || ""} ${ev?.venue || ev?.location || ""} ${ev?.city || ""}`
+    return events.filter((e) => {
+      const blob = norm(
+        [e.title, e.venue, e.city, formatEventDate(e.starts_at)].filter(Boolean).join(" ")
       );
-      return hay.includes(q);
+      return blob.includes(q);
     });
-  }, [query, events]);
-
-  if (!userChecked) {
-    return <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando…</div>;
-  }
+  }, [events, query]);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-12">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          {/* ✅ Esto es EXACTO el “texto + link” como tu recuadro rojo */}
+    <div className="tix-section">
+      <div className="tix-container">
+        <div className="tix-card p-8">
+          {/* ✅ LINK estilo texto arriba (como tu recuadro rojo) */}
           <Link href="/" className="text-sm text-slate-600 hover:text-blue-600">
             ← Volver al inicio
           </Link>
 
-          <h1 className="mt-2 text-3xl font-bold text-slate-900">Eventos disponibles</h1>
-          <p className="mt-2 text-slate-600">
-            Elige un evento para ver las entradas publicadas por otros usuarios.
-          </p>
+          <div className="mt-2 flex items-start justify-between gap-6">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900">Eventos disponibles</h1>
+              <p className="mt-2 text-slate-600">
+                Elige un evento para ver las entradas publicadas por otros usuarios.
+              </p>
+            </div>
+
+            <Link
+              href="/sell"
+              className="rounded-full bg-green-600 px-6 py-3 text-white font-semibold hover:bg-green-700 transition"
+            >
+              Publicar entrada
+            </Link>
+          </div>
+
+          {/* Search */}
+          <div className="mt-8">
+            <input
+              className="tix-input"
+              placeholder="Buscar evento (artista, recinto, ciudad...)"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Grid */}
+          <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
+            {loading ? (
+              <div className="text-slate-600">Cargando eventos...</div>
+            ) : filtered.length === 0 ? (
+              <div className="text-slate-600">No encontramos eventos con ese texto.</div>
+            ) : (
+              filtered.map((ev) => {
+                const date = formatEventDate(ev.starts_at);
+                const meta = [date, ev.venue, ev.city].filter(Boolean).join(" · ");
+
+                return (
+                  <div key={ev.id} className="rounded-2xl border border-slate-200 bg-white p-6">
+                    <div className="text-xl font-bold text-slate-900">{ev.title}</div>
+
+                    <div className="mt-3 space-y-2 text-slate-700">
+                      {date ? (
+                        <div className="flex items-center gap-2">
+                          <span>📅</span>
+                          <span>{date}</span>
+                        </div>
+                      ) : null}
+
+                      {(ev.venue || ev.city) ? (
+                        <div className="flex items-center gap-2">
+                          <span>📍</span>
+                          <span>{[ev.venue, ev.city].filter(Boolean).join(" · ")}</span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <Link
+                      href={`/events/${ev.id}`}
+                      className="mt-5 inline-flex items-center gap-2 font-semibold text-blue-600 hover:text-blue-700"
+                    >
+                      Ver entradas disponibles <span aria-hidden>→</span>
+                    </Link>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
-
-        <button
-          onClick={() => router.push("/sell")}
-          className="bg-green-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
-        >
-          Publicar entrada
-        </button>
-      </div>
-
-      <div className="mt-8">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar evento (artista, recinto, ciudad...)"
-          className="w-full border rounded-xl px-5 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
-      </div>
-
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {loading ? (
-          <p className="text-slate-600">Cargando eventos…</p>
-        ) : filtered.length === 0 ? (
-          <p className="text-slate-600">No hay eventos que coincidan con tu búsqueda.</p>
-        ) : (
-          filtered.map((ev) => {
-            const title = ev?.title || ev?.name || "Evento";
-            const date = formatEventDate(ev?.starts_at || ev?.date);
-            const venue = ev?.venue || ev?.location || "";
-            const city = ev?.city || "";
-
-            return (
-              <div key={ev.id} className="bg-white border rounded-xl p-6 shadow-sm">
-                <h3 className="text-xl font-bold text-slate-900">{title}</h3>
-                <div className="mt-3 text-slate-700 space-y-1">
-                  {date && <p>📅 {date}</p>}
-                  {(venue || city) && (
-                    <p>
-                      📍 {venue}
-                      {venue && city ? " · " : ""}
-                      {city}
-                    </p>
-                  )}
-                </div>
-
-                <Link
-                  href={`/events/${ev.id}`}
-                  className="mt-5 inline-block text-blue-600 font-semibold hover:underline"
-                >
-                  Ver entradas disponibles →
-                </Link>
-              </div>
-            );
-          })
-        )}
       </div>
     </div>
   );
