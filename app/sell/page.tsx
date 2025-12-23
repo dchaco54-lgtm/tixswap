@@ -55,7 +55,6 @@ export default function SellPage() {
       setEventsLoading(true);
       setEventsError(null);
 
-      // OJO: mismos campos que tu homepage (app/page.js)
       const { data, error } = await supabase
         .from("events")
         .select("id, title, starts_at, venue, city, country")
@@ -120,47 +119,50 @@ export default function SellPage() {
   return (
     <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-5xl">
-        {/* Header / Stepper en gradiente */}
-        <div className="mb-8 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 p-[1px] shadow-sm">
-          <div className="rounded-2xl bg-white/10">
-            <div className="px-6 py-5">
-              <h1 className="text-3xl font-semibold text-white">Vender entrada</h1>
+        {/* Header / Stepper (estilo imagen 2, NO transparente) */}
+        <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
+          <div className="tix-header-gradient px-8 py-10">
+            <h1 className="text-4xl font-bold text-white">Vender entrada</h1>
 
-              <div className="mt-4 flex items-center gap-3">
-                {steps.map((s, i) => {
-                  const active = i === currentStep;
-                  const done = i < currentStep;
+            <div className="mt-7 flex items-center">
+              {steps.map((s, i) => {
+                const active = i === currentStep;
+                const done = i < currentStep;
 
-                  return (
-                    <div key={s} className="flex flex-1 items-center gap-3">
+                return (
+                  <div key={s} className="flex items-center flex-1">
+                    {/* Paso */}
+                    <div className="flex items-center gap-4">
                       <div
                         className={[
-                          "flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold",
+                          "flex h-12 w-12 items-center justify-center rounded-full text-base font-bold",
                           active
-                            ? "bg-white text-blue-600"
+                            ? "bg-white text-blue-700"
                             : done
-                            ? "bg-white/70 text-blue-700"
-                            : "bg-white/20 text-white",
+                            ? "bg-white/80 text-blue-800"
+                            : "bg-blue-400/60 text-white",
                         ].join(" ")}
                       >
                         {i + 1}
                       </div>
 
-                      <div className="flex-1">
-                        <div className="text-sm font-medium text-white">{s}</div>
-                        <div className="mt-2 h-[3px] w-full rounded-full bg-white/20">
-                          <div
-                            className={[
-                              "h-[3px] rounded-full bg-white transition-all",
-                              i <= currentStep ? "w-full" : "w-0",
-                            ].join(" ")}
-                          />
-                        </div>
-                      </div>
+                      <div className="text-lg font-semibold text-white">{s}</div>
                     </div>
-                  );
-                })}
-              </div>
+
+                    {/* Conector */}
+                    {i < steps.length - 1 && (
+                      <div className="mx-6 h-[3px] flex-1 rounded-full bg-white/25">
+                        <div
+                          className={[
+                            "h-[3px] rounded-full bg-white transition-all duration-300",
+                            i < currentStep ? "w-full" : "w-0",
+                          ].join(" ")}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -178,7 +180,7 @@ export default function SellPage() {
               Evento <span className="text-red-500">*</span>
             </label>
             <div className="mt-2" ref={dropdownRef}>
-              {/* Input + flecha (1 solo control, NO select aparte) */}
+              {/* Input + flecha */}
               <div className="relative">
                 <input
                   className={inputBase + " pr-10"}
@@ -191,7 +193,6 @@ export default function SellPage() {
                   onFocus={() => setEventOpen(true)}
                 />
                 <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  {/* chevron */}
                   <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
                     <path
                       d="M6 8l4 4 4-4"
@@ -252,7 +253,7 @@ export default function SellPage() {
                 </div>
               )}
 
-              {/* Selected pill / helper */}
+              {/* Selected pill */}
               {selectedEvent && !eventOpen ? (
                 <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div className="text-sm font-semibold text-slate-900">{selectedEvent.title}</div>
@@ -271,7 +272,7 @@ export default function SellPage() {
             </div>
           </div>
 
-          {/* Descripción (dejamos solo esto para que no sea redundante con título) */}
+          {/* Descripción */}
           <div className="mt-6">
             <label className={labelBase}>
               Descripción <span className="text-red-500">*</span>
@@ -334,7 +335,9 @@ export default function SellPage() {
                 className={inputBase}
                 inputMode="numeric"
                 value={originalPrice}
-                onChange={(e) => setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))}
+                onChange={(e) =>
+                  setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))
+                }
               />
             </div>
           </div>
@@ -379,7 +382,10 @@ export default function SellPage() {
                   </div>
                   <div>
                     <div className="font-semibold text-slate-900">
-                      Subasta <span className="text-sm font-medium text-slate-500">(próximamente)</span>
+                      Subasta{" "}
+                      <span className="text-sm font-medium text-slate-500">
+                        (próximamente)
+                      </span>
                     </div>
                     <div className="mt-0.5 text-sm text-slate-600">
                       Deja que los compradores pujen por tu entrada
@@ -401,9 +407,12 @@ export default function SellPage() {
             <button
               type="button"
               className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"
-              // En el paso 1 no avanzamos si no hay evento + descripción (tu lógica real la enchufamos después)
               disabled={!selectedEvent || description.trim().length < 6}
-              title={!selectedEvent || description.trim().length < 6 ? "Completa evento y descripción" : ""}
+              title={
+                !selectedEvent || description.trim().length < 6
+                  ? "Completa evento y descripción"
+                  : ""
+              }
             >
               Continuar
             </button>
