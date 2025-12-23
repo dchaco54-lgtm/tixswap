@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation"; // ✅ agregado (solo lógica)
 import { supabase } from "@/lib/supabaseClient";
+
+const DRAFT_KEY = "tixswap_sell_draft_v1"; // ✅ agregado (solo lógica)
 
 function formatEventDate(starts_at) {
   if (!starts_at) return "";
@@ -27,6 +30,8 @@ function normalizeEventRow(e) {
 }
 
 export default function SellPage() {
+  const router = useRouter(); // ✅ agregado (solo lógica)
+
   const steps = ["Detalles", "Archivo", "Confirmar"];
   const [currentStep] = useState(0);
 
@@ -502,18 +507,31 @@ export default function SellPage() {
               type="button"
               className="tix-btn-primary"
               disabled={requestSending || (!requestEvent ? !canContinueNormal : !canContinueRequest)}
-              title={
-                requestEvent
-                  ? "Completa nombre del evento y descripción"
-                  : "Completa evento y descripción"
-              }
+              title={requestEvent ? "Completa nombre del evento y descripción" : "Completa evento y descripción"}
               onClick={() => {
                 if (requestEvent) {
                   handleRequestSupport();
-                } else {
-                  // ⚠️ acá va tu flujo normal a Paso 2 (se mantiene como lo tengas en tu versión)
-                  // por ahora lo dejamos sin romper nada
+                  return;
                 }
+
+                // ✅ PASO 5: guardar draft + ir a Paso 2 (Archivo)
+                const draft = {
+                  step: 1,
+                  event_id: selectedEvent?.id,
+                  event_title: selectedEvent?.title || null,
+
+                  description: description.trim(),
+                  sector: sector.trim() || null,
+                  fila: fila.trim() || null,
+                  asiento: asiento.trim() || null,
+
+                  saleType: saleType || "fixed",
+                  price: price ? Number(price) : null,
+                  originalPrice: originalPrice ? Number(originalPrice) : null,
+                };
+
+                localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+                router.push("/sell/file");
               }}
             >
               {requestSending ? "Enviando..." : "Continuar"}
@@ -524,4 +542,3 @@ export default function SellPage() {
     </div>
   );
 }
-
