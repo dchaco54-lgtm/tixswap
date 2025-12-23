@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
-const BUCKET = "ticket-pdfs"; // ✅ debe existir EXACTO (case-sensitive)
-const MAX_BYTES = 8 * 1024 * 1024;
-
-function getSupabaseAdmin() {
+function supabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -17,100 +13,68 @@ function getSupabaseAdmin() {
   });
 }
 
+// Espera JSON (como lo manda tu page.jsx)
 export async function POST(req) {
   try {
-    const supabase = getSupabaseAdmin();
+    const body = await req.json();
 
-    const form = await req.formData();
-    const file = form.get("file");
-    const metaRaw = form.get("meta");
+    const {
+      sha256,
+      storage_path,
+      event_id,
+      owner_user_id,
+      original_filename,
+      size_bytes,
+      is_nominated,
+    } = body || {};
 
-    if (!file) {
-      return NextResponse.json({ error: "Falta el archivo (file)." }, { status: 400 });
-    }
-    if (typeof file === "string") {
-      return NextResponse.json({ error: "Archivo inválido." }, { status: 400 });
-    }
+    if (!sha256) return NextResponse.json({ error: "sha256 is required" }, { status: 400 });
+    if (!storage_path) return NextResponse.json({ error: "storage_path is required" }, { status: 400 });
+    if (!event_id) return NextResponse.json({ error: "event_id is required" }, { status: 400 });
+    if (!owner_user_id) return NextResponse.json({ error: "owner_user_id is required" }, { status: 400 });
 
-    if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: "Máx 8MB." }, { status: 400 });
-    }
+    const supabase = supabaseAdmin();
 
-    const ab = await file.arrayBuffer();
-    const buf = Buffer.from(ab);
-
-    // Validación mínima de PDF
-    const header = buf.subarray(0, 5).toString("utf8");
-    if (header !== "%PDF-") {
-      return NextResponse.json({ error: "El archivo no parece ser un PDF válido." }, { status: 400 });
-    }
-
-    // Hash anti-duplicado
-    const hash = crypto.createHash("sha256").update(buf).digest("hex");
-
-    let meta = {};
-    try {
-      meta = metaRaw ? JSON.parse(String(metaRaw)) : {};
-    } catch {
-      meta = {};
-    }
-
-    // Tabla donde guardamos uploads (anti-duplicado)
-    // Asegúrate de crearla con el SQL de abajo
+    // 1) si ya existe => 409
     const { data: existing, error: findErr } = await supabase
       .from("ticket_uploads")
-      .select("id, storage_path")
-      .eq("file_hash", hash)
+      .select("id, sha256, storage_path")
+      .eq("sha256", sha256)
       .maybeSingle();
 
     if (findErr) {
-      return NextResponse.json({ error: `DB error (lookup): ${findErr.message}` }, { status: 500 });
+      return NextResponse.json({ error: `DB lookup error: ${findErr.message}` }, { status: 500 });
     }
+
     if (existing) {
-      return NextResponse.json(
-        { error: "Entrada ya subida en Tixswap.", code: "DUPLICATE", existing },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: "Entrada ya subida en Tixswap" }, { status: 409 });
     }
 
-    const userId = meta?.userId || "anon";
-    const storagePath = `${userId}/${hash}.pdf`;
-
-    const { error: upErr } = await supabase.storage
-      .from(BUCKET)
-      .upload(storagePath, buf, {
-        contentType: "application/pdf",
-        upsert: false,
-      });
-
-    if (upErr) {
-      return NextResponse.json({ error: `Storage error: ${upErr.message}` }, { status: 500 });
-    }
-
-    const { data: ins, error: insErr } = await supabase
+    // 2) inserta
+    const { data: inserted, error: insErr } = await supabase
       .from("ticket_uploads")
       .insert({
-        user_id: meta?.userId ?? null,
-        file_hash: hash,
-        storage_bucket: BUCKET,
-        storage_path: storagePath,
-        original_filename: file.name ?? null,
-        file_size: file.size ?? null,
-        is_nominated: !!meta?.isNominated,
-        meta: meta ?? {},
+        sha256,
+        storage_bucket: "ticket-pdfs",
+        storage_path,
+        event_id,
+        owner_user_id,
+        original_filename: original_filename || null,
+        size_bytes: size_bytes || null,
+        is_nominated: !!is_nominated,
       })
-      .select("id, storage_path, file_hash")
+      .select("id, sha256, storage_path")
       .single();
 
     if (insErr) {
-      return NextResponse.json({ error: `DB error (insert): ${insErr.message}` }, { status: 500 });
+      return NextResponse.json({ error: `DB insert error: ${insErr.message}` }, { status: 500 });
     }
 
-    return NextResponse.json({
-      ok: true,
-      upload: ins,
-    });
+    return NextResponse.json({ ok: true, ticket: inserted }, { status: 200 });
   } catch (e) {
-    return NextResponse.json({ error: e?.message || "Unknown error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Unknown error in /api/tickets/register" },
+      { status: 500 }
+    );
   }
 }
