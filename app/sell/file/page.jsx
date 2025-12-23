@@ -19,12 +19,10 @@ async function basicPdfCheck(file) {
   if (file.type !== "application/pdf") return { ok: false, error: "Debe ser un PDF." };
   if (file.size > 8 * 1024 * 1024) return { ok: false, error: "PDF muy pesado (máx 8MB)." };
 
-  // Header %PDF-
   const headBuf = await file.slice(0, 5).arrayBuffer();
   const head = new TextDecoder().decode(headBuf);
   if (head !== "%PDF-") return { ok: false, error: "Archivo inválido: no parece PDF real." };
 
-  // Heurística: PDFs cifrados suelen incluir /Encrypt
   const chunk = await file.slice(0, 200000).text().catch(() => "");
   if (chunk.includes("/Encrypt")) {
     return { ok: false, error: "PDF protegido/cifrado. Sube el ticket sin clave." };
@@ -48,7 +46,7 @@ export default function SellFilePage() {
   const [status, setStatus] = useState("idle"); // idle|checking|uploading|done|error
   const [message, setMessage] = useState("");
 
-  // ✅ Carga segura del draft (sin crashear)
+  // ✅ carga segura del draft
   useEffect(() => {
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
@@ -85,10 +83,9 @@ export default function SellFilePage() {
         return;
       }
 
-      // Hash
       const sha = await sha256Hex(file);
 
-      // 1) check duplicado (si todavía no creaste el endpoint, NO crashea: muestra error bonito)
+      // 1) dedupe check
       const checkRes = await fetch(`/api/tickets/check?sha=${encodeURIComponent(sha)}`);
       const checkJson = await checkRes.json().catch(() => ({}));
       if (!checkRes.ok) {
@@ -181,20 +178,15 @@ export default function SellFilePage() {
     }
   }
 
-  // ✅ evita render prematuro que a veces crashea
   if (!ready) return null;
 
   return (
-    <div className="tix-section">
-      <div className="tix-container">
-        {/* Header/Stepper (misma onda visual) */}
-        <div className="tix-card overflow-hidden">
-          <div className="tix-header-gradient px-8 py-8">
-            <a href="/" className="inline-flex items-center gap-2 text-sm font-medium text-white/90 hover:text-white">
-              <span aria-hidden>←</span> Volver al inicio
-            </a>
-
-            <h1 className="mt-3 text-4xl font-bold text-white">Vender entrada</h1>
+    <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
+      <div className="mx-auto max-w-5xl">
+        {/* Stepper header (mismo look) */}
+        <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
+          <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-8 py-10">
+            <h1 className="text-4xl font-bold text-white">Vender entrada</h1>
             <p className="mt-2 text-white/80">Publica tu ticket en 3 pasos, rápido y seguro.</p>
 
             <div className="mt-7 flex items-center">
@@ -203,22 +195,31 @@ export default function SellFilePage() {
                 const done = i < currentStep;
 
                 return (
-                  <div key={s} ="flex flex-1 items-center">
-                    <div ="flex items-center gap-4">
+                  <div key={s} className="flex flex-1 items-center">
+                    <div className="flex items-center gap-4">
                       <div
-                        ={[
+                        className={[
                           "flex h-12 w-12 items-center justify-center rounded-full text-base font-extrabold",
-                          active ? "bg-white text-blue-700" : done ? "bg-white/80 text-blue-800" : "bg-white/25 text-white",
+                          active
+                            ? "bg-white text-blue-700"
+                            : done
+                            ? "bg-white/80 text-blue-800"
+                            : "bg-white/25 text-white",
                         ].join(" ")}
                       >
                         {i + 1}
                       </div>
-                      <div ="text-lg font-semibold text-white">{s}</div>
+                      <div className="text-lg font-semibold text-white">{s}</div>
                     </div>
 
                     {i < steps.length - 1 && (
-                      <div ="mx-6 h-[3px] flex-1 rounded-full bg-white/25">
-                        <div ={["h-[3px] rounded-full bg-white transition-all duration-300", i < currentStep ? "w-full" : "w-0"].join(" ")} />
+                      <div className="mx-6 h-[3px] flex-1 rounded-full bg-white/25">
+                        <div
+                          className={[
+                            "h-[3px] rounded-full bg-white transition-all duration-300",
+                            i < currentStep ? "w-full" : "w-0",
+                          ].join(" ")}
+                        />
                       </div>
                     )}
                   </div>
@@ -226,74 +227,100 @@ export default function SellFilePage() {
               })}
             </div>
           </div>
+        </div>
 
-          {/* Card contenido */}
-          <div ="p-8">
-            <h2 ="text-2xl font-semibold text-slate-900">Archivo</h2>
-            <p ="mt-1 text-sm text-slate-500">Sube el PDF del ticket. Validaremos formato y evitaremos duplicados.</p>
+        {/* Card */}
+        <div className="tix-card p-8">
+          <h2 className="text-2xl font-semibold text-slate-900">Archivo</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Sube el PDF del ticket. Validaremos formato y evitaremos duplicados.
+          </p>
 
-            {/* checkbox nominada */}
-            <div ="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <label ="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  ="mt-1 h-4 w-4 accent-indigo-600"
-                  checked={isNominated}
-                  onChange={(e) => setIsNominated(e.target.checked)}
-                />
-                <div>
-                  <div ="text-sm font-semibold text-slate-900">Es nominada</div>
-                  <p ="mt-1 text-sm text-slate-600">
-                    Si es nominada, al momento de la compra se abrirá un chat comprador↔vendedor para coordinar la nominación y subir el PDF re-nominado.
-                  </p>
-                </div>
-              </label>
-            </div>
-
-            {/* upload */}
-            <div ="mt-6">
-              <label ="text-sm font-medium text-slate-700">Subir PDF del ticket</label>
+          {/* checkbox nominada */}
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <label className="flex items-start gap-3">
               <input
-                type="file"
-                accept="application/pdf"
-                className="tix-input mt-2"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-indigo-600"
+                checked={isNominated}
+                onChange={(e) => setIsNominated(e.target.checked)}
               />
-              <p className="mt-2 text-xs text-slate-500">Máx 8MB. Validamos PDF real + anti-duplicado.</p>
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Es nominada</div>
+                <p className="mt-1 text-sm text-slate-600">
+                  Si es nominada, al momento de la compra se abrirá un chat comprador↔vendedor para coordinar la nominación y subir el PDF re-nominado.
+                </p>
+              </div>
+            </label>
+          </div>
+
+          {/* upload */}
+          <div className="mt-6">
+            <label className="text-sm font-medium text-slate-700">Subir PDF del ticket</label>
+            <input
+              type="file"
+              accept="application/pdf"
+              className="tix-input mt-2"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+            <p className="mt-2 text-xs text-slate-500">Máx 8MB. Validamos PDF real + anti-duplicado.</p>
+          </div>
+
+          {/* acciones con UX correcta */}
+          <div className="mt-6 flex items-center justify-between">
+            <button type="button" className="tix-btn-secondary" onClick={() => router.push("/sell")}>
+              Volver
+            </button>
+
+            <div className="flex items-center gap-3">
+              {/* VALIDAR: azul al inicio, después pasa a "Validado ✅" plomito */}
+              <button
+                type="button"
+                className={status === "done" ? "tix-btn-secondary" : "tix-btn-primary"}
+                disabled={!file || status === "checking" || status === "uploading" || status === "done"}
+                onClick={handleValidateAndUpload}
+                title={status === "done" ? "Ya está validado" : "Valida y sube el PDF para continuar"}
+              >
+                {status === "checking"
+                  ? "Validando..."
+                  : status === "uploading"
+                  ? "Subiendo..."
+                  : status === "done"
+                  ? "Validado ✅"
+                  : "Validar y subir"}
+              </button>
+
+              {/* CONTINUAR: plomito hasta validar, luego azul */}
+              <button
+                type="button"
+                className={status === "done" ? "tix-btn-primary" : "tix-btn-secondary"}
+                disabled={!canContinue}
+                onClick={() => router.push("/sell/confirm")}
+                title={!canContinue ? "Primero valida y sube el PDF" : "Listo, pasemos al paso 3"}
+              >
+                Continuar
+              </button>
             </div>
-      {/* acciones */}
-<div className="mt-6 flex items-center justify-between">
-  <button type="button" className="tix-btn-secondary" onClick={() => router.push("/sell")}>
-    Volver
-  </button>
+          </div>
 
-  <div className="flex items-center gap-3">
-    {/* VALIDAR */}
-    <button
-      type="button"
-      className={status === "done" ? "tix-btn-secondary" : "tix-btn-primary"}
-      disabled={!file || status === "checking" || status === "uploading" || status === "done"}
-      onClick={handleValidateAndUpload}
-      title={status === "done" ? "Ya está validado" : "Valida y sube el PDF para continuar"}
-    >
-      {status === "checking"
-        ? "Validando..."
-        : status === "uploading"
-        ? "Subiendo..."
-        : status === "done"
-        ? "Validado ✅"
-        : "Validar y subir"}
-    </button>
+          {status !== "done" && (
+            <p className="mt-3 text-xs text-slate-500">Para continuar, primero debes validar y subir el PDF.</p>
+          )}
 
-    {/* CONTINUAR */}
-    <button
-      type="button"
-      className={status === "done" ? "tix-btn-primary" : "tix-btn-secondary"}
-      disabled={status !== "done"}
-      onClick={() => router.push("/sell/confirm")}
-      title={status !== "done" ? "Primero valida y sube el PDF" : "Listo, pasemos al paso 3"}
-    >
-      Continuar
-    </button>
-  </div>
-</div>
+          {message && (
+            <div
+              className={[
+                "mt-4 rounded-xl px-4 py-3 text-sm border",
+                status === "error"
+                  ? "bg-red-50 text-red-700 border-red-200"
+                  : "bg-green-50 text-green-700 border-green-200",
+              ].join(" ")}
+            >
+              {message}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
