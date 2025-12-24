@@ -5,9 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-/** =========================
- * Helpers
- * ========================= */
+/** Helpers */
 function norm(str) {
   return (str || "")
     .toString()
@@ -53,21 +51,15 @@ function formatEventDate(iso) {
   }
 }
 
-/** =========================
- * Page
- * ========================= */
 export default function AdminEventsPage() {
   const router = useRouter();
 
-  // Guard / perms
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Data
   const [events, setEvents] = useState([]);
   const [search, setSearch] = useState("");
 
-  // Create event form
   const [newEvent, setNewEvent] = useState({
     title: "",
     starts_at: "",
@@ -77,71 +69,47 @@ export default function AdminEventsPage() {
     image_url: "",
   });
 
-  // Edit state
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({
-    id: "",
-    title: "",
-    starts_at: "",
-    venue: "",
-    city: "",
-    category: "",
-    image_url: "",
-  });
-
+  const [editingEvent, setEditingEvent] = useState(null); // { id, title, starts_at(datetime-local), venue, city, category, image_url }
   const [loading, setLoading] = useState(false);
 
-  /** =========================
-   * Admin guard (ZIP-compatible):
-   * - must be logged in
-   * - must have profiles.role === 'admin'
-   * ========================= */
+  /** Admin guard (ZIP-style): profiles.role === "admin" */
   useEffect(() => {
     const guard = async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        const user = data?.user;
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
 
-        if (!user) {
-          router.replace(`/login?redirectTo=${encodeURIComponent("/admin/events")}`);
-          return;
-        }
-
-        // ✅ Tu proyecto valida admin por profiles.role
-        const { data: profileRow, error: profileErr } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        if (profileErr) {
-          console.warn("[admin/events] no se pudo leer profiles.role:", profileErr);
-          router.replace("/dashboard");
-          return;
-        }
-
-        if (profileRow?.role !== "admin") {
-          router.replace("/dashboard");
-          return;
-        }
-
-        setIsAdmin(true);
-        setCheckingAdmin(false);
-        await fetchEvents();
-      } catch (e) {
-        console.error("[admin/events] guard error:", e);
-        router.replace("/dashboard");
+      if (!user) {
+        router.replace(`/login?redirectTo=${encodeURIComponent("/admin/events")}`);
+        return;
       }
+
+      const { data: profileRow, error: profileErr } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileErr) {
+        console.warn("[admin/events] profiles role error:", profileErr);
+        router.replace("/dashboard");
+        return;
+      }
+
+      if (profileRow?.role !== "admin") {
+        router.replace("/dashboard");
+        return;
+      }
+
+      setIsAdmin(true);
+      setCheckingAdmin(false);
+      await fetchEvents();
     };
 
     guard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** =========================
-   * Fetch events
-   * ========================= */
-  const fetchEvents = async () => {
+  async function fetchEvents() {
     const { data, error } = await supabase
       .from("events")
       .select("*")
@@ -152,17 +120,12 @@ export default function AdminEventsPage() {
       setEvents([]);
       return;
     }
-
     setEvents(Array.isArray(data) ? data : []);
-  };
+  }
 
-  /** =========================
-   * Search filter
-   * ========================= */
-  const filteredEvents = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = norm(search);
     if (!q) return events;
-
     return (events || []).filter((ev) => {
       const hay = norm(
         `${ev?.title || ""} ${ev?.venue || ev?.location || ""} ${ev?.city || ""} ${ev?.category || ""}`
@@ -171,49 +134,49 @@ export default function AdminEventsPage() {
     });
   }, [events, search]);
 
-  /** =========================
-   * Create event
-   * ========================= */
+  /** Create event (verificado con select().single()) */
   const createEvent = async () => {
-    const title = (newEvent.title || "").trim();
-    const venue = (newEvent.venue || "").trim();
-    const startsAtIso = datetimeLocalToIso(newEvent.starts_at);
+    const title = newEvent.title.trim();
+    const venue = newEvent.venue.trim();
+    const starts_at_iso = datetimeLocalToIso(newEvent.starts_at);
 
-    if (!title || !venue || !startsAtIso) {
-      alert("Completa: Título, Fecha/Hora y Ubicación (recinto).");
+    if (!title || !venue || !starts_at_iso) {
+      alert("Completa: Título, Fecha/Hora y Ubicación (recinto)");
       return;
     }
 
+    setLoading(true);
+
     const payload = {
       title,
-      starts_at: startsAtIso,
+      starts_at: starts_at_iso,
       venue,
-      city: (newEvent.city || "").trim() || null,
-      category: (newEvent.category || "").trim() || null,
-      image_url: (newEvent.image_url || "").trim() || null,
+      city: newEvent.city.trim() || null,
+      category: newEvent.category.trim() || null,
+      image_url: newEvent.image_url.trim() || null,
     };
 
-    setLoading(true);
-    const { error } = await supabase.from("events").insert([payload]);
+    const { data, error } = await supabase
+      .from("events")
+      .insert([payload])
+      .select("*")
+      .single();
+
     setLoading(false);
 
     if (error) {
       console.error("[admin/events] createEvent error:", error);
-      alert("Error al crear evento (revisa consola).");
+      alert(`Error al crear evento: ${error.message}`);
       return;
     }
 
     setNewEvent({ title: "", starts_at: "", venue: "", city: "", category: "", image_url: "" });
     await fetchEvents();
-    alert("Evento creado ✅");
+    alert(`Evento creado ✅ (${data?.title || "OK"})`);
   };
 
-  /** =========================
-   * Start edit
-   * ========================= */
   const startEdit = (ev) => {
-    setEditingId(ev.id);
-    setEditForm({
+    setEditingEvent({
       id: ev.id,
       title: ev?.title || "",
       starts_at: isoToDatetimeLocal(ev?.starts_at),
@@ -224,89 +187,81 @@ export default function AdminEventsPage() {
     });
   };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditForm({ id: "", title: "", starts_at: "", venue: "", city: "", category: "", image_url: "" });
-  };
+  /** Update event (verificado con select().single(): si no cambia fila -> error y te lo dice) */
+  const updateEvent = async () => {
+    if (!editingEvent?.id) return;
 
-  /** =========================
-   * Save edit
-   * ========================= */
-  const saveEdit = async () => {
-    if (!editingId) return;
+    const title = (editingEvent.title || "").trim();
+    const venue = (editingEvent.venue || "").trim();
+    const starts_at_iso = datetimeLocalToIso(editingEvent.starts_at);
 
-    const title = (editForm.title || "").trim();
-    const venue = (editForm.venue || "").trim();
-    const startsAtIso = datetimeLocalToIso(editForm.starts_at);
-
-    if (!title || !venue || !startsAtIso) {
-      alert("Completa: Título, Fecha/Hora y Ubicación (recinto).");
+    if (!title || !venue || !starts_at_iso) {
+      alert("Completa: Título, Fecha/Hora y Ubicación (recinto)");
       return;
     }
+
+    setLoading(true);
 
     const payload = {
       title,
-      starts_at: startsAtIso,
+      starts_at: starts_at_iso,
       venue,
-      city: (editForm.city || "").trim() || null,
-      category: (editForm.category || "").trim() || null,
-      image_url: (editForm.image_url || "").trim() || null,
+      city: (editingEvent.city || "").trim() || null,
+      category: (editingEvent.category || "").trim() || null,
+      image_url: (editingEvent.image_url || "").trim() || null,
     };
 
-    setLoading(true);
-    const { error } = await supabase.from("events").update(payload).eq("id", editingId);
+    const { data, error } = await supabase
+      .from("events")
+      .update(payload)
+      .eq("id", editingEvent.id)
+      .select("*")
+      .single();
+
     setLoading(false);
 
     if (error) {
-      console.error("[admin/events] saveEdit error:", error);
-      alert("Error al actualizar evento (revisa consola).");
+      console.error("[admin/events] updateEvent error:", error);
+      alert(`No se pudo actualizar (RLS/columna/id): ${error.message}`);
       return;
     }
 
-    cancelEdit();
+    setEditingEvent(null);
     await fetchEvents();
-    alert("Evento actualizado ✅");
+
+    alert(`Evento actualizado ✅ (${data?.title || "OK"})`);
   };
 
-  /** =========================
-   * Delete event (and its tickets)
-   * ========================= */
   const deleteEvent = async (id) => {
     const ev = events.find((x) => x.id === id);
     const name = ev?.title || "este evento";
 
-    if (!confirm(`¿Seguro que quieres eliminar "${name}"?\n\nEsto elimina también sus entradas.`)) return;
+    if (!confirm(`¿Seguro que quieres eliminar "${name}" y todas sus entradas?`)) return;
 
     setLoading(true);
 
-    // Borra tickets asociados (por si no tienes ON DELETE CASCADE)
-    const { error: ticketsErr } = await supabase.from("tickets").delete().eq("event_id", id);
-    if (ticketsErr) {
-      console.warn("[admin/events] delete tickets warning:", ticketsErr);
-    }
+    const { error: tErr } = await supabase.from("tickets").delete().eq("event_id", id);
+    if (tErr) console.warn("[admin/events] delete tickets warning:", tErr);
 
     const { error } = await supabase.from("events").delete().eq("id", id);
+
     setLoading(false);
 
     if (error) {
-      console.error("[admin/events] delete event error:", error);
-      alert("Error al eliminar evento (revisa consola).");
+      console.error("[admin/events] deleteEvent error:", error);
+      alert(`Error al eliminar evento: ${error.message}`);
       return;
     }
 
-    if (editingId === id) cancelEdit();
     await fetchEvents();
     alert("Evento eliminado ✅");
   };
 
-  /** =========================
-   * UI
-   * ========================= */
   if (checkingAdmin) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-gray-100 text-sm text-gray-700">
-          Validando permisos de administrador…
+          Validando permisos de administrador...
         </div>
       </main>
     );
@@ -316,24 +271,18 @@ export default function AdminEventsPage() {
 
   return (
     <div className="max-w-6xl mx-auto py-10 px-4">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Panel de eventos</h1>
-          <p className="text-gray-600 mt-1">Administra nombre, fecha/hora, ubicación, categoría e imagen.</p>
-        </div>
-
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <h1 className="text-3xl font-bold">Panel de eventos</h1>
         <button
           onClick={() => router.push("/dashboard")}
           className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50"
         >
-          Volver al panel
+          Volver
         </button>
       </div>
 
-      {/* =========================
-          Create new event
-         ========================= */}
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mt-8">
+      {/* Crear nuevo evento */}
+      <div className="bg-white p-5 rounded-2xl shadow mb-10">
         <h2 className="text-xl font-semibold mb-4">Crear nuevo evento</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -353,7 +302,7 @@ export default function AdminEventsPage() {
 
           <input
             className="border p-2 rounded-xl"
-            placeholder="Ubicación / Recinto (ej: Movistar Arena)"
+            placeholder="Ubicación (recinto)"
             value={newEvent.venue}
             onChange={(e) => setNewEvent({ ...newEvent, venue: e.target.value })}
           />
@@ -367,200 +316,165 @@ export default function AdminEventsPage() {
 
           <input
             className="border p-2 rounded-xl"
-            placeholder="Categoría (Rock, Pop, etc.)"
+            placeholder="Categoría (opcional)"
             value={newEvent.category}
             onChange={(e) => setNewEvent({ ...newEvent, category: e.target.value })}
           />
 
           <input
             className="border p-2 rounded-xl"
-            placeholder="Imagen URL (opcional) — pega un link tipo PuntoTicket"
+            placeholder="URL de imagen (opcional)"
             value={newEvent.image_url}
             onChange={(e) => setNewEvent({ ...newEvent, image_url: e.target.value })}
           />
         </div>
 
-        {/* Preview imagen nueva */}
-        <div className="mt-4 w-full h-44 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center">
+        {/* Preview create */}
+        <div className="mt-4 w-full h-40 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
           {newEvent.image_url ? (
-            <img
-              src={newEvent.image_url}
-              alt="Preview"
-              className="w-full h-full object-cover"
-              loading="lazy"
-            />
+            <img src={newEvent.image_url} alt="Preview" className="w-full h-full object-cover" />
           ) : (
-            <span className="text-sm text-gray-400">Falta cargar imagen</span>
+            <span className="text-sm text-slate-400">Falta cargar imagen</span>
           )}
         </div>
 
         <button
           onClick={createEvent}
           disabled={loading}
-          className="mt-5 px-6 py-2 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-60"
+          className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-60"
         >
-          {loading ? "Creando…" : "Crear evento"}
+          {loading ? "Creando..." : "Crear evento"}
         </button>
       </div>
 
-      {/* =========================
-          Search + list
-         ========================= */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mt-10">
+      {/* Buscador */}
+      <div className="flex items-center justify-between gap-4 mb-4">
         <h2 className="text-2xl font-semibold">Eventos en backend</h2>
-
         <input
-          className="border rounded-xl px-4 py-2 w-full md:max-w-sm"
-          placeholder="Buscar por título, recinto, ciudad, categoría…"
+          className="border rounded-xl px-4 py-2 w-full max-w-sm"
+          placeholder="Buscar evento..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
 
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {filteredEvents.length === 0 ? (
-          <div className="text-gray-600">No hay eventos para mostrar.</div>
-        ) : (
-          filteredEvents.map((ev) => {
-            const title = ev?.title || "Evento";
-            const venue = ev?.venue || ev?.location || "";
-            const city = ev?.city || "";
-            const category = ev?.category || "";
-            const startsAt = ev?.starts_at;
-            const imageUrl = ev?.image_url || "";
+      {/* Lista */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {filtered.map((ev) => {
+          const title = ev?.title || "Evento";
+          const venue = ev?.venue || ev?.location || "";
+          const city = ev?.city || "";
+          const imageUrl = ev?.image_url || "";
 
-            const isEditing = editingId === ev.id;
+          return (
+            <div key={ev.id} className="bg-white shadow rounded-xl p-4 relative">
+              {editingEvent?.id === ev.id ? (
+                <>
+                  <input
+                    className="border p-2 w-full mb-2 rounded-xl"
+                    value={editingEvent.title}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, title: e.target.value })}
+                  />
 
-            return (
-              <div key={ev.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-                {/* Imagen (preview) */}
-                <div className="w-full h-40 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center mb-4">
-                  {imageUrl ? (
-                    <img src={imageUrl} alt={title} className="w-full h-full object-cover" loading="lazy" />
-                  ) : (
-                    <span className="text-sm text-gray-400">Falta cargar imagen</span>
-                  )}
-                </div>
+                  <input
+                    className="border p-2 w-full mb-2 rounded-xl"
+                    type="datetime-local"
+                    value={editingEvent.starts_at}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, starts_at: e.target.value })}
+                  />
 
-                {!isEditing ? (
-                  <>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="text-lg font-bold text-gray-900 truncate">{title}</h3>
-                        <p className="mt-1 text-sm text-gray-600">📅 {formatEventDate(startsAt)}</p>
-                        <p className="text-sm text-gray-600">
-                          📍 {venue}
-                          {venue && city ? " — " : ""}
-                          {city}
-                        </p>
-                        {category && <p className="text-xs text-gray-500 mt-1">Categoría: {category}</p>}
-                      </div>
+                  <input
+                    className="border p-2 w-full mb-2 rounded-xl"
+                    placeholder="Ubicación (recinto)"
+                    value={editingEvent.venue}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, venue: e.target.value })}
+                  />
 
-                      <div className="flex gap-2 shrink-0">
-                        <button
-                          onClick={() => startEdit(ev)}
-                          className="px-3 py-1.5 rounded-xl border bg-white hover:bg-gray-50 text-blue-700 font-semibold"
-                        >
-                          Editar
-                        </button>
-                        <button
-                          onClick={() => deleteEvent(ev.id)}
-                          className="px-3 py-1.5 rounded-xl border bg-white hover:bg-red-50 text-red-700 font-semibold"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    </div>
+                  <input
+                    className="border p-2 w-full mb-2 rounded-xl"
+                    placeholder="Ciudad (opcional)"
+                    value={editingEvent.city}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, city: e.target.value })}
+                  />
 
-                    <div className="mt-3 text-xs text-gray-500 break-all">
-                      <span className="font-semibold">image_url:</span> {imageUrl || "NULL"}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <h3 className="text-lg font-bold text-gray-900 mb-3">Editando: {title}</h3>
+                  <input
+                    className="border p-2 w-full mb-2 rounded-xl"
+                    placeholder="Categoría (opcional)"
+                    value={editingEvent.category}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, category: e.target.value })}
+                  />
 
-                    <div className="grid grid-cols-1 gap-3">
-                      <input
-                        className="border p-2 rounded-xl"
-                        placeholder="Título"
-                        value={editForm.title}
-                        onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                  <input
+                    className="border p-2 w-full mb-2 rounded-xl"
+                    placeholder="URL de imagen (opcional)"
+                    value={editingEvent.image_url}
+                    onChange={(e) => setEditingEvent({ ...editingEvent, image_url: e.target.value })}
+                  />
+
+                  {/* Preview edit */}
+                  <div className="mb-3 w-full h-40 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
+                    {editingEvent.image_url ? (
+                      <img
+                        src={editingEvent.image_url}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                        loading="lazy"
                       />
+                    ) : (
+                      <span className="text-sm text-slate-400">Falta cargar imagen</span>
+                    )}
+                  </div>
 
-                      <input
-                        type="datetime-local"
-                        className="border p-2 rounded-xl"
-                        value={editForm.starts_at}
-                        onChange={(e) => setEditForm({ ...editForm, starts_at: e.target.value })}
-                      />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={updateEvent}
+                      disabled={loading}
+                      className="bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 disabled:opacity-60"
+                    >
+                      {loading ? "Guardando..." : "Guardar"}
+                    </button>
+                    <button
+                      onClick={() => setEditingEvent(null)}
+                      disabled={loading}
+                      className="bg-gray-200 text-gray-800 px-4 py-2 rounded-xl disabled:opacity-60"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Imagen */}
+                  <div className="mb-3 w-full h-40 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
+                    {imageUrl ? (
+                      <img src={imageUrl} alt={title} className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <span className="text-sm text-slate-400">Falta cargar imagen</span>
+                    )}
+                  </div>
 
-                      <input
-                        className="border p-2 rounded-xl"
-                        placeholder="Recinto"
-                        value={editForm.venue}
-                        onChange={(e) => setEditForm({ ...editForm, venue: e.target.value })}
-                      />
+                  <h3 className="text-lg font-semibold">{title}</h3>
+                  <p className="text-sm text-gray-500">{ev?.starts_at ? formatEventDate(ev.starts_at) : "(Sin fecha)"}</p>
+                  <p className="text-sm">
+                    {venue || "—"}
+                    {venue && city ? " — " : ""}
+                    {city || ""}
+                  </p>
+                  <p className="text-sm text-gray-600 mt-1">Categoría: {ev?.category || "—"}</p>
 
-                      <input
-                        className="border p-2 rounded-xl"
-                        placeholder="Ciudad (opcional)"
-                        value={editForm.city}
-                        onChange={(e) => setEditForm({ ...editForm, city: e.target.value })}
-                      />
-
-                      <input
-                        className="border p-2 rounded-xl"
-                        placeholder="Categoría (opcional)"
-                        value={editForm.category}
-                        onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
-                      />
-
-                      <input
-                        className="border p-2 rounded-xl"
-                        placeholder="Imagen URL (opcional)"
-                        value={editForm.image_url}
-                        onChange={(e) => setEditForm({ ...editForm, image_url: e.target.value })}
-                      />
-
-                      {/* Preview edit */}
-                      <div className="w-full h-40 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center">
-                        {editForm.image_url ? (
-                          <img
-                            src={editForm.image_url}
-                            alt="Preview"
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <span className="text-sm text-gray-400">Falta cargar imagen</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 mt-4">
-                      <button
-                        onClick={saveEdit}
-                        disabled={loading}
-                        className="px-4 py-2 rounded-xl bg-green-600 text-white font-semibold hover:bg-green-700 disabled:opacity-60"
-                      >
-                        {loading ? "Guardando…" : "Guardar cambios"}
-                      </button>
-
-                      <button
-                        onClick={cancelEdit}
-                        disabled={loading}
-                        className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50 disabled:opacity-60"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })
-        )}
+                  <div className="flex justify-end gap-3 mt-3">
+                    <button onClick={() => startEdit(ev)} className="text-blue-600 hover:underline">
+                      Editar
+                    </button>
+                    <button onClick={() => deleteEvent(ev.id)} className="text-red-600 hover:underline">
+                      Eliminar
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
