@@ -22,15 +22,14 @@ export default function EventCard({ event }) {
   const dateLabel = formatEventDate(event?.starts_at || event?.date);
   const venue = event?.venue || event?.location || "";
   const city = event?.city || "";
-  const imageUrl = event?.image_url || event?.image || event?.imageUrl || "";
+  const imageUrl = (event?.image_url || "").trim();
 
   return (
     <div className="bg-white rounded-xl border shadow-sm p-6 flex flex-col justify-between">
       <div>
-        {/* Imagen del evento (si no existe: placeholder) */}
-        <div className="w-full h-40 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center mb-4">
+        {/* ✅ Imagen (solo se agrega, no rompe el diseño) */}
+        <div className="w-full h-40 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center mb-4">
           {imageUrl ? (
-            // Usamos <img> (no next/image) para evitar problemas de dominios remotos
             <img
               src={imageUrl}
               alt={title}
@@ -38,7 +37,7 @@ export default function EventCard({ event }) {
               loading="lazy"
             />
           ) : (
-            <span className="text-sm text-slate-400">Falta cargar imagen</span>
+            <span className="text-sm text-gray-400">Falta cargar imagen</span>
           )}
         </div>
 
@@ -64,7 +63,10 @@ export default function EventCard({ event }) {
         </div>
       </div>
 
-      <Link href={`/events/${event.id}`} className="mt-6 text-blue-600 font-medium hover:underline">
+      <Link
+        href={`/events/${event.id}`}
+        className="mt-6 text-blue-600 font-medium hover:underline"
+      >
         Ver entradas disponibles →
       </Link>
     </div>
