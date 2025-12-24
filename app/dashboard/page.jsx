@@ -2,8 +2,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
+import WalletSection from "./WalletSection";
 
 const BASE_SECTIONS = [
   { id: "overview", label: "Resumen" },
@@ -13,10 +14,12 @@ const BASE_SECTIONS = [
   { id: "ratings", label: "Mis calificaciones" },
   { id: "wallet", label: "Wallet" },
   { id: "support", label: "Soporte" },
+  { id: "tickets", label: "Mis tickets" },
 ];
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [currentSection, setCurrentSection] = useState("overview");
   const [user, setUser] = useState(null);
@@ -47,17 +50,25 @@ export default function DashboardPage() {
   const [profileError, setProfileError] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
 
-  // Cargar usuario + tickets + rol
+  // Deep link /dashboard?section=wallet
+  useEffect(() => {
+    const section = searchParams?.get("section");
+    if (!section) return;
+    const exists = BASE_SECTIONS.some((s) => s.id === section);
+    if (exists) setCurrentSection(section);
+  }, [searchParams]);
+
+  // Cargar usuario + rol + tickets
   useEffect(() => {
     const load = async () => {
+      setLoadingUser(true);
+
       const {
         data: { user },
         error,
       } = await supabase.auth.getUser();
 
-      if (error) {
-        console.error(error);
-      }
+      if (error) console.warn(error);
 
       if (!user) {
         router.push("/login");
@@ -65,29 +76,23 @@ export default function DashboardPage() {
       }
 
       setUser(user);
-      setLoadingUser(false);
 
-      // --- cargar rol desde public.profiles ---
+      // rol (profiles.role)
       try {
-        const { data: profileRow, error: profileError } = await supabase
+        const { data: profileRow, error: profileErr } = await supabase
           .from("profiles")
           .select("role")
           .eq("id", user.id)
           .maybeSingle();
 
-        if (profileError) {
-          console.warn("Error cargando perfil:", profileError.message);
-        } else if (profileRow?.role === "admin") {
-          setIsAdmin(true);
-        }
+        if (!profileErr && profileRow?.role === "admin") setIsAdmin(true);
       } catch (e) {
-        console.warn("Error inesperado cargando rol de perfil:", e);
+        console.warn("No se pudo leer role en profiles:", e);
       }
 
-      // Inicializar formulario de perfil desde metadata
+      // perfil desde metadata
       const fullNameMeta =
         user.user_metadata?.name || user.user_metadata?.full_name || "";
-      const rutMeta = user.user_metadata?.rut || "";
       const phoneMeta = user.user_metadata?.phone || "";
       const userTypeMeta = user.user_metadata?.userType || "Usuario general";
 
@@ -98,19 +103,22 @@ export default function DashboardPage() {
         userType: userTypeMeta,
       });
 
-      // Cargar tickets del usuario (RLS se encarga de filtrar)
-      const { data: ticketsData, error: ticketsError } = await supabase
+      // tickets del usuario
+      setLoadingTickets(true);
+      const { data: ticketsData, error: ticketsErr } = await supabase
         .from("support_tickets")
         .select("*")
         .order("created_at", { ascending: false });
 
-      if (ticketsError) {
-        console.error(ticketsError);
+      if (ticketsErr) {
+        console.warn(ticketsErr);
         setTickets([]);
       } else {
         setTickets(ticketsData || []);
       }
       setLoadingTickets(false);
+
+      setLoadingUser(false);
     };
 
     load();
@@ -127,7 +135,6 @@ export default function DashboardPage() {
   const phone = user?.user_metadata?.phone || "—";
   const userTypeMeta = user?.user_metadata?.userType || "Usuario general";
   const email = user?.email || "—";
-
   const displayedUserType = isAdmin ? "Administrador TixSwap" : userTypeMeta;
 
   // -------- Perfil: actualizar datos --------
@@ -167,22 +174,16 @@ export default function DashboardPage() {
 
       if (error) {
         console.error(error);
-        setProfileError(
-          "Ocurrió un problema al actualizar tus datos. Intenta de nuevo."
-        );
+        setProfileError("Ocurrió un problema al actualizar tus datos.");
         return;
       }
 
-      if (data?.user) {
-        setUser(data.user);
-      }
+      if (data?.user) setUser(data.user);
 
       setProfileSuccess("Tus datos fueron actualizados correctamente.");
     } catch (err) {
       console.error(err);
-      setProfileError(
-        "Ocurrió un problema al actualizar tus datos. Intenta de nuevo."
-      );
+      setProfileError("Ocurrió un problema al actualizar tus datos.");
     } finally {
       setSavingProfile(false);
     }
@@ -217,42 +218,30 @@ export default function DashboardPage() {
           category: ticketForm.category,
           subject: ticketForm.subject.trim(),
           message: ticketForm.message.trim(),
-          // status por defecto 'open'
         },
       ]);
 
       if (error) {
         console.error(error);
-        setTicketError(
-          "Ocurrió un problema al crear tu ticket. Intenta de nuevo en unos minutos."
-        );
+        setTicketError("No se pudo crear el ticket. Intenta más tarde.");
         return;
       }
 
-      // Recargar tickets
-      const { data: ticketsData, error: ticketsError } = await supabase
+      const { data: ticketsData } = await supabase
         .from("support_tickets")
         .select("*")
         .order("created_at", { ascending: false });
 
-      if (!ticketsError && ticketsData) {
-        setTickets(ticketsData);
-      }
+      setTickets(ticketsData || []);
 
-      // Limpiar formulario
-      setTicketForm({
-        category: "soporte",
-        subject: "",
-        message: "",
-      });
-
+      setTicketForm({ category: "soporte", subject: "", message: "" });
       setTicketSuccess("Tu solicitud fue enviada correctamente. 🎫");
     } finally {
       setSubmittingTicket(false);
     }
   };
 
-  // -------- Render de secciones --------
+  // -------- Render --------
   const renderSection = () => {
     if (currentSection === "overview") {
       return (
@@ -277,13 +266,13 @@ export default function DashboardPage() {
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <h2 className="text-lg font-semibold mb-4">Estado</h2>
             <p className="text-sm text-slate-700 mb-2">
-              Por ahora este es un resumen simple de tu cuenta. Más adelante
-              aquí vas a ver:
+              Más adelante aquí vas a ver:
             </p>
             <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
               <li>Entradas en venta</li>
               <li>Compras realizadas</li>
-              <li>Verificación de identidad / medios de pago</li>
+              <li>Wallet y pagos programados</li>
+              <li>Reputación / calificaciones</li>
             </ul>
           </div>
         </div>
@@ -295,8 +284,8 @@ export default function DashboardPage() {
         <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100 max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Mis datos</h2>
           <p className="text-sm text-slate-500 mb-4">
-            Por seguridad, el nombre y el RUT no se pueden modificar desde el
-            panel. Si necesitas actualizar alguno de esos datos, escríbenos a{" "}
+            Por seguridad, el nombre y el RUT no se modifican desde aquí. Si
+            necesitas cambiar algo, escríbenos a{" "}
             <a
               href="mailto:soporte@tixswap.cl"
               className="text-blue-600 hover:underline"
@@ -343,9 +332,7 @@ export default function DashboardPage() {
                 >
                   <option value="Usuario general">Usuario general</option>
                   <option value="Vendedor frecuente">Vendedor frecuente</option>
-                  <option value="Comprador frecuente">
-                    Comprador frecuente
-                  </option>
+                  <option value="Comprador frecuente">Comprador frecuente</option>
                   <option value="Usuario verificado">Usuario verificado</option>
                 </select>
               </div>
@@ -406,9 +393,8 @@ export default function DashboardPage() {
     if (currentSection === "sales") {
       return (
         <PlaceholderCard title="Mis ventas">
-          Aquí vas a poder ver todas las entradas que hayas publicado, el
-          comprador, la fecha de la venta y las calificaciones que recibas
-          como vendedor.
+          Próximamente: tus ventas, estado de pago (retenido / listo / pagado),
+          y calificaciones como vendedor.
         </PlaceholderCard>
       );
     }
@@ -416,8 +402,7 @@ export default function DashboardPage() {
     if (currentSection === "purchases") {
       return (
         <PlaceholderCard title="Mis compras">
-          Aquí vas a ver todas las entradas que compraste, estado del evento,
-          vendedor y tus calificaciones como comprador.
+          Próximamente: tus compras, botón “Aprobar” y opción de “Reclamar”.
         </PlaceholderCard>
       );
     }
@@ -425,19 +410,13 @@ export default function DashboardPage() {
     if (currentSection === "ratings") {
       return (
         <PlaceholderCard title="Mis calificaciones">
-          Aquí se mostrará tu nivel como comprador y vendedor (estrellas) y el
-          detalle de las evaluaciones recibidas.
+          Próximamente: reputación comprador/vendedor (estrellas + detalle).
         </PlaceholderCard>
       );
     }
 
     if (currentSection === "wallet") {
-      return (
-        <PlaceholderCard title="Wallet">
-          Aquí verás tu saldo disponible, saldo a liberar y el historial de
-          movimientos de tu cuenta.
-        </PlaceholderCard>
-      );
+      return <WalletSection user={user} />;
     }
 
     if (currentSection === "support") {
@@ -445,14 +424,12 @@ export default function DashboardPage() {
 
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)]">
-          {/* Formulario */}
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <h2 className="text-lg font-semibold mb-4">
               Crear solicitud de soporte
             </h2>
             <p className="text-sm text-slate-500 mb-4">
-              Si tuviste un problema con una compra, venta o con tu cuenta,
-              cuéntanos los detalles y te vamos a ayudar lo antes posible.
+              Si tuviste un problema con una compra, venta o cuenta, cuéntanos.
             </p>
 
             <form onSubmit={handleCreateTicket} className="space-y-4">
@@ -467,8 +444,8 @@ export default function DashboardPage() {
                 >
                   <option value="soporte">Soporte general</option>
                   <option value="disputa">Disputa por compra/venta</option>
-                  <option value="sugerencia">Sugerencia para TixSwap</option>
-                  <option value="reclamo">Reclamo para TixSwap</option>
+                  <option value="sugerencia">Sugerencia</option>
+                  <option value="reclamo">Reclamo</option>
                   <option value="otro">Otro</option>
                 </select>
               </div>
@@ -492,7 +469,7 @@ export default function DashboardPage() {
                 </label>
                 <textarea
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[120px]"
-                  placeholder="Cuéntanos qué pasó, incluye fechas, evento y toda la información que tengas."
+                  placeholder="Cuéntanos qué pasó..."
                   value={ticketForm.message}
                   onChange={handleTicketChange("message")}
                 />
@@ -520,7 +497,6 @@ export default function DashboardPage() {
             </form>
           </div>
 
-          {/* Lista de tickets (últimos) */}
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-lg font-semibold">Mis tickets</h2>
@@ -528,26 +504,16 @@ export default function DashboardPage() {
                 <span className="text-xs text-slate-400">Cargando…</span>
               ) : (
                 <span className="text-xs text-slate-400">
-                  {tickets.length} ticket
-                  {tickets.length === 1 ? "" : "s"}
+                  {tickets.length} ticket{tickets.length === 1 ? "" : "s"}
                 </span>
               )}
             </div>
 
-            {!loadingTickets && tickets.length > 0 && (
-              <p className="text-[11px] text-slate-400 mb-3">
-                Mostrando tus últimos {lastTickets.length} tickets.
-              </p>
-            )}
-
             {loadingTickets ? (
-              <p className="text-sm text-slate-500">
-                Cargando tus solicitudes de soporte…
-              </p>
+              <p className="text-sm text-slate-500">Cargando tickets…</p>
             ) : tickets.length === 0 ? (
               <p className="text-sm text-slate-500">
-                Aún no has creado tickets de soporte. Cuando envíes uno, lo
-                vas a ver aquí con su estado.
+                Aún no has creado tickets de soporte.
               </p>
             ) : (
               <>
@@ -606,8 +572,7 @@ export default function DashboardPage() {
             <div>
               <h2 className="text-lg font-semibold">Todos mis tickets</h2>
               <p className="text-xs text-slate-500">
-                Aquí puedes revisar el historial completo de tus solicitudes de
-                soporte.
+                Historial completo de solicitudes.
               </p>
             </div>
             <button
@@ -620,13 +585,9 @@ export default function DashboardPage() {
           </div>
 
           {loadingTickets ? (
-            <p className="text-sm text-slate-500">
-              Cargando tus solicitudes de soporte…
-            </p>
+            <p className="text-sm text-slate-500">Cargando…</p>
           ) : tickets.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              Aún no has creado tickets de soporte.
-            </p>
+            <p className="text-sm text-slate-500">No hay tickets.</p>
           ) : (
             <ul className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
               {tickets.map((t) => (
@@ -666,13 +627,13 @@ export default function DashboardPage() {
       );
     }
 
-    if (currentSection === "admin") {
+    if (currentSection === "admin" && isAdmin) {
       return (
         <div className="grid gap-6 md:grid-cols-3">
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <h2 className="text-lg font-semibold mb-2">Eventos</h2>
             <p className="text-sm text-slate-500 mb-4">
-              Crea, edita o desactiva eventos publicados en TixSwap.
+              Gestor de eventos.
             </p>
             <button
               type="button"
@@ -686,7 +647,7 @@ export default function DashboardPage() {
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <h2 className="text-lg font-semibold mb-2">Tickets de soporte</h2>
             <p className="text-sm text-slate-500 mb-4">
-              Revisa y responde las solicitudes que envían los usuarios.
+              Revisar solicitudes.
             </p>
             <button
               type="button"
@@ -700,7 +661,7 @@ export default function DashboardPage() {
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <h2 className="text-lg font-semibold mb-2">Usuarios</h2>
             <p className="text-sm text-slate-500 mb-4">
-              Cambia roles, bloquea usuarios y administra cuentas especiales.
+              Administración de usuarios.
             </p>
             <button
               type="button"
@@ -726,8 +687,8 @@ export default function DashboardPage() {
   }
 
   const sidebarSections = isAdmin
-    ? [...BASE_SECTIONS, { id: "admin", label: "Admin" }]
-    : BASE_SECTIONS;
+    ? [...BASE_SECTIONS.filter((s) => s.id !== "admin"), { id: "admin", label: "Admin" }]
+    : BASE_SECTIONS.filter((s) => s.id !== "admin");
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -742,7 +703,6 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {/* BOTONES SUPERIORES */}
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => router.push("/")}
@@ -772,7 +732,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex flex-col md:flex-row gap-6">
-          {/* Sidebar */}
           <aside className="w-full md:w-60 bg-white border border-slate-100 rounded-2xl p-3 shadow-sm">
             <nav className="space-y-1">
               {sidebarSections.map((section) => (
@@ -791,7 +750,6 @@ export default function DashboardPage() {
             </nav>
           </aside>
 
-          {/* Contenido */}
           <section className="flex-1">{renderSection()}</section>
         </div>
       </div>
@@ -799,16 +757,13 @@ export default function DashboardPage() {
   );
 }
 
-// ---- Componentes auxiliares ----
-
 function PlaceholderCard({ title, children }) {
   return (
     <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
       <h2 className="text-lg font-semibold mb-3">{title}</h2>
       <p className="text-sm text-slate-500 mb-2">{children}</p>
       <p className="text-xs text-slate-400">
-        Esta sección está en construcción para el MVP. Más adelante aquí se
-        verá la información en detalle.
+        Esta sección está en construcción para el MVP.
       </p>
     </div>
   );
@@ -820,10 +775,8 @@ function StatusPill({ status }) {
 
   const map = {
     open: base + " bg-amber-50 text-amber-700 border border-amber-100",
-    in_progress:
-      base + " bg-blue-50 text-blue-700 border border-blue-100",
-    closed:
-      base + " bg-emerald-50 text-emerald-700 border border-emerald-100",
+    in_progress: base + " bg-blue-50 text-blue-700 border border-blue-100",
+    closed: base + " bg-emerald-50 text-emerald-700 border border-emerald-100",
   };
 
   return <span className={map[status] || base}>{formatStatus(status)}</span>;
@@ -839,8 +792,9 @@ function formatStatus(status) {
 function formatCategory(category) {
   if (category === "soporte") return "Soporte general";
   if (category === "disputa") return "Disputa por compra/venta";
-  if (category === "sugerencia") return "Sugerencia para TixSwap";
-  if (category === "reclamo") return "Reclamo para TixSwap";
+  if (category === "sugerencia") return "Sugerencia";
+  if (category === "reclamo") return "Reclamo";
   if (category === "otro") return "Otro";
   return category || "—";
 }
+
