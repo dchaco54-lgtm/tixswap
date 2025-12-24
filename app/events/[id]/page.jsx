@@ -171,10 +171,12 @@ export default function EventDetailPage() {
           </div>
         </div>
 
+        {/* ✅ Ajustado para que diga cómo funciona DE VERDAD */}
         <div className="hidden md:block bg-slate-50 border rounded-xl px-5 py-4 text-sm text-slate-700">
           <p className="font-semibold">Reventa segura en TixSwap</p>
           <p className="mt-1">
-            Pagas solo cuando el vendedor sube la entrada y la validamos.
+            Pagas dentro de TixSwap y tu plata queda protegida: validamos el ticket y
+            liberamos el pago al vendedor solo cuando todo está OK.
           </p>
         </div>
       </div>
@@ -256,24 +258,37 @@ export default function EventDetailPage() {
         </div>
 
         <aside className="space-y-4">
+          {/* ✅ NUEVO: Cómo funciona real (3 pasos) */}
           <div className="bg-white border rounded-xl p-5 shadow-sm">
             <h3 className="font-semibold text-slate-900">Cómo funciona TixSwap</h3>
             <ol className="mt-3 text-sm text-slate-700 space-y-2 list-decimal list-inside">
-              <li>Pagas y el vendedor sube su entrada.</li>
-              <li>La revisamos y la dejamos en tu correo.</li>
-              <li>Si algo no calza, te devolvemos la plata.</li>
+              <li>
+                El vendedor publica y sube su ticket (PDF). TixSwap valida formato y evita duplicados.
+              </li>
+              <li>
+                Compras dentro de TixSwap: tu pago queda protegido mientras se coordina la entrega
+                (si es nominada, se coordina por el chat).
+              </li>
+              <li>
+                Cuando el ticket está OK para usar, liberamos el pago al vendedor. Si hay un problema validado,
+                gestionamos el reembolso.
+              </li>
             </ol>
           </div>
 
+          {/* ✅ NUEVO: Recomendaciones anti estafa */}
           <div className="bg-white border rounded-xl p-5 shadow-sm">
-            <h3 className="font-semibold text-slate-900">Recomendaciones del vendedor</h3>
-            <p className="mt-2 text-sm text-slate-700">
-              Esto después lo conectamos a un sistema de reputación real.
-            </p>
+            <h3 className="font-semibold text-slate-900">Recomendaciones para evitar estafas</h3>
+            <ul className="mt-3 text-sm text-slate-700 space-y-2 list-disc list-inside">
+              <li>Paga siempre dentro de TixSwap (nunca transferencia por fuera).</li>
+              <li>Revisa bien sector/fila/asiento y que coincida con el evento y la fecha.</li>
+              <li>Si es nominada, coordina solo por el chat de TixSwap y guarda todo ahí.</li>
+              <li>Desconfía de precios demasiado bajos o vendedores que apuren “ya ya ya”.</li>
+              <li>No compartas datos sensibles fuera del proceso (clave, códigos, etc.).</li>
+            </ul>
           </div>
         </aside>
       </div>
     </div>
   );
 }
-
