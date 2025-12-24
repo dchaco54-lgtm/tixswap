@@ -127,9 +127,24 @@ export default function EventsPage() {
             const date = formatEventDate(ev?.starts_at || ev?.date);
             const venue = ev?.venue || ev?.location || "";
             const city = ev?.city || "";
+            const imageUrl = ev?.image_url || ev?.image || ev?.imageUrl || "";
 
             return (
               <div key={ev.id} className="bg-white border rounded-xl p-6 shadow-sm">
+                {/* Imagen del evento (si no existe: placeholder) */}
+                <div className="w-full h-44 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center mb-4">
+                  {imageUrl ? (
+                    <img
+                      src={imageUrl}
+                      alt={title}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="text-sm text-slate-400">Falta cargar imagen</span>
+                  )}
+                </div>
+
                 <h3 className="text-xl font-bold text-slate-900">{title}</h3>
                 <div className="mt-3 text-slate-700 space-y-1">
                   {date && <p>📅 {date}</p>}
