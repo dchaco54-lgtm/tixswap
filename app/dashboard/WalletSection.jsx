@@ -5,405 +5,387 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 const ACCOUNT_TYPES = [
-  { value: "corriente", label: "Cuenta corriente" },
-  { value: "vista", label: "Cuenta vista" },
-  { value: "rut", label: "CuentaRUT" },
-  { value: "digital", label: "Cuenta digital / prepago" },
+  "Cuenta corriente",
+  "Cuenta vista",
+  "CuentaRUT",
+  "Cuenta digital (Mach/Tenpo/otro)",
 ];
-
-// Lista corta (sugerencias). Igual dejamos input libre.
-const BANK_SUGGESTIONS = [
-  "Banco de Chile",
-  "Banco Estado",
-  "Banco Santander",
-  "BCI",
-  "Scotiabank",
-  "Banco Itaú",
-  "Banco Falabella",
-  "Banco Security",
-  "Banco BICE",
-  "Banco Consorcio",
-  "Banco Internacional",
-  "Ripley",
-  "Copec Pay",
-  "Mach",
-  "Tenpo",
-  "Mercado Pago",
-  "Otro",
-];
-
-function normalizeRut(raw) {
-  if (!raw) return "";
-  return raw.replace(/\./g, "").replace(/\s/g, "").toUpperCase();
-}
-
-function onlyDigits(raw) {
-  if (raw === null || raw === undefined) return "";
-  return String(raw).replace(/[^0-9]/g, "");
-}
 
 export default function WalletSection({ user }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [saveError, setSaveError] = useState("");
-  const [saveSuccess, setSaveSuccess] = useState("");
 
-  const metaName =
-    user?.user_metadata?.name || user?.user_metadata?.full_name || "";
-  const metaRut = user?.user_metadata?.rut || "";
-  const metaPhone = user?.user_metadata?.phone || "";
+  const [configured, setConfigured] = useState(false);
+  const [editing, setEditing] = useState(false);
+
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const fullName = useMemo(() => {
+    return (
+      user?.user_metadata?.name ||
+      user?.user_metadata?.full_name ||
+      user?.user_metadata?.fullName ||
+      ""
+    );
+  }, [user]);
+
+  const rut = useMemo(() => {
+    return (user?.user_metadata?.rut || "").trim();
+  }, [user]);
 
   const [form, setForm] = useState({
-    holder_name: "",
-    holder_rut: "",
     bank_name: "",
-    account_type: "corriente",
+    account_type: "Cuenta corriente",
     account_number: "",
     transfer_email: "",
     transfer_phone: "",
   });
 
-  const configured = useMemo(() => {
-    return (
-      !!form.holder_name.trim() &&
-      !!form.holder_rut.trim() &&
-      !!form.bank_name.trim() &&
-      !!form.account_number.trim()
-    );
-  }, [form]);
+  const [savedView, setSavedView] = useState(null); // payout_accounts row
 
   useEffect(() => {
-    let alive = true;
-
-    async function load() {
+    const load = async () => {
       setLoading(true);
-      setLoadError("");
+      setError("");
+      setSuccess("");
 
-      if (!user?.id) {
-        setLoading(false);
-        return;
-      }
+      try {
+        const { data, error } = await supabase
+          .from("payout_accounts")
+          .select("*")
+          .maybeSingle();
 
-      const { data, error } = await supabase
-        .from("payout_accounts")
-        .select(
-          "user_id, holder_name, holder_rut, bank_name, account_type, account_number, transfer_email, transfer_phone"
-        )
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (!alive) return;
-
-      if (error) {
-        const msg = (error.message || "").toLowerCase();
-        if (msg.includes("relation") && msg.includes("does not exist")) {
-          setLoadError(
-            "Aún no existe la tabla payout_accounts en Supabase. Crea la tabla (te dejé el SQL) y vuelve a cargar."
-          );
+        if (error) {
+          console.warn(error);
+          setConfigured(false);
+          setSavedView(null);
+        } else if (data) {
+          setConfigured(true);
+          setSavedView(data);
+          setForm({
+            bank_name: data.bank_name || "",
+            account_type: data.account_type || "Cuenta corriente",
+            account_number: data.account_number || "",
+            transfer_email: data.transfer_email || "",
+            transfer_phone: data.transfer_phone || "",
+          });
+          setEditing(false);
         } else {
-          setLoadError("No pudimos cargar tu Wallet. Intenta de nuevo.");
+          setConfigured(false);
+          setSavedView(null);
+          setEditing(true); // si no hay wallet, entra en modo editar para crear
         }
-
-        setForm((prev) => ({
-          ...prev,
-          holder_name: metaName || prev.holder_name,
-          holder_rut: metaRut || prev.holder_rut,
-          transfer_phone: metaPhone || prev.transfer_phone,
-        }));
+      } finally {
         setLoading(false);
-        return;
       }
-
-      if (data) {
-        setForm({
-          holder_name: data.holder_name || metaName || "",
-          holder_rut: data.holder_rut || metaRut || "",
-          bank_name: data.bank_name || "",
-          account_type: data.account_type || "corriente",
-          account_number: data.account_number || "",
-          transfer_email: data.transfer_email || user?.email || "",
-          transfer_phone: data.transfer_phone || metaPhone || "",
-        });
-      } else {
-        setForm({
-          holder_name: metaName || "",
-          holder_rut: metaRut || "",
-          bank_name: "",
-          account_type: "corriente",
-          account_number: "",
-          transfer_email: user?.email || "",
-          transfer_phone: metaPhone || "",
-        });
-      }
-
-      setLoading(false);
-    }
+    };
 
     load();
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, []);
 
-  function onChange(field) {
-    return (e) => {
-      const value = e.target.value;
-      setSaveError("");
-      setSaveSuccess("");
+  const setField = (k) => (e) => {
+    setError("");
+    setSuccess("");
+    setForm((p) => ({ ...p, [k]: e.target.value }));
+  };
 
-      if (field === "holder_rut") {
-        setForm((prev) => ({ ...prev, holder_rut: normalizeRut(value) }));
-        return;
-      }
+  const handleEdit = () => {
+    setError("");
+    setSuccess("");
+    setEditing(true);
+  };
 
-      if (field === "account_number") {
-        setForm((prev) => ({ ...prev, account_number: onlyDigits(value) }));
-        return;
-      }
+  const handleCancelEdit = () => {
+    setError("");
+    setSuccess("");
+    // volver a lo guardado si existe
+    if (savedView) {
+      setForm({
+        bank_name: savedView.bank_name || "",
+        account_type: savedView.account_type || "Cuenta corriente",
+        account_number: savedView.account_number || "",
+        transfer_email: savedView.transfer_email || "",
+        transfer_phone: savedView.transfer_phone || "",
+      });
+      setEditing(false);
+    }
+  };
 
-      setForm((prev) => ({ ...prev, [field]: value }));
-    };
-  }
+  const handleSave = async () => {
+    setError("");
+    setSuccess("");
 
-  async function handleSave(e) {
-    e.preventDefault();
-    setSaveError("");
-    setSaveSuccess("");
-
-    if (!user?.id) {
-      setSaveError("Debes iniciar sesión.");
+    if (!user) {
+      setError("Debes iniciar sesión.");
+      return;
+    }
+    if (!fullName || !rut) {
+      setError("Tu cuenta no tiene Nombre/RUT. Completa el RUT en tu perfil para configurar Wallet.");
       return;
     }
 
-    if (!form.holder_name.trim() || !form.holder_rut.trim()) {
-      setSaveError("Completa el nombre y RUT del titular.");
-      return;
-    }
-    if (!form.bank_name.trim()) {
-      setSaveError("Selecciona o escribe tu banco/institución.");
-      return;
-    }
-    if (!form.account_number.trim()) {
-      setSaveError("Ingresa el número de cuenta.");
+    if (!form.bank_name.trim() || !form.account_type.trim() || !form.account_number.trim()) {
+      setError("Completa Banco, Tipo de cuenta y Número de cuenta.");
       return;
     }
 
     try {
       setSaving(true);
 
-      const payload = {
-        user_id: user.id,
-        holder_name: form.holder_name.trim(),
-        holder_rut: normalizeRut(form.holder_rut.trim()),
-        bank_name: form.bank_name.trim(),
-        account_type: form.account_type,
-        account_number: form.account_number.trim(),
-        transfer_email: form.transfer_email?.trim() || null,
-        transfer_phone: form.transfer_phone?.trim() || null,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { error } = await supabase
-        .from("payout_accounts")
-        .upsert(payload, { onConflict: "user_id" });
-
-      if (error) {
-        setSaveError(`No se pudo guardar. ${error.message || "Intenta de nuevo."}`);
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) {
+        setError("Sesión expirada. Vuelve a iniciar sesión.");
         return;
       }
 
-      setSaveSuccess("Wallet guardada. Ya tenemos tus datos para pagarte.");
-    } catch {
-      setSaveError("No se pudo guardar. Intenta de nuevo.");
+      const res = await fetch("/api/wallet/save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          bank_name: form.bank_name,
+          account_type: form.account_type,
+          account_number: form.account_number,
+          transfer_email: form.transfer_email,
+          transfer_phone: form.transfer_phone,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json?.error || "No se pudo guardar Wallet.");
+        return;
+      }
+
+      setConfigured(true);
+      setSavedView(json?.payout_account || null);
+      setEditing(false);
+      setSuccess("Wallet guardada. Ya tenemos tus datos para pagarte.");
     } finally {
       setSaving(false);
     }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+        <h2 className="text-lg font-semibold mb-2">Wallet</h2>
+        <p className="text-sm text-slate-500">Cargando…</p>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Wallet</h2>
-            <p className="text-sm text-slate-500 mt-1">
+            <p className="text-sm text-slate-500">
               Aquí configuras los datos donde TixSwap te deposita tus ventas.
             </p>
           </div>
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-              configured
-                ? "bg-emerald-50 text-emerald-700 border-emerald-100"
-                : "bg-amber-50 text-amber-700 border-amber-100"
-            }`}
-          >
-            {configured ? "Configurado" : "Pendiente"}
-          </span>
+
+          {configured && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+              Configurado
+            </span>
+          )}
         </div>
 
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          <p className="font-semibold">Pagos (MVP)</p>
-          <p className="mt-1">
-            TixSwap deposita a vendedores los días <b>lunes, miércoles y viernes</b>,
-            solo si la compra está aprobada o si pasaron <b>48h después del evento</b>
-            sin reclamos.
+        <div className="mt-4 border border-slate-200 rounded-xl p-4">
+          <p className="text-sm font-semibold text-slate-800 mb-1">Pagos (MVP)</p>
+          <p className="text-sm text-slate-600">
+            TixSwap deposita a vendedores los días{" "}
+            <span className="font-semibold">lunes, miércoles y viernes</span>, solo si la compra está aprobada
+            o si pasaron <span className="font-semibold">48h después del evento, sin reclamos</span>.
           </p>
         </div>
       </div>
 
+      {/* Body */}
       <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-        <h3 className="text-base font-semibold">Datos para transferencia</h3>
-        <p className="text-sm text-slate-500 mt-1">
-          Puedes usar cuenta corriente, vista, CuentaRUT o cuenta digital (Tenpo/Mach, etc.).
-        </p>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-base font-semibold">Datos para transferencia</h3>
+            <p className="text-sm text-slate-500">
+              Puedes usar cuenta corriente, vista, CuentaRUT o cuenta digital (Tenpo/Mach, etc.).
+            </p>
+          </div>
 
-        {loading ? (
-          <div className="mt-6 text-sm text-slate-600">Cargando Wallet…</div>
-        ) : (
-          <form onSubmit={handleSave} className="mt-6 grid gap-4">
-            {loadError ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                {loadError}
+          {configured && !editing && (
+            <button
+              type="button"
+              onClick={handleEdit}
+              className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+            >
+              Editar
+            </button>
+          )}
+        </div>
+
+        {/* Bloque anti-estafa */}
+        <div className="grid gap-4 md:grid-cols-2 mb-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Nombre titular</label>
+            <input
+              value={fullName || ""}
+              readOnly
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
+              placeholder="(se toma desde tu cuenta)"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Por seguridad, este dato viene desde tu cuenta y no se puede cambiar aquí.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">RUT titular</label>
+            <input
+              value={rut || ""}
+              readOnly
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
+              placeholder="(se toma desde tu cuenta)"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Tip: lo guardamos tal cual (sin puntos también sirve).
+            </p>
+          </div>
+        </div>
+
+        {/* Form editable solo si editing */}
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Banco / institución</label>
+            <input
+              value={form.bank_name}
+              onChange={setField("bank_name")}
+              disabled={!editing}
+              className={`w-full border rounded-lg px-3 py-2 text-sm ${
+                editing
+                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}
+              placeholder="Banco de Chile / Santander / Tenpo..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de cuenta</label>
+            <select
+              value={form.account_type}
+              onChange={setField("account_type")}
+              disabled={!editing}
+              className={`w-full border rounded-lg px-3 py-2 text-sm ${
+                editing
+                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}
+            >
+              {ACCOUNT_TYPES.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Número de cuenta</label>
+            <input
+              value={form.account_number}
+              onChange={setField("account_number")}
+              disabled={!editing}
+              className={`w-full border rounded-lg px-3 py-2 text-sm ${
+                editing
+                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}
+              placeholder="Para CuentaRUT normalmente es tu RUT sin DV (pero puedes pegar lo que uses)."
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Para CuentaRUT normalmente es tu RUT sin DV (pero puedes pegar lo que uses).
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Email (opcional)</label>
+            <input
+              value={form.transfer_email}
+              onChange={setField("transfer_email")}
+              disabled={!editing}
+              className={`w-full border rounded-lg px-3 py-2 text-sm ${
+                editing
+                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}
+              placeholder="correo@ejemplo.cl"
+            />
+          </div>
+
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Teléfono (opcional)</label>
+            <input
+              value={form.transfer_phone}
+              onChange={setField("transfer_phone")}
+              disabled={!editing}
+              className={`w-full border rounded-lg px-3 py-2 text-sm ${
+                editing
+                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}
+              placeholder="+56 9 ..."
+            />
+          </div>
+        </div>
+
+        {/* Alerts + actions */}
+        <div className="mt-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div className="flex-1">
+            {error && (
+              <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {error}
               </div>
-            ) : null}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Nombre titular
-                </label>
-                <input
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.holder_name}
-                  onChange={onChange("holder_name")}
-                  placeholder="Ej: David Chacón"
-                />
+            )}
+            {success && (
+              <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                {success}
               </div>
+            )}
+          </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  RUT titular
-                </label>
-                <input
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.holder_rut}
-                  onChange={onChange("holder_rut")}
-                  placeholder="12.345.678-9"
-                />
-                <p className="text-xs text-slate-400 mt-1">
-                  Tip: lo guardamos tal cual (sin puntos también sirve).
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Banco / institución
-                </label>
-                <input
-                  list="banks"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.bank_name}
-                  onChange={onChange("bank_name")}
-                  placeholder="Ej: Banco de Chile, Tenpo, Mach"
-                />
-                <datalist id="banks">
-                  {BANK_SUGGESTIONS.map((b) => (
-                    <option key={b} value={b} />
-                  ))}
-                </datalist>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Tipo de cuenta
-                </label>
-                <select
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.account_type}
-                  onChange={onChange("account_type")}
+          {editing ? (
+            <div className="flex gap-2 justify-end">
+              {configured && (
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+                  disabled={saving}
                 >
-                  {ACCOUNT_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Número de cuenta
-                </label>
-                <input
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.account_number}
-                  onChange={onChange("account_number")}
-                  placeholder="Solo números"
-                  inputMode="numeric"
-                />
-                <p className="text-xs text-slate-400 mt-1">
-                  Para CuentaRUT normalmente es tu RUT sin DV (pero puedes pegar lo que uses, solo guardamos dígitos).
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Email (opcional)
-                </label>
-                <input
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.transfer_email}
-                  onChange={onChange("transfer_email")}
-                  placeholder="correo@ejemplo.com"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Teléfono (opcional)
-                </label>
-                <input
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  value={form.transfer_phone}
-                  onChange={onChange("transfer_phone")}
-                  placeholder="+56 9 1234 5678"
-                />
-              </div>
-
-              <div className="hidden md:block" />
-            </div>
-
-            {saveError ? (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-                {saveError}
-              </p>
-            ) : null}
-
-            {saveSuccess ? (
-              <p className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
-                {saveSuccess}
-              </p>
-            ) : null}
-
-            <div className="flex items-center justify-end">
+                  Cancelar
+                </button>
+              )}
               <button
-                type="submit"
+                type="button"
+                onClick={handleSave}
                 disabled={saving}
-                className="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="text-sm px-5 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
               >
-                {saving ? "Guardando..." : "Guardar Wallet"}
+                {saving ? "Guardando..." : configured ? "Guardar cambios" : "Guardar Wallet"}
               </button>
             </div>
-          </form>
-        )}
+          ) : (
+            <div className="text-xs text-slate-500">
+              Wallet configurada. Si necesitas cambiar tus datos bancarios, usa “Editar”.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
