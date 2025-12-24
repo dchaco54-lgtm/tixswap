@@ -41,8 +41,9 @@ export default function SellConfirmPage() {
   const [price, setPrice] = useState("");
   const [originalPrice, setOriginalPrice] = useState("");
 
-  // tipo venta (por ahora fijo)
-  const [saleType] = useState("fixed");
+  // tipo de venta (pero subasta aún deshabilitada)
+  const [saleType, setSaleType] = useState("fixed"); // fixed | auction (futuro)
+  const [autoEmergencyAuction, setAutoEmergencyAuction] = useState(false); // futuro (disabled)
 
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
@@ -67,7 +68,6 @@ export default function SellConfirmPage() {
       }
       const parsed = JSON.parse(raw);
 
-      // si no hay evento o no hay pdf “validado”, lo mando al paso correcto
       if (!parsed?.event_id) {
         router.replace("/sell");
         return;
@@ -81,12 +81,16 @@ export default function SellConfirmPage() {
       setPrice(String(parsed?.price ?? ""));
       setOriginalPrice(parsed?.originalPrice ? String(parsed.originalPrice) : "");
       setEventQuery(parsed?.event_title || "");
+
+      // si en el draft había saleType (para futuro), lo tomo
+      if (parsed?.saleType) setSaleType(parsed.saleType);
+      if (parsed?.autoEmergencyAuction) setAutoEmergencyAuction(!!parsed.autoEmergencyAuction);
     } catch {
       router.replace("/sell");
     }
   }, [router]);
 
-  // cargar eventos (para cambiarlo)
+  // cargar eventos
   useEffect(() => {
     let alive = true;
 
@@ -112,7 +116,6 @@ export default function SellConfirmPage() {
       setEvents(normalized);
       setEventsLoading(false);
 
-      // set selectedEvent inicial desde draft
       const found = normalized.find((x) => String(x.id) === String(draft?.event_id));
       if (found) setSelectedEvent(found);
       else if (draft?.event_id) setSelectedEvent({ id: draft.event_id, title: draft.event_title || "Evento" });
@@ -135,19 +138,21 @@ export default function SellConfirmPage() {
     });
   }, [events, eventQuery]);
 
+  function writeDraft(partial) {
+    const nextDraft = { ...(draft || {}), ...(partial || {}) };
+    setDraft(nextDraft);
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(nextDraft));
+  }
+
   function selectEvent(ev) {
     setSelectedEvent(ev);
     setEventQuery(ev.title ?? "");
     setEventOpen(false);
 
-    // actualizar draft altiro
-    const nextDraft = {
-      ...(draft || {}),
+    writeDraft({
       event_id: ev.id,
       event_title: ev.title || null,
-    };
-    setDraft(nextDraft);
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(nextDraft));
+    });
   }
 
   const canPublish = useMemo(() => {
@@ -164,6 +169,7 @@ export default function SellConfirmPage() {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData?.session?.access_token;
+
       if (!token) {
         router.replace(`/login?redirectTo=${encodeURIComponent("/sell/confirm")}`);
         return;
@@ -173,7 +179,10 @@ export default function SellConfirmPage() {
         event_id: selectedEvent?.id,
         price: Number(String(price).replace(/[^\d]/g, "")),
         originalPrice: originalPrice ? Number(String(originalPrice).replace(/[^\d]/g, "")) : null,
+
+        // tipo venta (por ahora fixed)
         saleType: saleType || "fixed",
+        autoEmergencyAuction: autoEmergencyAuction || false,
 
         // paso 1
         description: draft?.description || null,
@@ -181,7 +190,7 @@ export default function SellConfirmPage() {
         fila: draft?.fila || null,
         asiento: draft?.asiento || null,
 
-        // paso 2 (pdf)
+        // paso 2
         ticketUpload: draft?.ticketUpload || null,
       };
 
@@ -194,14 +203,22 @@ export default function SellConfirmPage() {
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json().catch(() => ({}));
+      // leer error real si pasa algo
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {}
 
       if (!res.ok) {
-        setError(data?.details ? `${data.error}: ${data.details}` : (data?.error || "No se pudo publicar."));
+        setError(
+          data?.details
+            ? `${data.error}: ${data.details}`
+            : (data?.error || raw?.slice(0, 180) || "No se pudo publicar.")
+        );
         return;
       }
 
-      // limpiar draft y mandar al evento
       localStorage.removeItem(DRAFT_KEY);
       router.push(`/events/${data?.event_id || selectedEvent.id}`);
     } catch (e) {
@@ -219,7 +236,7 @@ export default function SellConfirmPage() {
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 py-10">
         <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
-          {/* Stepper (mismo estilo que /sell/file) */}
+          {/* Stepper */}
           <div className="rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 px-6 py-6 text-white">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-3 opacity-80">
@@ -243,9 +260,7 @@ export default function SellConfirmPage() {
 
           <div className="mt-8">
             <h1 className="text-3xl font-bold text-slate-900">Confirmar publicación</h1>
-            <p className="mt-2 text-slate-600">
-              Revisa el evento, ajusta el precio y publica tu entrada.
-            </p>
+            <p className="mt-2 text-slate-600">Revisa el evento, ajusta el precio y publica tu entrada.</p>
 
             {/* Evento (editable) */}
             <div className="mt-8">
@@ -280,7 +295,9 @@ export default function SellConfirmPage() {
                             <div className="min-w-0">
                               <div className="truncate font-semibold text-slate-900">{ev.title}</div>
                               <div className="mt-0.5 text-xs text-slate-500">
-                                {formatEventDate(ev.starts_at)} {ev.venue ? `• ${ev.venue}` : ""} {ev.city ? `• ${ev.city}` : ""}
+                                {formatEventDate(ev.starts_at)}
+                                {ev.venue ? ` • ${ev.venue}` : ""}
+                                {ev.city ? ` • ${ev.city}` : ""}
                               </div>
                             </div>
                           </button>
@@ -298,7 +315,7 @@ export default function SellConfirmPage() {
               ) : null}
             </div>
 
-            {/* Precio (editable) */}
+            {/* Precio */}
             <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <label className="text-sm font-medium text-slate-700">
@@ -308,7 +325,11 @@ export default function SellConfirmPage() {
                   className="tix-input mt-2"
                   inputMode="numeric"
                   value={price}
-                  onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/[^\d]/g, "");
+                    setPrice(v);
+                    writeDraft({ price: v });
+                  }}
                 />
               </div>
 
@@ -318,30 +339,75 @@ export default function SellConfirmPage() {
                   className="tix-input mt-2"
                   inputMode="numeric"
                   value={originalPrice}
-                  onChange={(e) => setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/[^\d]/g, "");
+                    setOriginalPrice(v);
+                    writeDraft({ originalPrice: v });
+                  }}
                 />
               </div>
             </div>
 
-            {/* Tipo de venta (subasta deshabilitada igual que paso 1) */}
+            {/* ✅ Tipo de venta (IGUAL que Paso 1) */}
             <div className="mt-8">
               <div className="text-sm font-medium text-slate-700">Tipo de venta</div>
 
               <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="rounded-2xl border border-blue-500 bg-blue-50 p-5 ring-4 ring-blue-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSaleType("fixed");
+                    writeDraft({ saleType: "fixed" });
+                  }}
+                  className={[
+                    "rounded-2xl border p-5 text-left transition",
+                    saleType === "fixed"
+                      ? "border-blue-500 bg-blue-50 ring-4 ring-blue-100"
+                      : "border-slate-200 hover:bg-slate-50",
+                  ].join(" ")}
+                >
                   <div className="font-semibold text-slate-900">Precio fijo</div>
-                  <div className="mt-1 text-sm text-slate-600">Vende inmediatamente al precio que estableciste</div>
-                </div>
-
-                <div className="cursor-not-allowed rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                  <div className="flex items-center gap-2 font-semibold text-slate-900">
-                    Subasta
-                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
-                      Se viene pronto
-                    </span>
-                  </div>
                   <div className="mt-1 text-sm text-slate-600">
-                    Podrás elegir entre dos tipos de subasta (próximamente).
+                    Vende inmediatamente al precio que estableciste
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled
+                  className="rounded-2xl border border-slate-200 bg-white p-5 text-left"
+                  title="Pronto estará disponible"
+                >
+                  <div className="font-semibold text-slate-900">Subasta</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Pronto estará disponible. Deja que los compradores pujen por tu entrada.
+                  </div>
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    disabled
+                    checked={autoEmergencyAuction}
+                    onChange={(e) => {
+                      setAutoEmergencyAuction(e.target.checked);
+                      writeDraft({ autoEmergencyAuction: e.target.checked });
+                    }}
+                    className="mt-1 h-4 w-4 cursor-not-allowed"
+                  />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 font-semibold text-amber-900">
+                      <span>Subasta automática de emergencia</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                        Se viene pronto
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-amber-800">
+                      Si mi entrada no se vende, permitir que se active automáticamente una subasta 2 horas antes del evento.
+                      Los compradores podrán pujar y se enviará un email a cada uno cuando sea superado.
+                    </p>
                   </div>
                 </div>
               </div>
