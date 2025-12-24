@@ -145,6 +145,7 @@ export default function EventDetailPage() {
   const dateLabel = formatDateTime(event?.starts_at || event?.date);
   const venue = event?.venue || event?.location || "";
   const city = event?.city || "";
+  const imageUrl = event?.image_url || event?.image || event?.imageUrl || "";
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-12">
@@ -152,8 +153,22 @@ export default function EventDetailPage() {
         ← Volver a eventos
       </Link>
 
-      <div className="mt-6 bg-white border rounded-xl p-6 shadow-sm flex items-start justify-between gap-6">
-        <div className="min-w-0">
+      <div className="mt-6 bg-white border rounded-xl p-6 shadow-sm flex flex-col md:flex-row items-start justify-between gap-6">
+        <div className="min-w-0 flex-1">
+          {/* Imagen del evento (si no existe: placeholder) */}
+          <div className="w-full h-52 md:h-44 rounded-xl bg-slate-100 overflow-hidden flex items-center justify-center mb-5">
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={title}
+                className="w-full h-full object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <span className="text-sm text-slate-400">Falta cargar imagen</span>
+            )}
+          </div>
+
           <h1 className="text-3xl font-bold text-slate-900">{title}</h1>
           <div className="mt-3 text-slate-700 space-y-1">
             {dateLabel && <p>📅 {dateLabel}</p>}
@@ -258,7 +273,6 @@ export default function EventDetailPage() {
         </div>
 
         <aside className="space-y-4">
-          {/* ✅ Cómo funciona real (3 pasos) */}
           <div className="bg-white border rounded-xl p-5 shadow-sm">
             <h3 className="font-semibold text-slate-900">Cómo funciona TixSwap</h3>
             <ol className="mt-3 text-sm text-slate-700 space-y-2 list-decimal list-inside">
@@ -274,7 +288,6 @@ export default function EventDetailPage() {
             </ol>
           </div>
 
-          {/* ✅ Recomendaciones anti estafa */}
           <div className="bg-white border rounded-xl p-5 shadow-sm">
             <h3 className="font-semibold text-slate-900">Recomendaciones para evitar estafas</h3>
             <ul className="mt-3 text-sm text-slate-700 space-y-2 list-disc list-inside">
