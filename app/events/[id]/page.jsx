@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 function formatDateTime(iso) {
   if (!iso) return "";
@@ -123,15 +123,11 @@ export default function EventDetailPage() {
   }, [tickets, sectorFilter, sortBy]);
 
   if (!userChecked) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando…</div>
-    );
+    return <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando…</div>;
   }
 
   if (loading) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando evento…</div>
-    );
+    return <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando evento…</div>;
   }
 
   if (error || !event) {
@@ -157,7 +153,7 @@ export default function EventDetailPage() {
       </Link>
 
       <div className="mt-6 bg-white border rounded-xl p-6 shadow-sm flex items-start justify-between gap-6">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-3xl font-bold text-slate-900">{title}</h1>
           <div className="mt-3 text-slate-700 space-y-1">
             {dateLabel && <p>📅 {dateLabel}</p>}
@@ -171,13 +167,23 @@ export default function EventDetailPage() {
           </div>
         </div>
 
-        {/* ✅ Ajustado para que diga cómo funciona DE VERDAD */}
-        <div className="hidden md:block bg-slate-50 border rounded-xl px-5 py-4 text-sm text-slate-700">
-          <p className="font-semibold">Reventa segura en TixSwap</p>
-          <p className="mt-1">
-            Pagas dentro de TixSwap y tu plata queda protegida: validamos el ticket y
-            liberamos el pago al vendedor solo cuando todo está OK.
-          </p>
+        {/* ✅ Caja compacta (mitad) + clamp 2 líneas */}
+        <div className="hidden md:flex w-full max-w-[420px] justify-end">
+          <div className="bg-slate-50 border rounded-xl px-5 py-4 text-sm text-slate-700 w-full">
+            <p className="font-semibold">Reventa segura en TixSwap</p>
+            <p
+              className="mt-1 leading-snug"
+              style={{
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }}
+            >
+              Pagas dentro de TixSwap y tu plata queda protegida: validamos el ticket y liberamos el pago al vendedor
+              solo cuando todo está OK.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -212,16 +218,14 @@ export default function EventDetailPage() {
 
           <div className="mt-4 space-y-4">
             {filteredTickets.length === 0 ? (
-              <div className="text-slate-600">
-                Aún no hay entradas publicadas para este evento.
-              </div>
+              <div className="text-slate-600">Aún no hay entradas publicadas para este evento.</div>
             ) : (
               filteredTickets.map((t) => (
                 <div
                   key={t.id}
                   className="border rounded-xl p-5 bg-white shadow-sm flex items-center justify-between gap-4"
                 >
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-semibold text-slate-900">
                       {t?.title || "Entrada"}
                       {t?.sector ? ` · ${t.sector}` : ""}
@@ -229,18 +233,14 @@ export default function EventDetailPage() {
                       {t?.seat ? `, asiento ${t.seat}` : ""}
                     </p>
 
-                    {t?.description && (
-                      <p className="mt-1 text-sm text-slate-600">{t.description}</p>
-                    )}
+                    {t?.description && <p className="mt-1 text-sm text-slate-600">{t.description}</p>}
 
                     {t?.seller_name && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Publicado por {t.seller_name}
-                      </p>
+                      <p className="mt-1 text-xs text-slate-500">Publicado por {t.seller_name}</p>
                     )}
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <p className="text-lg font-bold text-green-700">
                       ${Number(t?.price || 0).toLocaleString("es-CL")}
                     </p>
@@ -258,16 +258,14 @@ export default function EventDetailPage() {
         </div>
 
         <aside className="space-y-4">
-          {/* ✅ NUEVO: Cómo funciona real (3 pasos) */}
+          {/* ✅ Cómo funciona real (3 pasos) */}
           <div className="bg-white border rounded-xl p-5 shadow-sm">
             <h3 className="font-semibold text-slate-900">Cómo funciona TixSwap</h3>
             <ol className="mt-3 text-sm text-slate-700 space-y-2 list-decimal list-inside">
+              <li>El vendedor publica y sube su ticket (PDF). TixSwap valida formato y evita duplicados.</li>
               <li>
-                El vendedor publica y sube su ticket (PDF). TixSwap valida formato y evita duplicados.
-              </li>
-              <li>
-                Compras dentro de TixSwap: tu pago queda protegido mientras se coordina la entrega
-                (si es nominada, se coordina por el chat).
+                Compras dentro de TixSwap: tu pago queda protegido mientras se coordina la entrega (si es nominada, se
+                coordina por el chat).
               </li>
               <li>
                 Cuando el ticket está OK para usar, liberamos el pago al vendedor. Si hay un problema validado,
@@ -276,13 +274,13 @@ export default function EventDetailPage() {
             </ol>
           </div>
 
-          {/* ✅ NUEVO: Recomendaciones anti estafa */}
+          {/* ✅ Recomendaciones anti estafa */}
           <div className="bg-white border rounded-xl p-5 shadow-sm">
             <h3 className="font-semibold text-slate-900">Recomendaciones para evitar estafas</h3>
             <ul className="mt-3 text-sm text-slate-700 space-y-2 list-disc list-inside">
               <li>Paga siempre dentro de TixSwap (nunca transferencia por fuera).</li>
               <li>Revisa bien sector/fila/asiento y que coincida con el evento y la fecha.</li>
-              <li>Si es nominada, coordina solo por el chat de TixSwap y guarda todo ahí.</li>
+              <li>Si es nominada, coordina solo por el chat de TixSwap y deja todo registrado ahí.</li>
               <li>Desconfía de precios demasiado bajos o vendedores que apuren “ya ya ya”.</li>
               <li>No compartas datos sensibles fuera del proceso (clave, códigos, etc.).</li>
             </ul>
