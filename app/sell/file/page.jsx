@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1";
 
@@ -10,7 +11,7 @@ export default function SellFilePage() {
 
   const [draft, setDraft] = useState(null);
 
-  const [isNominated, setIsNominated] = useState(false);
+  const [isNominada, setIsNominada] = useState(false);
   const [file, setFile] = useState(null);
 
   const [uploading, setUploading] = useState(false);
@@ -28,7 +29,7 @@ export default function SellFilePage() {
       const parsed = JSON.parse(raw);
       setDraft(parsed);
 
-      if (parsed?.ticketUpload?.isNominated) setIsNominated(true);
+      if (parsed?.ticketUpload?.isNominada) setIsNominada(true);
       if (parsed?.ticketUpload?.uploaded) {
         setUploaded(true);
         setViewUrl(parsed?.ticketUpload?.viewUrl || null);
@@ -39,61 +40,53 @@ export default function SellFilePage() {
     }
   }, []);
 
-  const canValidate = useMemo(() => {
-    return !!file && !uploading && !uploaded;
-  }, [file, uploading, uploaded]);
-
-  const canContinue = useMemo(() => {
-    return uploaded && !uploading;
-  }, [uploaded, uploading]);
+  const canValidate = useMemo(() => !!file && !uploading && !uploaded, [file, uploading, uploaded]);
+  const canContinue = useMemo(() => uploaded && !uploading, [uploaded, uploading]);
 
   async function handleValidateAndUpload() {
     setError("");
     setViewUrl(null);
     setSha256(null);
 
-    if (!file) {
-      setError("Selecciona un PDF primero.");
-      return;
-    }
-    if (file.type !== "application/pdf") {
-      setError("El archivo debe ser PDF.");
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      setError("Máx 8MB.");
-      return;
-    }
+    if (!file) return setError("Selecciona un PDF primero.");
+    if (file.type !== "application/pdf") return setError("El archivo debe ser PDF.");
+    if (file.size > 8 * 1024 * 1024) return setError("Máx 8MB.");
 
     setUploading(true);
 
     try {
+      // sacar user id si existe sesión
+      let sellerId = null;
+      try {
+        const { data } = await supabase.auth.getUser();
+        sellerId = data?.user?.id ?? null;
+      } catch {}
+
       const fd = new FormData();
       fd.append("file", file);
-      fd.append("isNominated", String(isNominated));
-
-      // Si tienes userId en tu draft, pásalo. Si no, queda "anon".
-      if (draft?.userId) fd.append("userId", draft.userId);
+      fd.append("isNominada", String(isNominada));
+      if (sellerId) fd.append("sellerId", sellerId);
 
       const res = await fetch("/api/tickets/register", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        // Duplicado: mostramos mensaje y si viene viewUrl lo dejamos linkeado
-        if (data?.error === "DUPLICATE") {
-          setUploaded(false); // aún no lo dejamos “validado” para avanzar si tú quieres
-          // pero UX: si ya existe, igual te dejo el link para verlo y el mensaje.
+        // duplicado
+        if (res.status === 409 || data?.error === "DUPLICATE") {
           setError(data?.message || "Entrada ya subida en Tixswap");
           if (data?.existing?.viewUrl) setViewUrl(data.existing.viewUrl);
           if (data?.sha256) setSha256(data.sha256);
           return;
         }
 
-        setError(data?.details ? `${data.error}: ${data.details}` : (data?.error || "Error registrando ticket (/api/tickets/register)."));
+        setError(
+          data?.details
+            ? `${data.error}: ${data.details}`
+            : (data?.error || "Error registrando ticket (/api/tickets/register).")
+        );
         return;
       }
 
-      // OK
       setUploaded(true);
       setViewUrl(data?.viewUrl || null);
       setSha256(data?.sha256 || null);
@@ -102,7 +95,8 @@ export default function SellFilePage() {
         ...(draft || {}),
         ticketUpload: {
           uploaded: true,
-          isNominated,
+          isNominada,
+          ticketUploadId: data?.ticketUploadId || null,
           sha256: data?.sha256 || null,
           filePath: data?.filePath || null,
           viewUrl: data?.viewUrl || null,
@@ -120,10 +114,7 @@ export default function SellFilePage() {
   }
 
   function handleContinue() {
-    // Bloqueado sí o sí
     if (!uploaded) return;
-
-    // Paso 3 (ajusta si tu ruta es distinta)
     router.push("/sell/confirm");
   }
 
@@ -134,9 +125,7 @@ export default function SellFilePage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 py-10">
-        {/* Tarjeta principal (misma onda visual) */}
         <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
-          {/* Stepper (simple, sin romper tu estructura) */}
           <div className="rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 px-6 py-6 text-white">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-3">
@@ -168,14 +157,13 @@ export default function SellFilePage() {
               Sube el PDF del ticket. Validaremos formato y evitaremos duplicados.
             </p>
 
-            {/* Nominada */}
             <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
               <label className="flex items-start gap-3">
                 <input
                   type="checkbox"
                   className="mt-1 h-4 w-4"
-                  checked={isNominated}
-                  onChange={(e) => setIsNominated(e.target.checked)}
+                  checked={isNominada}
+                  onChange={(e) => setIsNominada(e.target.checked)}
                   disabled={uploading}
                 />
                 <div>
@@ -188,7 +176,6 @@ export default function SellFilePage() {
               </label>
             </div>
 
-            {/* Upload */}
             <div className="mt-8">
               <div className="text-sm font-medium text-slate-700">Subir PDF del ticket</div>
 
@@ -205,7 +192,6 @@ export default function SellFilePage() {
                   }}
                   disabled={uploading}
                 />
-
                 <div className="mt-2 text-xs text-slate-500">Máx 8MB. Validamos PDF real + anti-duplicado.</div>
 
                 {viewUrl ? (
@@ -219,25 +205,21 @@ export default function SellFilePage() {
               </div>
             </div>
 
-            {/* Botones */}
             <div className="mt-8 flex items-center justify-between">
               <button type="button" className="tix-btn-secondary" onClick={handleBack} disabled={uploading}>
                 Volver
               </button>
 
               <div className="flex items-center gap-3">
-                {/* Validar: azul cuando corresponde, gris cuando ya está validado */}
                 <button
                   type="button"
                   className={uploaded ? "tix-btn-secondary" : "tix-btn-primary"}
                   onClick={handleValidateAndUpload}
                   disabled={!canValidate}
-                  title={!file ? "Selecciona un PDF" : uploaded ? "Ya validado" : ""}
                 >
                   {uploading ? "Validando..." : uploaded ? "Validado ✓" : "Validar y subir"}
                 </button>
 
-                {/* Continuar: bloqueado hasta upload OK; cuando OK -> azul */}
                 <button
                   type="button"
                   className={canContinue ? "tix-btn-primary" : "tix-btn-secondary"}
@@ -250,12 +232,10 @@ export default function SellFilePage() {
               </div>
             </div>
 
-            {/* Mensaje UX */}
             <div className="mt-3 text-sm text-slate-500">
               Para continuar, primero debes validar y subir el PDF.
             </div>
 
-            {/* Error */}
             {error ? (
               <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {error}
