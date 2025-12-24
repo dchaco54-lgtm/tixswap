@@ -31,6 +31,37 @@ function formatEventDate(iso) {
   }
 }
 
+// Orden global: próximos primero (más cercanos a hoy), luego futuros lejanos, y al final pasados
+function sortEventsByProximity(list = []) {
+  const now = Date.now();
+  const arr = Array.isArray(list) ? [...list] : [];
+
+  arr.sort((a, b) => {
+    const ta = a?.starts_at ? new Date(a.starts_at).getTime() : null;
+    const tb = b?.starts_at ? new Date(b.starts_at).getTime() : null;
+
+    const aMissing = !ta || Number.isNaN(ta);
+    const bMissing = !tb || Number.isNaN(tb);
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1; // sin fecha al final
+    if (bMissing) return -1;
+
+    const aFuture = ta >= now;
+    const bFuture = tb >= now;
+
+    if (aFuture && !bFuture) return -1; // futuros primero
+    if (!aFuture && bFuture) return 1;
+
+    // ambos futuros: asc (más cercano primero)
+    if (aFuture && bFuture) return ta - tb;
+
+    // ambos pasados: desc (más reciente pasado primero)
+    return tb - ta;
+  });
+
+  return arr;
+}
+
 export default function EventsPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -61,9 +92,12 @@ export default function EventsPage() {
       const { data, error } = await supabase
         .from("events")
         .select("*")
-        .order("starts_at", { ascending: true });
+        .order("starts_at", { ascending: true, nullsFirst: false });
 
-      if (!error) setEvents(Array.isArray(data) ? data : []);
+      if (!error) {
+        const sorted = sortEventsByProximity(Array.isArray(data) ? data : []);
+        setEvents(sorted);
+      }
       setLoading(false);
     };
 
@@ -127,24 +161,9 @@ export default function EventsPage() {
             const date = formatEventDate(ev?.starts_at || ev?.date);
             const venue = ev?.venue || ev?.location || "";
             const city = ev?.city || "";
-            const imageUrl = ev?.image_url || ev?.image || ev?.imageUrl || "";
 
             return (
               <div key={ev.id} className="bg-white border rounded-xl p-6 shadow-sm">
-                {/* Imagen del evento (si no existe: placeholder) */}
-                <div className="w-full h-44 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center mb-4">
-                  {imageUrl ? (
-                    <img
-                      src={imageUrl}
-                      alt={title}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <span className="text-sm text-slate-400">Falta cargar imagen</span>
-                  )}
-                </div>
-
                 <h3 className="text-xl font-bold text-slate-900">{title}</h3>
                 <div className="mt-3 text-slate-700 space-y-1">
                   {date && <p>📅 {date}</p>}
