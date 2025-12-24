@@ -31,7 +31,7 @@ function formatEventDate(iso) {
   }
 }
 
-// Orden global: próximos primero (más cercanos a hoy), luego futuros lejanos, y al final pasados
+// ✅ Orden global: próximos primero (más cercanos), luego lejanos, al final pasados
 function sortEventsByProximity(list = []) {
   const now = Date.now();
   const arr = Array.isArray(list) ? [...list] : [];
@@ -71,7 +71,7 @@ export default function EventsPage() {
   const [events, setEvents] = useState([]);
   const [query, setQuery] = useState("");
 
-  // Auth guard: si no hay sesión -> login y después vuelve a /events
+  // Auth guard: si no hay sesión -> login y vuelve a /events
   useEffect(() => {
     const guard = async () => {
       const { data } = await supabase.auth.getUser();
@@ -161,9 +161,24 @@ export default function EventsPage() {
             const date = formatEventDate(ev?.starts_at || ev?.date);
             const venue = ev?.venue || ev?.location || "";
             const city = ev?.city || "";
+            const imageUrl = (ev?.image_url || "").trim();
 
             return (
               <div key={ev.id} className="bg-white border rounded-xl p-6 shadow-sm">
+                {/* ✅ Imagen (solo se agrega, no cambia lo demás) */}
+                <div className="w-full h-40 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center mb-4">
+                  {imageUrl ? (
+                    <img
+                      src={imageUrl}
+                      alt={title}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="text-sm text-gray-400">Falta cargar imagen</span>
+                  )}
+                </div>
+
                 <h3 className="text-xl font-bold text-slate-900">{title}</h3>
                 <div className="mt-3 text-slate-700 space-y-1">
                   {date && <p>📅 {date}</p>}
