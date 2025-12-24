@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-/** Helpers */
+/** =========================
+ * Helpers
+ * ========================= */
 function norm(str) {
   return (str || "")
     .toString()
@@ -51,10 +53,13 @@ function formatEventDate(iso) {
   }
 }
 
+/** =========================
+ * Page
+ * ========================= */
 export default function AdminEventsPage() {
   const router = useRouter();
 
-  // Admin Guard
+  // Guard / perms
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -62,7 +67,7 @@ export default function AdminEventsPage() {
   const [events, setEvents] = useState([]);
   const [search, setSearch] = useState("");
 
-  // Create
+  // Create event form
   const [newEvent, setNewEvent] = useState({
     title: "",
     starts_at: "",
@@ -72,7 +77,7 @@ export default function AdminEventsPage() {
     image_url: "",
   });
 
-  // Edit
+  // Edit state
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({
     id: "",
@@ -86,7 +91,11 @@ export default function AdminEventsPage() {
 
   const [loading, setLoading] = useState(false);
 
-  /** Guard admin by email (como tu caso: soporte@tixswap.cl) */
+  /** =========================
+   * Admin guard (ZIP-compatible):
+   * - must be logged in
+   * - must have profiles.role === 'admin'
+   * ========================= */
   useEffect(() => {
     const guard = async () => {
       try {
@@ -98,8 +107,20 @@ export default function AdminEventsPage() {
           return;
         }
 
-        const email = (user.email || "").toLowerCase();
-        if (email !== "soporte@tixswap.cl") {
+        // ✅ Tu proyecto valida admin por profiles.role
+        const { data: profileRow, error: profileErr } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profileErr) {
+          console.warn("[admin/events] no se pudo leer profiles.role:", profileErr);
+          router.replace("/dashboard");
+          return;
+        }
+
+        if (profileRow?.role !== "admin") {
           router.replace("/dashboard");
           return;
         }
@@ -117,7 +138,9 @@ export default function AdminEventsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Load events from Supabase */
+  /** =========================
+   * Fetch events
+   * ========================= */
   const fetchEvents = async () => {
     const { data, error } = await supabase
       .from("events")
@@ -129,10 +152,13 @@ export default function AdminEventsPage() {
       setEvents([]);
       return;
     }
+
     setEvents(Array.isArray(data) ? data : []);
   };
 
-  /** Filter */
+  /** =========================
+   * Search filter
+   * ========================= */
   const filteredEvents = useMemo(() => {
     const q = norm(search);
     if (!q) return events;
@@ -145,7 +171,9 @@ export default function AdminEventsPage() {
     });
   }, [events, search]);
 
-  /** Create */
+  /** =========================
+   * Create event
+   * ========================= */
   const createEvent = async () => {
     const title = (newEvent.title || "").trim();
     const venue = (newEvent.venue || "").trim();
@@ -180,7 +208,9 @@ export default function AdminEventsPage() {
     alert("Evento creado ✅");
   };
 
-  /** Start edit */
+  /** =========================
+   * Start edit
+   * ========================= */
   const startEdit = (ev) => {
     setEditingId(ev.id);
     setEditForm({
@@ -194,13 +224,14 @@ export default function AdminEventsPage() {
     });
   };
 
-  /** Cancel edit */
   const cancelEdit = () => {
     setEditingId(null);
     setEditForm({ id: "", title: "", starts_at: "", venue: "", city: "", category: "", image_url: "" });
   };
 
-  /** Save edit */
+  /** =========================
+   * Save edit
+   * ========================= */
   const saveEdit = async () => {
     if (!editingId) return;
 
@@ -237,23 +268,23 @@ export default function AdminEventsPage() {
     alert("Evento actualizado ✅");
   };
 
-  /** Delete event (y tickets asociados) */
+  /** =========================
+   * Delete event (and its tickets)
+   * ========================= */
   const deleteEvent = async (id) => {
     const ev = events.find((x) => x.id === id);
     const name = ev?.title || "este evento";
 
-    if (!confirm(`¿Seguro que quieres eliminar "${name}"? Esto elimina también sus entradas.`)) return;
+    if (!confirm(`¿Seguro que quieres eliminar "${name}"?\n\nEsto elimina también sus entradas.`)) return;
 
     setLoading(true);
 
-    // 1) Borra tickets relacionados (si no tienes cascade)
-    const { error: tErr } = await supabase.from("tickets").delete().eq("event_id", id);
-    if (tErr) {
-      console.error("[admin/events] delete tickets error:", tErr);
-      // seguimos igual, porque puede que no tenga tickets
+    // Borra tickets asociados (por si no tienes ON DELETE CASCADE)
+    const { error: ticketsErr } = await supabase.from("tickets").delete().eq("event_id", id);
+    if (ticketsErr) {
+      console.warn("[admin/events] delete tickets warning:", ticketsErr);
     }
 
-    // 2) Borra evento
     const { error } = await supabase.from("events").delete().eq("id", id);
     setLoading(false);
 
@@ -268,7 +299,9 @@ export default function AdminEventsPage() {
     alert("Evento eliminado ✅");
   };
 
-  /** UI */
+  /** =========================
+   * UI
+   * ========================= */
   if (checkingAdmin) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -288,6 +321,7 @@ export default function AdminEventsPage() {
           <h1 className="text-3xl font-bold">Panel de eventos</h1>
           <p className="text-gray-600 mt-1">Administra nombre, fecha/hora, ubicación, categoría e imagen.</p>
         </div>
+
         <button
           onClick={() => router.push("/dashboard")}
           className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50"
@@ -296,7 +330,9 @@ export default function AdminEventsPage() {
         </button>
       </div>
 
-      {/* Crear nuevo */}
+      {/* =========================
+          Create new event
+         ========================= */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mt-8">
         <h2 className="text-xl font-semibold mb-4">Crear nuevo evento</h2>
 
@@ -338,10 +374,24 @@ export default function AdminEventsPage() {
 
           <input
             className="border p-2 rounded-xl"
-            placeholder="Imagen URL (opcional) — pega link tipo PuntoTicket"
+            placeholder="Imagen URL (opcional) — pega un link tipo PuntoTicket"
             value={newEvent.image_url}
             onChange={(e) => setNewEvent({ ...newEvent, image_url: e.target.value })}
           />
+        </div>
+
+        {/* Preview imagen nueva */}
+        <div className="mt-4 w-full h-44 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center">
+          {newEvent.image_url ? (
+            <img
+              src={newEvent.image_url}
+              alt="Preview"
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <span className="text-sm text-gray-400">Falta cargar imagen</span>
+          )}
         </div>
 
         <button
@@ -353,7 +403,9 @@ export default function AdminEventsPage() {
         </button>
       </div>
 
-      {/* Buscador + listado */}
+      {/* =========================
+          Search + list
+         ========================= */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mt-10">
         <h2 className="text-2xl font-semibold">Eventos en backend</h2>
 
@@ -420,7 +472,6 @@ export default function AdminEventsPage() {
                       </div>
                     </div>
 
-                    {/* Mostrar URL (para que sepas qué quedó guardado) */}
                     <div className="mt-3 text-xs text-gray-500 break-all">
                       <span className="font-semibold">image_url:</span> {imageUrl || "NULL"}
                     </div>
@@ -472,7 +523,7 @@ export default function AdminEventsPage() {
                         onChange={(e) => setEditForm({ ...editForm, image_url: e.target.value })}
                       />
 
-                      {/* Preview de la imagen mientras editas */}
+                      {/* Preview edit */}
                       <div className="w-full h-40 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center">
                         {editForm.image_url ? (
                           <img
