@@ -1,196 +1,435 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+"use client";
 
-export const runtime = "nodejs";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const DRAFT_KEY = "tixswap_sell_draft_v1";
 
-  if (!url) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL");
-  if (!serviceKey) throw new Error("Missing env: SUPABASE_SERVICE_ROLE_KEY");
-
-  return createClient(url, serviceKey, {
-    auth: { persistSession: false },
-  });
+function normalizeEventRow(e) {
+  return {
+    id: e.id ?? e.event_id ?? e.uuid ?? e.slug ?? String(Math.random()),
+    title: e.title ?? e.name ?? e.event_name ?? e.nombre ?? "Evento sin nombre",
+    starts_at: e.starts_at ?? e.start_at ?? e.date ?? e.start_date ?? e.fecha ?? null,
+    venue: e.venue ?? e.place ?? e.location ?? e.venue_name ?? e.lugar ?? null,
+    city: e.city ?? e.ciudad ?? null,
+  };
 }
 
-async function columnExists(supabase, table, col) {
-  const { error } = await supabase.from(table).select(col).limit(1);
-  return !error;
+function formatEventDate(starts_at) {
+  if (!starts_at) return "";
+  const d = new Date(starts_at);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("es-CL", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function pickFirstDefined(obj, keys) {
-  for (const k of keys) {
-    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
-  }
-  return null;
-}
+export default function SellConfirmPage() {
+  const router = useRouter();
 
-export async function POST(req) {
-  try {
-    const supabase = getSupabaseAdmin();
+  const [draft, setDraft] = useState(null);
 
-    // ---------- AUTH ----------
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  // eventos para poder “cambiarlo si se equivocó”
+  const [events, setEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventQuery, setEventQuery] = useState("");
+  const [eventOpen, setEventOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
-    if (!token) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+  const [selectedEvent, setSelectedEvent] = useState(null);
+
+  // precio editable
+  const [price, setPrice] = useState("");
+  const [originalPrice, setOriginalPrice] = useState("");
+
+  // tipo venta (misma estructura que Paso 1)
+  const [saleType, setSaleType] = useState("fixed"); // fixed | auction (futuro)
+  const [autoEmergencyAuction, setAutoEmergencyAuction] = useState(false); // futuro (ahora disabled)
+
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState("");
+
+  // cerrar dropdown al click afuera
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!dropdownRef.current) return;
+      if (!dropdownRef.current.contains(e.target)) setEventOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  // cargar draft y validar que venga paso 2 listo
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) {
+        router.replace("/sell");
+        return;
+      }
+      const parsed = JSON.parse(raw);
+
+      // si no hay evento o no hay pdf “validado”, lo mando al paso correcto
+      if (!parsed?.event_id) {
+        router.replace("/sell");
+        return;
+      }
+      if (!parsed?.ticketUpload?.uploaded) {
+        router.replace("/sell/file");
+        return;
+      }
+
+      setDraft(parsed);
+
+      setPrice(String(parsed?.price ?? ""));
+      setOriginalPrice(parsed?.originalPrice ? String(parsed.originalPrice) : "");
+
+      setEventQuery(parsed?.event_title || "");
+
+      // mantener consistencia si el draft ya tiene tipo (para futuro)
+      if (parsed?.saleType) setSaleType(parsed.saleType);
+
+      // auto emergency (futuro)
+      if (parsed?.autoEmergencyAuction) setAutoEmergencyAuction(!!parsed.autoEmergencyAuction);
+    } catch {
+      router.replace("/sell");
+    }
+  }, [router]);
+
+  // cargar eventos
+  useEffect(() => {
+    let alive = true;
+
+    async function loadEvents() {
+      setEventsLoading(true);
+      const { data, error } = await supabase.from("events").select("*").limit(300);
+
+      if (!alive) return;
+
+      if (error) {
+        setEvents([]);
+        setEventsLoading(false);
+        return;
+      }
+
+      const normalized = (data || []).map(normalizeEventRow);
+      normalized.sort((a, b) => {
+        const ta = a.starts_at ? new Date(a.starts_at).getTime() : 0;
+        const tb = b.starts_at ? new Date(b.starts_at).getTime() : 0;
+        return ta - tb;
+      });
+
+      setEvents(normalized);
+      setEventsLoading(false);
+
+      const found = normalized.find((x) => String(x.id) === String(draft?.event_id));
+      if (found) setSelectedEvent(found);
+      else if (draft?.event_id) setSelectedEvent({ id: draft.event_id, title: draft.event_title || "Evento" });
     }
 
-    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userData?.user) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    }
-    const user = userData.user;
-
-    // ---------- BODY ----------
-    const body = await req.json().catch(() => ({}));
-
-    const event_id = body?.event_id ?? null;
-    const price = Number(body?.price);
-
-    if (!event_id) {
-      return NextResponse.json({ error: "Falta event_id" }, { status: 400 });
-    }
-    if (!Number.isFinite(price) || price <= 0) {
-      return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
-    }
-
-    const table = "tickets";
-
-    // ---------- INSERT PAYLOAD BASE ----------
-    const insertPayload = {
-      event_id,
-      price,
+    loadEvents();
+    return () => {
+      alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.event_id]);
 
-    // ---------- SELLER IDENTIDAD (lo importante) ----------
-    // Guardar seller_id SI existe la columna
-    const hasSellerId = await columnExists(supabase, table, "seller_id");
-    if (hasSellerId) insertPayload.seller_id = user.id;
+  const filteredEvents = useMemo(() => {
+    const q = (eventQuery || "").trim().toLowerCase();
+    if (!q) return events;
 
-    // Guardar seller_rut SI existe la columna y lo tenemos en profiles
-    const hasSellerRut = await columnExists(supabase, table, "seller_rut");
-    if (hasSellerRut) {
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("rut")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      // si no existe rut o falla, no reviento el publish: simplemente no lo seteo
-      if (!profErr && prof?.rut) insertPayload.seller_rut = prof.rut;
-    }
-
-    // seller_name (opcional)
-    const hasSellerName = await columnExists(supabase, table, "seller_name");
-    if (hasSellerName) {
-      const sellerName =
-        pickFirstDefined(user.user_metadata, ["name", "full_name", "nombre"]) || user.email || null;
-      if (sellerName) insertPayload.seller_name = sellerName;
-    }
-
-    // ---------- CAMPOS DEL PASO 1 (solo si existen columnas) ----------
-    const description = body?.description ?? null;
-    if (description && (await columnExists(supabase, table, "description"))) {
-      insertPayload.description = description;
-    }
-
-    const sector = body?.sector ?? null;
-    if (sector && (await columnExists(supabase, table, "sector"))) {
-      insertPayload.sector = sector;
-    }
-
-    const rowValue = body?.fila ?? body?.row ?? null;
-    if (rowValue) {
-      if (await columnExists(supabase, table, "row")) insertPayload.row = rowValue;
-      else if (await columnExists(supabase, table, "fila")) insertPayload.fila = rowValue;
-    }
-
-    const seatValue = body?.asiento ?? body?.seat ?? null;
-    if (seatValue) {
-      if (await columnExists(supabase, table, "seat")) insertPayload.seat = seatValue;
-      else if (await columnExists(supabase, table, "asiento")) insertPayload.asiento = seatValue;
-    }
-
-    // original price (opcional)
-    const originalPrice = body?.originalPrice;
-    const originalNumber =
-      originalPrice === null || originalPrice === undefined ? null : Number(originalPrice);
-
-    if (Number.isFinite(originalNumber)) {
-      if (await columnExists(supabase, table, "original_price")) insertPayload.original_price = originalNumber;
-      else if (await columnExists(supabase, table, "originalPrice")) insertPayload.originalPrice = originalNumber;
-      else if (await columnExists(supabase, table, "price_original")) insertPayload.price_original = originalNumber;
-    }
-
-    // sale type (por ahora fixed)
-    const saleType = body?.saleType || "fixed";
-    if (await columnExists(supabase, table, "sale_type")) insertPayload.sale_type = saleType;
-    else if (await columnExists(supabase, table, "saleType")) insertPayload.saleType = saleType;
-
-    // status (opcional)
-    if (await columnExists(supabase, table, "status")) insertPayload.status = "active";
-
-    // title default (si existe)
-    if (await columnExists(supabase, table, "title")) insertPayload.title = "Entrada";
-
-    // ---------- LINK PDF (paso 2) BEST-EFFORT ----------
-    const tu = body?.ticketUpload || {};
-    const ticketUploadId = tu?.ticketUploadId ?? tu?.id ?? null;
-    const storagePath = tu?.filePath ?? tu?.storagePath ?? null;
-    const fileHash = tu?.sha256 ?? tu?.fileHash ?? null;
-
-    if (ticketUploadId) {
-      if (await columnExists(supabase, table, "ticket_upload_id")) insertPayload.ticket_upload_id = ticketUploadId;
-      else if (await columnExists(supabase, table, "ticket_uploads_id")) insertPayload.ticket_uploads_id = ticketUploadId;
-      else if (await columnExists(supabase, table, "upload_id")) insertPayload.upload_id = ticketUploadId;
-    }
-
-    if (storagePath) {
-      if (await columnExists(supabase, table, "ticket_pdf_path")) insertPayload.ticket_pdf_path = storagePath;
-      else if (await columnExists(supabase, table, "storage_path")) insertPayload.storage_path = storagePath;
-      else if (await columnExists(supabase, table, "pdf_path")) insertPayload.pdf_path = storagePath;
-    }
-
-    if (fileHash) {
-      if (await columnExists(supabase, table, "file_hash")) insertPayload.file_hash = fileHash;
-      else if (await columnExists(supabase, table, "sha256")) insertPayload.sha256 = fileHash;
-      else if (await columnExists(supabase, table, "pdf_hash")) insertPayload.pdf_hash = fileHash;
-    }
-
-    const isNominada = !!tu?.isNominada || !!tu?.isNominated;
-    if (await columnExists(supabase, table, "is_nominada")) insertPayload.is_nominada = isNominada;
-    else if (await columnExists(supabase, table, "isNominada")) insertPayload.isNominada = isNominada;
-
-    // ---------- INSERT ----------
-    const { data: inserted, error: insErr } = await supabase
-      .from(table)
-      .insert(insertPayload)
-      .select("id, event_id, seller_id, seller_rut")
-      .single();
-
-    if (insErr) {
-      return NextResponse.json(
-        { error: "DB insert error", details: insErr.message, payload_keys: Object.keys(insertPayload) },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      ticket_id: inserted.id,
-      event_id: inserted.event_id,
-      seller_id: inserted.seller_id ?? null,
-      seller_rut: inserted.seller_rut ?? null,
+    return events.filter((ev) => {
+      const hay = `${ev.title ?? ""} ${ev.venue ?? ""} ${ev.city ?? ""}`.toLowerCase();
+      return hay.includes(q);
     });
-  } catch (e) {
-    return NextResponse.json(
-      { error: "Server error", details: e?.message || String(e) },
-      { status: 500 }
-    );
+  }, [events, eventQuery]);
+
+  function selectEvent(ev) {
+    setSelectedEvent(ev);
+    setEventQuery(ev.title ?? "");
+    setEventOpen(false);
+
+    const nextDraft = {
+      ...(draft || {}),
+      event_id: ev.id,
+      event_title: ev.title || null,
+    };
+    setDraft(nextDraft);
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(nextDraft));
   }
+
+  // helpers de estilos (igual que Paso 1)
+  const cardBase = "rounded-2xl border p-5 transition";
+  const selectedCard = "border-blue-500 bg-blue-50 ring-4 ring-blue-100";
+  const normalCard = "border-slate-200 bg-white";
+  const disabledCard = "border-slate-200 bg-slate-50 opacity-70 cursor-not-allowed";
+
+  const canPublish = useMemo(() => {
+    const p = Number(String(price).replace(/[^\d]/g, ""));
+    return !!selectedEvent?.id && Number.isFinite(p) && p > 0 && !publishing;
+  }, [selectedEvent?.id, price, publishing]);
+
+  async function handlePublish() {
+    setError("");
+    if (!draft) return;
+    if (!canPublish) return;
+
+    setPublishing(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) {
+        router.replace(`/login?redirectTo=${encodeURIComponent("/sell/confirm")}`);
+        return;
+      }
+
+      const payload = {
+        event_id: selectedEvent?.id,
+        price: Number(String(price).replace(/[^\d]/g, "")),
+        originalPrice: originalPrice ? Number(String(originalPrice).replace(/[^\d]/g, "")) : null,
+
+        // tipo de venta (por ahora fixed)
+        saleType: saleType || "fixed",
+        autoEmergencyAuction: autoEmergencyAuction || false,
+
+        // paso 1
+        description: draft?.description || null,
+        sector: draft?.sector || null,
+        fila: draft?.fila || null,
+        asiento: draft?.asiento || null,
+
+        // paso 2 (pdf)
+        ticketUpload: draft?.ticketUpload || null,
+      };
+
+      const res = await fetch("/api/tickets/publish", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      // para que te muestre errores reales si fallara
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {}
+
+      if (!res.ok) {
+        setError(
+          data?.details
+            ? `${data.error}: ${data.details}`
+            : (data?.error || raw?.slice(0, 180) || "No se pudo publicar.")
+        );
+        return;
+      }
+
+      localStorage.removeItem(DRAFT_KEY);
+      router.push(`/events/${data?.event_id || selectedEvent.id}`);
+    } catch (e) {
+      setError(e?.message || "No se pudo publicar.");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  function handleBack() {
+    router.push("/sell/file");
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="mx-auto max-w-5xl px-4 py-10">
+        <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+          {/* Stepper */}
+          <div className="rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 px-6 py-6 text-white">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 opacity-80">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 font-semibold">1</div>
+                <div className="font-semibold">Detalles</div>
+              </div>
+              <div className="h-[2px] flex-1 bg-white/30" />
+              <div className="flex items-center gap-3 opacity-80">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 font-semibold">2</div>
+                <div className="font-semibold">Archivo</div>
+              </div>
+              <div className="h-[2px] flex-1 bg-white/30" />
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white font-semibold text-slate-900">
+                  3
+                </div>
+                <div className="font-semibold">Confirmar</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <h1 className="text-3xl font-bold text-slate-900">Confirmar publicación</h1>
+            <p className="mt-2 text-slate-600">Revisa el evento, ajusta el precio y publica tu entrada.</p>
+
+            {/* Evento (editable) */}
+            <div className="mt-8">
+              <label className="text-sm font-medium text-slate-700">Evento asociado</label>
+
+              <div className="relative mt-2" ref={dropdownRef}>
+                <input
+                  className="tix-input w-full"
+                  value={eventQuery}
+                  onChange={(e) => {
+                    setEventQuery(e.target.value);
+                    setEventOpen(true);
+                  }}
+                  onFocus={() => setEventOpen(true)}
+                  placeholder={eventsLoading ? "Cargando eventos..." : "Busca y selecciona un evento"}
+                  disabled={eventsLoading}
+                />
+
+                {eventOpen && !eventsLoading ? (
+                  <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+                    <div className="max-h-72 overflow-auto">
+                      {filteredEvents.length === 0 ? (
+                        <div className="px-4 py-3 text-sm text-slate-600">No hay resultados.</div>
+                      ) : (
+                        filteredEvents.slice(0, 80).map((ev) => (
+                          <button
+                            key={String(ev.id)}
+                            type="button"
+                            className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                            onClick={() => selectEvent(ev)}
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate font-semibold text-slate-900">{ev.title}</div>
+                              <div className="mt-0.5 text-xs text-slate-500">
+                                {formatEventDate(ev.starts_at)}
+                                {ev.venue ? ` • ${ev.venue}` : ""}
+                                {ev.city ? ` • ${ev.city}` : ""}
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              {selectedEvent?.id ? (
+                <div className="mt-2 text-xs text-slate-500">
+                  Seleccionado: <span className="font-semibold text-slate-700">{selectedEvent.title}</span>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Precio (editable) */}
+            <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium text-slate-700">
+                  Precio de venta <span className="text-red-500">*</span>
+                </label>
+                <input
+                  className="tix-input mt-2"
+                  inputMode="numeric"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ""))}
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Precio original (opcional)</label>
+                <input
+                  className="tix-input mt-2"
+                  inputMode="numeric"
+                  value={originalPrice}
+                  onChange={(e) => setOriginalPrice(e.target.value.replace(/[^\d]/g, ""))}
+                />
+              </div>
+            </div>
+
+            {/* ✅ Tipo de venta (igual que Paso 1) */}
+            <div className="mt-8">
+              <div className="text-sm font-medium text-slate-700">Tipo de venta</div>
+
+              <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                {/* Precio fijo (seleccionable) */}
+                <button
+                  type="button"
+                  className={`${cardBase} ${saleType === "fixed" ? selectedCard : normalCard} text-left`}
+                  onClick={() => setSaleType("fixed")}
+                >
+                  <div className="font-semibold text-slate-900">Precio fijo</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Vende inmediatamente al precio que estableciste
+                  </div>
+                </button>
+
+                {/* Subasta (deshabilitada por ahora) */}
+                <div className={`${cardBase} ${disabledCard}`}>
+                  <div className="flex items-center gap-2 font-semibold text-slate-900">
+                    Subasta
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                      Se viene pronto
+                    </span>
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Podrás elegir entre dos tipos de subasta (próximamente).
+                  </div>
+                </div>
+              </div>
+
+              {/* Bloque amarillo (igual que Paso 1) */}
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4"
+                    checked={autoEmergencyAuction}
+                    onChange={(e) => setAutoEmergencyAuction(e.target.checked)}
+                    disabled={true} // deshabilitado por ahora
+                  />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 font-semibold text-amber-900">
+                      Subasta automática de emergencia
+                      <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                        Se viene pronto
+                      </span>
+                    </div>
+                    <div className="mt-1 text-sm text-amber-900/80">
+                      Si mi entrada no se vende, permitir que se active automáticamente una subasta 2 horas antes del evento.
+                      Los compradores podrán pujar y se enviará un email a cada uno cuando sea superado.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Acciones */}
+            <div className="mt-10 flex items-center justify-between">
+              <button type="button" className="tix-btn-secondary" onClick={handleBack} disabled={publishing}>
+                Volver
+              </button>
+
+              <button
+                type="button"
+                className="tix-btn-primary"
+                onClick={handlePublish}
+                disabled={!canPublish}
+                title={!canPublish ? "Revisa evento + precio" : ""}
+              >
+                {publishing ? "Publicando..." : "Publicar"}
+              </button>
+            </div>
+
+            {error ? (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
