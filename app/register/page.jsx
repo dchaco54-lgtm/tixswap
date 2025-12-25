@@ -35,9 +35,7 @@ export default function RegisterPage() {
   };
 
   const handleRutChange = (e) => {
-    const value = e.target.value;
-    // Deja que escriba libre, pero normaliza al vuelo para evitar formatos raros
-    setFormData((prev) => ({ ...prev, rut: value }));
+    setFormData((prev) => ({ ...prev, rut: e.target.value }));
   };
 
   const handleSubmit = async (e) => {
@@ -52,40 +50,21 @@ export default function RegisterPage() {
     const password = formData.password;
     const confirmPassword = formData.confirmPassword;
 
-    if (!name) {
-      setError("Debes ingresar tu nombre completo.");
-      return;
-    }
-
-    if (!isValidRut(rutNormalized)) {
-      setError("El RUT ingresado no es válido. Revisa el formato y dígito verificador.");
-      return;
-    }
-
-    if (!email) {
-      setError("Debes ingresar un correo electrónico.");
-      return;
-    }
-
-    if (!phone) {
-      setError("Debes ingresar un teléfono.");
-      return;
-    }
-
-    if (!password || password.length < 6) {
-      setError("La contraseña debe tener al menos 6 caracteres.");
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setError("Las contraseñas no coinciden.");
-      return;
-    }
-
-    if (!acceptedTerms) {
-      setError("Debes aceptar los Términos y Condiciones para crear tu cuenta.");
-      return;
-    }
+    if (!name) return setError("Debes ingresar tu nombre completo.");
+    if (!isValidRut(rutNormalized))
+      return setError(
+        "El RUT ingresado no es válido. Revisa el formato y dígito verificador."
+      );
+    if (!email) return setError("Debes ingresar un correo electrónico.");
+    if (!phone) return setError("Debes ingresar un teléfono.");
+    if (!password || password.length < 6)
+      return setError("La contraseña debe tener al menos 6 caracteres.");
+    if (password !== confirmPassword)
+      return setError("Las contraseñas no coinciden.");
+    if (!acceptedTerms)
+      return setError(
+        "Debes aceptar los Términos y Condiciones para crear tu cuenta."
+      );
 
     setLoading(true);
 
@@ -98,12 +77,15 @@ export default function RegisterPage() {
           email,
           password,
           options: {
-            // OJO: mantenemos /login porque en tu proyecto es donde el usuario sigue el flujo
             emailRedirectTo: `${origin}/login`,
             data: {
-              full_name: name,
+              // 👇 COMPAT: algunos triggers buscan "name", otros "full_name"
+              name,                // ✅ para triggers antiguos
+              full_name: name,     // ✅ para triggers nuevos
+
               rut: rutNormalized,
               phone,
+
               accepted_terms: true,
               accepted_terms_at: new Date().toISOString(),
               accepted_terms_version: "1.0",
@@ -114,26 +96,28 @@ export default function RegisterPage() {
       );
 
       if (signUpError) {
+        console.error("Supabase signUpError:", signUpError);
         setError(signUpError.message || "No se pudo crear la cuenta.");
         return;
       }
 
-      // Supabase normalmente no crea sesión hasta que confirma email (según tu config)
-      // Así que lo correcto es mostrar “revisa tu correo”
+      console.log("Supabase signUp ok:", data);
+
       setSuccess(
         "Cuenta creada ✅ Revisa tu correo para confirmar tu email antes de iniciar sesión."
       );
 
-      // Limpia password para evitar que quede guardada en pantalla
       setFormData((prev) => ({
         ...prev,
         password: "",
         confirmPassword: "",
       }));
     } catch (err) {
+      console.error("Register unexpected error:", err);
+
       if (err?.message === "timeout") {
         setError(
-          "La solicitud se demoró demasiado (timeout). Revisa tu conexión o la configuración de Supabase (Redirect URLs) e inténtalo de nuevo."
+          "La solicitud se demoró demasiado (timeout). Revisa tu conexión o configuración de Supabase y reintenta."
         );
       } else {
         setError("Ocurrió un error inesperado. Inténtalo nuevamente.");
@@ -243,7 +227,6 @@ export default function RegisterPage() {
             />
           </div>
 
-          {/* Términos */}
           <div className="pt-1">
             <label className="flex items-start gap-2 text-sm text-gray-700">
               <input
