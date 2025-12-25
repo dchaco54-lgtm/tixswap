@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Categories() {
   return (
     <section className="py-20 px-6 text-center">
@@ -15,7 +17,7 @@ export default function Categories() {
 
           <h3 className="text-xl font-bold mt-6">Pago Protegido</h3>
           <p className="text-gray-600 mt-3 leading-relaxed">
-            Compra con confianza. Retenemos tu dinero hasta que confirmes que recibiste tu entrada.
+            Compra con confianza. Retenemos tu dinero hasta que tu compra esté confirmada según nuestras reglas de seguridad.
             Si hay problemas, te devolvemos el 100%.
           </p>
         </div>
@@ -30,7 +32,7 @@ export default function Categories() {
 
           <h3 className="text-xl font-bold mt-6">Usuarios Verificados</h3>
           <p className="text-gray-600 mt-3 leading-relaxed">
-            Todos los usuarios pasan por una validación de identidad.
+            Todos los usuarios pasan por validación de identidad para reducir cuentas falsas y estafas.
           </p>
         </div>
 
@@ -44,13 +46,21 @@ export default function Categories() {
 
           <h3 className="text-xl font-bold mt-6">Chat Integrado</h3>
           <p className="text-gray-600 mt-3 leading-relaxed">
-            Para entradas nominadas, chatea directamente con el vendedor para coordinar el cambio de nombre y entrega segura.
+            Para entradas nominadas, chatea con el vendedor para coordinar el cambio de nombre y una entrega segura.
           </p>
         </div>
 
       </div>
+
+      {/* Saber más (NO rompe el layout, va justo donde marcaste en rojo) */}
+      <div className="max-w-6xl mx-auto mt-10 flex justify-end">
+        <Link href="/how-it-works" className="tix-link">
+          Saber más →
+        </Link>
+      </div>
     </section>
   );
 }
+
 
 
