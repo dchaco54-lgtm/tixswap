@@ -106,7 +106,7 @@ export default function Footer() {
             <Item onClick={() => router.push("/legal/security")}>
               Seguridad y antifraude
             </Item>
-            <Item muted>Términos (pronto)</Item>
+            <Item onClick={() => router.push("/legal/terms")}>Términos y condiciones</Item>
           </div>
         </div>
       </div>
