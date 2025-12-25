@@ -1,64 +1,10 @@
-// app/register/page.jsx
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
-
-// ----------------- Helpers RUT -----------------
-
-function normalizeRut(raw) {
-  if (!raw) return "";
-  const clean = raw.replace(/\./g, "").replace(/-/g, "").toUpperCase();
-  const body = clean.slice(0, -1);
-  const dv = clean.slice(-1);
-  return `${body}-${dv}`;
-}
-
-function isValidRut(raw) {
-  if (!raw) return false;
-
-  const clean = raw.replace(/\./g, "").replace(/-/g, "").toUpperCase();
-
-  // Largo razonable
-  if (clean.length < 7 || clean.length > 9) return false;
-
-  const body = clean.slice(0, -1);
-  const dv = clean.slice(-1);
-
-  // Cuerpo sólo números
-  if (!/^\d+$/.test(body)) return false;
-
-  // ❗Bloque extra anti-RUT trucho:
-  const allSameDigit = new Set(body.split("")).size === 1;
-  const blacklistedBodies = ["12345678", "87654321"];
-
-  if (allSameDigit || blacklistedBodies.includes(body)) {
-    return false;
-  }
-
-  // Cálculo dígito verificador (módulo 11)
-  let sum = 0;
-  let multiplier = 2;
-
-  for (let i = body.length - 1; i >= 0; i--) {
-    sum += parseInt(body[i], 10) * multiplier;
-    multiplier = multiplier === 7 ? 2 : multiplier + 1;
-  }
-
-  const remainder = sum % 11;
-  const calc = 11 - remainder;
-
-  let dvCalc;
-  if (calc === 11) dvCalc = "0";
-  else if (calc === 10) dvCalc = "K";
-  else dvCalc = String(calc);
-
-  return dvCalc === dv;
-}
-
-// ----------------- Página -----------------
+import { validateRut, formatRut, cleanRut } from "../lib/rutUtils";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -68,7 +14,7 @@ export default function RegisterPage() {
     rut: "",
     email: "",
     phone: "",
-    userType: "Usuario general",
+    userType: "Comprador frecuente",
     password: "",
     passwordConfirm: "",
   });
@@ -76,12 +22,20 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
-  const handleChange = (field) => (e) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: e.target.value,
-    }));
+  const handleChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleRutBlur = () => {
+    const raw = form.rut.trim();
+    if (!raw) return;
+
+    const cleaned = cleanRut(raw);
+    if (!validateRut(cleaned)) return;
+
+    setForm((prev) => ({ ...prev, rut: formatRut(cleaned) }));
   };
 
   const handleSubmit = async (e) => {
@@ -89,146 +43,131 @@ export default function RegisterPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
-    const {
-      fullName,
-      rut,
-      email,
-      phone,
-      userType,
-      password,
-      passwordConfirm,
-    } = form;
+    const fullName = form.fullName.trim();
+    const rut = form.rut.trim();
+    const email = form.email.trim();
+    const phone = form.phone.trim();
+    const userType = form.userType;
 
-    // Validaciones básicas
     if (
-      !fullName.trim() ||
-      !rut.trim() ||
-      !email.trim() ||
-      !phone.trim() ||
-      !password ||
-      !passwordConfirm
+      !fullName ||
+      !rut ||
+      !email ||
+      !phone ||
+      !form.password ||
+      !form.passwordConfirm
     ) {
       setErrorMessage("Por favor completa todos los campos.");
       return;
     }
 
-    if (password.length < 6) {
+    if (!acceptTerms) {
+      setErrorMessage(
+        "Debes aceptar los Términos y Condiciones para crear tu cuenta."
+      );
+      return;
+    }
+
+    const cleanedRut = cleanRut(rut);
+    if (!validateRut(cleanedRut)) {
+      setErrorMessage("El RUT no es válido. Revisa el formato y el dígito verificador.");
+      return;
+    }
+
+    if (form.password.length < 6) {
       setErrorMessage("La contraseña debe tener al menos 6 caracteres.");
       return;
     }
 
-    if (password !== passwordConfirm) {
+    if (form.password !== form.passwordConfirm) {
       setErrorMessage("Las contraseñas no coinciden.");
       return;
     }
 
-    if (!isValidRut(rut)) {
-      setErrorMessage("El RUT ingresado no es válido.");
-      return;
-    }
-
-    const normalizedRut = normalizeRut(rut);
+    setLoading(true);
 
     try {
-      setLoading(true);
-
       const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
+        email,
+        password: form.password,
         options: {
           data: {
-            full_name: fullName.trim(),
-            rut: normalizedRut,
-            phone: phone.trim(),
-            userType,
+            full_name: fullName,
+            rut: cleanedRut, // guardamos limpio para consistencia
+            phone,
+            user_type: userType,
+
+            // ✅ consentimiento T&C (importante para respaldo)
+            accepted_terms: true,
+            accepted_terms_at: new Date().toISOString(),
+            terms_version: "v1",
           },
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/login`
-              : undefined,
         },
       });
 
-      if (error) {
-        const msg = (error.message || "").toLowerCase();
+      if (error) throw error;
 
-        if (msg.includes("already registered")) {
-          setErrorMessage(
-            "Este correo ya tiene una cuenta en TixSwap. Intenta iniciar sesión o recupera tu contraseña."
-          );
-        } else {
-          setErrorMessage(
-            "Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente."
-          );
-        }
-        return;
-      }
-
-      if (data?.user) {
-        setSuccessMessage(
-          "Cuenta creada correctamente. Te enviamos un correo para confirmar tu cuenta. Revisa tu bandeja de entrada o spam."
-        );
-
-        setForm({
-          fullName: "",
-          rut: "",
-          email: "",
-          phone: "",
-          userType: "Usuario general",
-          password: "",
-          passwordConfirm: "",
-        });
-
-        // Si quieres redirigir automáticamente después:
-        // setTimeout(() => router.push("/login"), 4000);
-      }
-    } catch (err) {
-      console.error(err);
-      setErrorMessage(
-        "Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente."
+      setSuccessMessage(
+        "Cuenta creada ✅ Revisa tu correo para confirmar tu cuenta (si aplica)."
       );
+
+      // Si tu flujo actual no requiere confirmación, puedes redirigir
+      setTimeout(() => {
+        router.push("/login");
+      }, 900);
+    } catch (err) {
+      setErrorMessage(err?.message || "Ocurrió un error al crear la cuenta.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Barra arriba para volver al inicio */}
-      <div className="w-full max-w-5xl mx-auto px-4 pt-4 flex items-center justify-between">
-        <Link
-          href="/"
-          className="inline-flex items-center text-sm text-slate-600 hover:text-slate-900"
-        >
-          <span className="mr-1">←</span>
-          Volver al inicio
-        </Link>
-        <Link href="/" className="text-lg font-bold text-blue-600">
-          TixSwap
-        </Link>
-      </div>
+    <div className="min-h-screen bg-white">
+      {/* Header simple */}
+      <header className="w-full border-b bg-white">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2">
+            <span className="text-xl font-semibold text-blue-600">TixSwap</span>
+            <span className="text-sm text-gray-500">Reventa segura, en un clic</span>
+          </Link>
 
-      {/* Contenido centrado */}
-      <div className="flex-1 flex items-center justify-center px-4 pb-10">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8">
-          <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-            Crear cuenta
-          </h1>
-          <p className="text-sm text-gray-500 mb-6">
-            Regístrate para comprar y vender entradas en TixSwap.
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="px-4 py-2 rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+            >
+              Iniciar sesión
+            </Link>
+            <Link
+              href="/register"
+              className="px-4 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Crear cuenta
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {/* Contenido */}
+      <main className="max-w-6xl mx-auto px-6 py-10 flex justify-center">
+        <div className="w-full max-w-md bg-white border border-gray-100 rounded-2xl shadow-sm p-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">Crear cuenta</h1>
+          <p className="text-gray-500 mb-6">
+            Regístrate para comprar y vender entradas de forma segura.
           </p>
 
-          {errorMessage && (
-            <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+          {errorMessage ? (
+            <div className="mb-4 rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-red-700 text-sm">
               {errorMessage}
             </div>
-          )}
+          ) : null}
 
-          {successMessage && (
-            <div className="mb-4 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
+          {successMessage ? (
+            <div className="mb-4 rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-green-700 text-sm">
               {successMessage}
             </div>
-          )}
+          ) : null}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Nombre */}
@@ -238,10 +177,10 @@ export default function RegisterPage() {
               </label>
               <input
                 type="text"
-                placeholder="Ej: Juan Pérez"
+                placeholder="Ej: David Chacón"
                 value={form.fullName}
-                onChange={handleChange("fullName")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={(e) => handleChange("fullName", e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </div>
 
@@ -252,28 +191,28 @@ export default function RegisterPage() {
               </label>
               <input
                 type="text"
-                placeholder="12345678-9"
+                placeholder="Ej: 12.345.678-9"
                 value={form.rut}
-                onChange={handleChange("rut")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={(e) => handleChange("rut", e.target.value)}
+                onBlur={handleRutBlur}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
-              <p className="mt-1 text-xs text-gray-400">
-                Validaremos que el RUT sea correcto (incluyendo dígito
-                verificador).
+              <p className="mt-1 text-xs text-gray-500">
+                Validaremos que el RUT sea correcto (incluyendo dígito verificador).
               </p>
             </div>
 
-            {/* Correo */}
+            {/* Email */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Correo electrónico
               </label>
               <input
                 type="email"
-                placeholder="tu@email.com"
+                placeholder="tucorreo@gmail.com"
                 value={form.email}
-                onChange={handleChange("email")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={(e) => handleChange("email", e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </div>
 
@@ -286,25 +225,24 @@ export default function RegisterPage() {
                 type="tel"
                 placeholder="+569..."
                 value={form.phone}
-                onChange={handleChange("phone")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={(e) => handleChange("phone", e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </div>
 
-            {/* Tipo de usuario */}
+            {/* Tipo */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Tipo de usuario
               </label>
               <select
                 value={form.userType}
-                onChange={handleChange("userType")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                onChange={(e) => handleChange("userType", e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
               >
-                <option value="Usuario general">Usuario general</option>
-                <option value="Comprador frecuente">Comprador frecuente</option>
-                <option value="Vendedor frecuente">Vendedor frecuente</option>
-                <option value="Promotor de eventos">Promotor de eventos</option>
+                <option>Comprador frecuente</option>
+                <option>Vendedor frecuente</option>
+                <option>Ambos (comprar y vender)</option>
               </select>
             </div>
 
@@ -317,8 +255,8 @@ export default function RegisterPage() {
                 type="password"
                 placeholder="********"
                 value={form.password}
-                onChange={handleChange("password")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={(e) => handleChange("password", e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </div>
 
@@ -331,31 +269,62 @@ export default function RegisterPage() {
                 type="password"
                 placeholder="********"
                 value={form.passwordConfirm}
-                onChange={handleChange("passwordConfirm")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={(e) => handleChange("passwordConfirm", e.target.value)}
+                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
+            </div>
+
+            {/* ✅ Términos y condiciones (OBLIGATORIO) */}
+            <div className="pt-1">
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={acceptTerms}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAcceptTerms(checked);
+                    if (checked) setErrorMessage("");
+                  }}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-200"
+                />
+                <span className="text-sm text-gray-700 leading-5">
+                  He leído y acepto los{" "}
+                  <Link
+                    href="/legal/terms"
+                    target="_blank"
+                    className="text-blue-600 hover:underline font-medium"
+                  >
+                    Términos y Condiciones
+                  </Link>{" "}
+                  de TixSwap.
+                </span>
+              </label>
+              <p className="mt-2 text-xs text-gray-500">
+                Si no aceptas los Términos, no podrás crear tu cuenta.
+              </p>
             </div>
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={loading || !acceptTerms}
+              className={`w-full rounded-xl px-4 py-3 font-semibold text-white transition ${
+                loading || !acceptTerms
+                  ? "bg-blue-300 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
             >
-              {loading ? "Creando cuenta..." : "Crear cuenta"}
+              {loading ? "Creando..." : "Crear cuenta"}
             </button>
-          </form>
 
-          <p className="mt-6 text-center text-sm text-gray-500">
-            ¿Ya tienes cuenta?{" "}
-            <Link
-              href="/login"
-              className="text-blue-600 hover:text-blue-700 font-medium"
-            >
-              Iniciar sesión
-            </Link>
-          </p>
+            <p className="text-sm text-gray-600 text-center">
+              ¿Ya tienes cuenta?{" "}
+              <Link href="/login" className="text-blue-600 hover:underline">
+                Iniciar sesión
+              </Link>
+            </p>
+          </form>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
