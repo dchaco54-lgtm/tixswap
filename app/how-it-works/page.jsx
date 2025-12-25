@@ -2,263 +2,305 @@ import Link from "next/link";
 
 export const metadata = {
   title: "Cómo funciona | TixSwap",
-  description: "Reglas y flujo completo de seguridad de TixSwap (pago protegido, validación de tickets y soporte).",
+  description:
+    "Reglas y flujo completo de seguridad de TixSwap (pago protegido, validación de tickets y soporte).",
 };
 
 function SectionTitle({ title, subtitle }) {
   return (
     <div className="mb-6">
       <h2 className="text-2xl md:text-3xl font-bold text-slate-900">{title}</h2>
-      {subtitle ? <p className="mt-2 text-slate-600">{subtitle}</p> : null}
+      {subtitle ? (
+        <p className="mt-2 text-slate-600 leading-relaxed">{subtitle}</p>
+      ) : null}
     </div>
   );
 }
 
 function Card({ title, children }) {
   return (
-    <div className="tix-card p-6 md:p-8">
-      <h3 className="text-lg md:text-xl font-bold text-slate-900">{title}</h3>
-      <div className="mt-3 text-slate-600 leading-relaxed">{children}</div>
+    <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+      {title ? (
+        <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+      ) : null}
+      <div className={title ? "mt-3 text-slate-700" : "text-slate-700"}>
+        {children}
+      </div>
     </div>
+  );
+}
+
+function Bullet({ children }) {
+  return (
+    <li className="flex gap-2">
+      <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-600" />
+      <span className="leading-relaxed">{children}</span>
+    </li>
   );
 }
 
 export default function HowItWorksPage() {
   return (
-    <main className="tix-container tix-section">
-      {/* Hero */}
-      <section className="text-center">
-        <h1 className="tix-title">¿Cómo funciona TixSwap?</h1>
-        <p className="tix-subtitle max-w-3xl mx-auto">
-          TixSwap está diseñado para que puedas comprar y vender entradas de forma segura: validamos usuarios, validamos tickets,
-          protegemos el pago y tenemos un canal de soporte ante cualquier problema.
+    <div className="tix-container tix-section">
+      <div className="max-w-4xl">
+        <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
+          Cómo funciona TixSwap
+        </h1>
+        <p className="mt-3 text-slate-600 leading-relaxed">
+          En TixSwap cuidamos tanto al comprador como al vendedor. Nuestro modelo
+          está pensado para que la reventa sea segura: el pago se protege, el
+          acceso se valida y, si algo falla, el soporte entra como intermediario.
         </p>
 
-        <div className="mt-6 flex items-center justify-center gap-2">
-          <Link href="/events" className="tix-btn-primary">
-            Ver eventos
-          </Link>
-          <Link href="/sell" className="tix-btn-secondary">
-            Publicar entrada
-          </Link>
-        </div>
-      </section>
-
-      {/* Resumen rápido */}
-      <section className="mt-10 grid gap-6 md:grid-cols-3">
-        <Card title="1) Registro seguro (Nombre + RUT)">
-          Registras tu cuenta con <b>nombre y RUT</b>. Validamos que el RUT sea válido y que <b>no exista duplicado</b> en TixSwap.
-          Esto reduce cuentas falsas y mejora la confianza.
-        </Card>
-
-        <Card title="2) Ticket validado (PDF)">
-          Al publicar una entrada, validamos que sea <b>PDF</b> y que cumpla requisitos técnicos (estructura/códigos/QR).
-          Además, generamos un <b>registro interno</b> para impedir que el mismo ticket se publique más de una vez.
-        </Card>
-
-        <Card title="3) Pago protegido (retención + liberación)">
-          El comprador paga y el dinero se <b>retiene</b>. El pago se libera al vendedor solo cuando se cumplen las reglas:
-          <b> 48 horas post evento</b> y <b>sin disputa</b>.
-        </Card>
-      </section>
-
-      {/* Registro */}
-      <section className="mt-14">
-        <SectionTitle
-          title="Registro y validación de identidad"
-          subtitle="Una cuenta = una identidad. Esto hace que el marketplace sea más seguro para todos."
-        />
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card title="Qué pedimos">
-            <ul className="list-disc pl-5 space-y-2">
-              <li><b>Nombre</b> y <b>RUT</b> (para identificar al usuario).</li>
-              <li>Validamos que el <b>RUT sea válido</b> (formato y dígito verificador).</li>
-              <li>Bloqueamos la <b>duplicidad</b>: si el RUT ya existe, no se puede registrar nuevamente.</li>
+        <div className="mt-8 grid grid-cols-1 gap-5">
+          <Card title="1) Publicación de la entrada (vendedor)">
+            <ul className="space-y-2">
+              <Bullet>
+                El vendedor elige el evento y publica su entrada en TixSwap.
+              </Bullet>
+              <Bullet>
+                Se recomienda subir evidencia: PDF/QR, comprobante, o lo que
+                acredite legitimidad.
+              </Bullet>
+              <Bullet>
+                Para recibir pagos, el vendedor debe tener su <b>Wallet</b>{" "}
+                configurada (datos bancarios).
+              </Bullet>
             </ul>
           </Card>
 
-          <Card title="Por qué importa">
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Menos cuentas falsas / suplantaciones.</li>
-              <li>Mejor trazabilidad si hay reclamos.</li>
-              <li>Facilita la seguridad en pagos y retiros (wallet).</li>
+          <Card title="2) Compra protegida (comprador)">
+            <ul className="space-y-2">
+              <Bullet>El comprador paga dentro de TixSwap.</Bullet>
+              <Bullet>
+                El pago queda protegido (retenido) hasta que se confirme que el
+                ticket funcionó.
+              </Bullet>
+              <Bullet>
+                Si el ticket se usa sin problemas, el proceso avanza a la
+                liberación de pago.
+              </Bullet>
             </ul>
           </Card>
-        </div>
-      </section>
 
-      {/* Publicar ticket */}
-      <section className="mt-14">
-        <SectionTitle
-          title="Publicación de entradas (venta)"
-          subtitle="Publicar es simple, pero con validaciones internas para evitar tickets falsos o duplicados."
-        />
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card title="Validaciones del PDF">
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Solo aceptamos <b>PDF</b>.</li>
-              <li>Validamos que el ticket tenga <b>códigos/QR</b> y estructura esperada.</li>
-              <li>Detectamos inconsistencias para reducir tickets alterados.</li>
-              <li>Se genera un <b>registro interno</b> para que el mismo ticket no se vuelva a subir.</li>
+          <Card title="3) Validación de acceso (día del evento)">
+            <ul className="space-y-2">
+              <Bullet>
+                Si el comprador entra correctamente, se marca la operación como
+                exitosa.
+              </Bullet>
+              <Bullet>
+                Si hay un problema real (QR inválido, ya usado, etc.), se abre
+                una disputa.
+              </Bullet>
             </ul>
-            <p className="mt-3 text-sm text-slate-500">
-              Nota: la validación exacta depende del formato del ticket y proveedor. Si tu PDF no cumple, te lo avisamos.
-            </p>
           </Card>
 
-          <Card title="Entradas nominadas vs no nominadas">
-            <ul className="list-disc pl-5 space-y-2">
-              <li><b>No nominadas</b>: normalmente la entrega es digital (el ticket) según la forma que defina el flujo.</li>
-              <li><b>Nominadas</b>: habilitamos coordinación entre comprador y vendedor para gestionar el <b>cambio de nombre</b>.</li>
-              <li>En nominadas, el <b>chat</b> ayuda a dejar registro y ordenar la coordinación.</li>
+          <Card title="4) Pago al vendedor">
+            <ul className="space-y-2">
+              <Bullet>
+                Una vez validada la operación, TixSwap libera el pago al vendedor
+                (según sus datos de Wallet).
+              </Bullet>
+              <Bullet>
+                La comisión se descuenta automáticamente según el tipo de usuario
+                del vendedor.
+              </Bullet>
             </ul>
           </Card>
         </div>
-      </section>
 
-      {/* Pago protegido */}
-      <section className="mt-14">
-        <SectionTitle
-          title="Pago protegido y liberación al vendedor"
-          subtitle="El corazón de TixSwap: el dinero se retiene para proteger al comprador y se libera con reglas claras."
-        />
+        {/* =========================
+            TIPOS DE USUARIO
+           ========================= */}
+        <div className="mt-12">
+          <SectionTitle
+            title="Tipos de usuario y comisiones"
+            subtitle="La comisión se aplica principalmente al VENDEDOR (quien recibe el pago). Los roles están pensados para premiar el uso constante sin regalar margen demasiado rápido."
+          />
 
-        <div className="tix-card p-6 md:p-8">
-          <h3 className="text-lg md:text-xl font-bold text-slate-900">Reglas de liberación del pago</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <Card title="Básico — 3,5% comisión">
+              <p className="leading-relaxed">
+                Es el rol por defecto. Ideal para usuarios que están partiendo o
+                venden/compran ocasionalmente.
+              </p>
+              <p className="mt-3 text-sm text-slate-500">
+                Ejemplo: entrada $35.000 → comisión $1.225.
+              </p>
+            </Card>
 
-          <ol className="mt-4 space-y-3">
-            <li className="flex gap-3">
-              <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-semibold">1</span>
-              <div className="text-slate-600">
-                El comprador paga en TixSwap y el dinero queda <b>retenido</b> (pago protegido).
-              </div>
-            </li>
-            <li className="flex gap-3">
-              <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-semibold">2</span>
-              <div className="text-slate-600">
-                Se concreta la entrega/uso de la entrada según el tipo (nominada/no nominada).
-              </div>
-            </li>
-            <li className="flex gap-3">
-              <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-semibold">3</span>
-              <div className="text-slate-600">
-                El pago se libera al vendedor <b>48 horas después del evento</b>, siempre que <b>no exista disputa</b> ni reclamos.
-              </div>
-            </li>
-            <li className="flex gap-3">
-              <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-semibold">4</span>
-              <div className="text-slate-600">
-                Si hay reclamo, el pago se <b>congela</b> y el equipo de soporte revisa el caso.
-              </div>
-            </li>
-          </ol>
+            <Card title="Pro — 2,5% comisión">
+              <p className="leading-relaxed">
+                Para usuarios más frecuentes. Baja la comisión y mejora el
+                incentivo a seguir usando la plataforma.
+              </p>
+            </Card>
 
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-600">
-            <b>Importante:</b> las calificaciones ayudan a reputación y transparencia, pero la liberación se define por
-            reglas objetivas (tiempo post-evento y ausencia de disputa), para evitar fraudes.
+            <Card title="Premium — 1,5% comisión">
+              <p className="leading-relaxed">
+                Para usuarios recurrentes y de buena conducta. Comisión baja y
+                mayor reconocimiento.
+              </p>
+            </Card>
+
+            <Card title="Elite — 0,5% comisión">
+              <p className="leading-relaxed">
+                Para usuarios de alto uso y confianza. Este rol es difícil de
+                alcanzar a propósito: premia fidelidad real.
+              </p>
+            </Card>
+
+            <Card title="Ultra Premium — 0% comisión">
+              <p className="leading-relaxed">
+                Rol especial por invitación/beneficio (concursos, partners,
+                primeros usuarios, regalías). No es automático.
+              </p>
+            </Card>
+
+            <Card title="Admin">
+              <p className="leading-relaxed">
+                Rol interno para administración y soporte.
+              </p>
+            </Card>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-slate-700">
+            <b>Nota:</b> Ultra Premium es por invitación/manual. No se obtiene
+            por volumen automáticamente.
           </div>
         </div>
-      </section>
 
-      {/* Wallet */}
-      <section className="mt-14">
-        <SectionTitle
-          title="Wallet del vendedor"
-          subtitle="Para que el pago llegue a la persona correcta y reducir estafas."
-        />
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card title="Datos bancarios">
-            <ul className="list-disc pl-5 space-y-2">
-              <li>El vendedor registra su <b>cuenta bancaria</b> (corriente/vista/rut según corresponda).</li>
-              <li>El <b>titular</b> debe coincidir con el usuario registrado (nombre + RUT) para evitar suplantación.</li>
-              <li>Una vez guardado, queda disponible como “Mi Wallet” y se puede editar cuando corresponda.</li>
-            </ul>
-          </Card>
+        {/* =========================
+            UPGRADE
+           ========================= */}
+        <div className="mt-12">
+          <SectionTitle
+            title="Cómo subir de nivel (upgrades)"
+            subtitle="Los upgrades se evalúan con 2 condiciones: (1) operaciones válidas y (2) tiempo mínimo. Esto evita que todos bajen a comisión casi cero demasiado rápido."
+          />
 
-          <Card title="Pago al vendedor">
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Los pagos se transfieren a la cuenta registrada en el Wallet.</li>
-              <li>La liberación depende de las reglas del pago protegido (48h post evento y sin disputa).</li>
-              <li>Si hay disputa, el pago se mantiene retenido hasta resolución.</li>
-            </ul>
-          </Card>
-        </div>
-      </section>
+          <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="py-3 px-4 text-left font-medium">Rol</th>
+                    <th className="py-3 px-4 text-left font-medium">
+                      Requisitos
+                    </th>
+                    <th className="py-3 px-4 text-left font-medium">
+                      Tiempo mínimo
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="text-slate-700">
+                  <tr className="border-t border-slate-100">
+                    <td className="py-3 px-4 font-medium text-slate-900">
+                      Básico
+                    </td>
+                    <td className="py-3 px-4">Default</td>
+                    <td className="py-3 px-4">—</td>
+                  </tr>
 
-      {/* Eventos (Admin) */}
-      <section className="mt-14">
-        <SectionTitle
-          title="Eventos y administración (Admin)"
-          subtitle="TixSwap se mantiene ordenado gracias al panel de administración."
-        />
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card title="Gestión de eventos">
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Crear eventos con título, fecha/hora, ubicación/categoría e imagen.</li>
-              <li>Editar eventos (cambiar nombre, fecha, hora, imagen, etc.).</li>
-              <li>Eliminar eventos si corresponde (para mantener catálogo limpio).</li>
-              <li>Los eventos se ordenan por fecha para mostrar primero los más próximos.</li>
-            </ul>
-          </Card>
+                  <tr className="border-t border-slate-100">
+                    <td className="py-3 px-4 font-medium text-slate-900">Pro</td>
+                    <td className="py-3 px-4">50 operaciones</td>
+                    <td className="py-3 px-4">≥ 3 meses</td>
+                  </tr>
 
-          <Card title="Por qué esto es clave">
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Evita publicaciones en eventos inexistentes.</li>
-              <li>Mejora la búsqueda (artista/recinto/ciudad) y la conversión.</li>
-              <li>Imágenes ayudan a reconocer rápido el evento (estilo “PuntoTicket”).</li>
-            </ul>
-          </Card>
-        </div>
-      </section>
+                  <tr className="border-t border-slate-100">
+                    <td className="py-3 px-4 font-medium text-slate-900">
+                      Premium
+                    </td>
+                    <td className="py-3 px-4">100 operaciones</td>
+                    <td className="py-3 px-4">≥ 6 meses</td>
+                  </tr>
 
-      {/* Reclamos */}
-      <section className="mt-14">
-        <SectionTitle
-          title="Reclamos, disputas y soporte"
-          subtitle="Si algo sale mal, hay un proceso claro para proteger a la comunidad."
-        />
-        <div className="grid gap-6 md:grid-cols-2">
-          <Card title="Ventana de reclamo">
-            <ul className="list-disc pl-5 space-y-2">
-              <li>El comprador puede levantar un reclamo si hay problema real con la entrada.</li>
-              <li>Recomendación de operación: reclamos dentro de la ventana definida (por defecto, post-evento).</li>
-              <li>Mientras exista disputa, el pago se mantiene retenido.</li>
-            </ul>
-          </Card>
+                  <tr className="border-t border-slate-100">
+                    <td className="py-3 px-4 font-medium text-slate-900">
+                      Elite
+                    </td>
+                    <td className="py-3 px-4">200 operaciones</td>
+                    <td className="py-3 px-4">≥ 12 meses</td>
+                  </tr>
 
-          <Card title="Cómo contactarnos">
-            <p>
-              Si necesitas ayuda, escríbenos a{" "}
-              <a className="tix-link" href="mailto:soporte@tixswap.cl">
-                soporte@tixswap.cl
-              </a>{" "}
-              o crea un ticket desde tu panel en la sección de <b>Soporte</b>.
+                  <tr className="border-t border-slate-100">
+                    <td className="py-3 px-4 font-medium text-slate-900">
+                      Ultra Premium
+                    </td>
+                    <td className="py-3 px-4">Manual / invitación</td>
+                    <td className="py-3 px-4">N/A</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p className="mt-5 text-slate-600 leading-relaxed">
+              Las operaciones válidas son aquellas que se completan con éxito (por
+              ejemplo: ticket validado y pago liberado).
             </p>
-            <p className="mt-3 text-sm text-slate-500">
-              Tip: mientras más detalle y evidencia (capturas, PDF, contexto), más rápido resolvemos.
-            </p>
-          </Card>
-        </div>
-      </section>
-
-      {/* Cierre */}
-      <section className="mt-14 mb-4 text-center">
-        <div className="tix-card p-6 md:p-8">
-          <h3 className="text-xl font-bold text-slate-900">Listo. Seguridad sin drama.</h3>
-          <p className="mt-2 text-slate-600 max-w-2xl mx-auto">
-            Eso es TixSwap: usuarios validados, tickets revisados, pago protegido y soporte real.
-            Si quieres publicar ahora, dale al botón.
-          </p>
-          <div className="mt-6 flex items-center justify-center gap-2">
-            <Link href="/sell" className="tix-btn-primary">
-              Publicar entrada
-            </Link>
-            <Link href="/" className="tix-btn-secondary">
-              Volver al inicio
-            </Link>
           </div>
         </div>
-      </section>
-    </main>
+
+        {/* =========================
+            DISPUTAS
+           ========================= */}
+        <div className="mt-12">
+          <SectionTitle
+            title="Disputas: cómo resolvemos problemas"
+            subtitle="Queremos proteger a ambos lados: comprador y vendedor. Si hay disputa, pedimos evidencia concreta."
+          />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <Card title="Si eres comprador">
+              <ul className="space-y-2">
+                <Bullet>
+                  Adjunta evidencia completa (fotos, videos, audios si aplica).
+                </Bullet>
+                <Bullet>
+                  Explica el problema: QR inválido, ya usado, no coincide, etc.
+                </Bullet>
+                <Bullet>
+                  Sin evidencia suficiente, el reclamo puede rechazarse.
+                </Bullet>
+              </ul>
+            </Card>
+
+            <Card title="Si eres vendedor">
+              <ul className="space-y-2">
+                <Bullet>
+                  TixSwap te pedirá pruebas de que el ticket fue usado
+                  correctamente o evidencia de entrega.
+                </Bullet>
+                <Bullet>
+                  Si se detecta abuso (comprador “pasándose de vivo”), también se
+                  reporta y sanciona.
+                </Bullet>
+                <Bullet>
+                  Buscamos el equilibrio: justicia y seguridad.
+                </Bullet>
+              </ul>
+            </Card>
+          </div>
+        </div>
+
+        <div className="mt-12 flex flex-col sm:flex-row gap-3">
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            Volver al inicio
+          </Link>
+
+          <Link
+            href="/support"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            Ir al centro de ayuda
+          </Link>
+        </div>
+      </div>
+    </div>
   );
 }
