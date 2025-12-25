@@ -1,276 +1,342 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import supabase from "../lib/supabaseClient";
-import { formatRut, isValidRut, normalizeRut } from "../lib/rutUtils";
+import { useMemo, useState } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { isValidRut, normalizeRut } from "../lib/rutUtils";
+
+const USER_TYPES = [
+  "Usuario general",
+  "Comprador frecuente",
+  "Vendedor frecuente",
+  "Premium",
+];
 
 export default function RegisterPage() {
   const router = useRouter();
 
-  const [formData, setFormData] = useState({
+  const [form, setForm] = useState({
     fullName: "",
     rut: "",
     email: "",
     phone: "",
-    userType: "Comprador frecuente",
+    userType: "Usuario general",
     password: "",
-    confirmPassword: "",
+    passwordConfirm: "",
   });
 
   const [acceptTerms, setAcceptTerms] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [successMessage, setSuccessMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const [errors, setErrors] = useState({});
   const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  const handleChange = (e) => {
+  const isSubmitDisabled = useMemo(() => {
+    return loading || !acceptTerms;
+  }, [loading, acceptTerms]);
+
+  function handleChange(e) {
     const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+    setErrors((prev) => ({ ...prev, [name]: "" }));
+    setErrorMessage("");
+    setSuccessMessage("");
+  }
 
-    // Formateo suave del RUT mientras escriben
-    if (name === "rut") {
-      setFormData((prev) => ({ ...prev, rut: value }));
-      return;
-    }
+  function validate() {
+    const nextErrors = {};
 
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
+    if (!form.fullName.trim()) nextErrors.fullName = "Ingresa tu nombre completo.";
+    if (!form.rut.trim()) nextErrors.rut = "Ingresa tu RUT.";
+    if (form.rut.trim() && !isValidRut(form.rut)) nextErrors.rut = "El RUT ingresado no es válido.";
 
-  const validateForm = () => {
+    if (!form.email.trim()) nextErrors.email = "Ingresa tu correo.";
+    if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim()))
+      nextErrors.email = "El correo no tiene formato válido.";
+
+    if (!form.phone.trim()) nextErrors.phone = "Ingresa tu teléfono.";
+    if (!form.password) nextErrors.password = "Ingresa una contraseña.";
+    if (form.password && form.password.length < 6)
+      nextErrors.password = "La contraseña debe tener al menos 6 caracteres.";
+
+    if (!form.passwordConfirm) nextErrors.passwordConfirm = "Repite tu contraseña.";
+    if (form.password && form.passwordConfirm && form.password !== form.passwordConfirm)
+      nextErrors.passwordConfirm = "Las contraseñas no coinciden.";
+
+    if (!acceptTerms) nextErrors.acceptTerms = "Debes aceptar los Términos y Condiciones para registrarte.";
+
+    return nextErrors;
+  }
+
+  async function handleSubmit(e) {
+    // 🔥 CLAVE: que NUNCA muera por event undefined
+    e?.preventDefault?.();
+
     setErrorMessage("");
     setSuccessMessage("");
 
-    const { fullName, rut, email, phone, userType, password, confirmPassword } =
-      formData;
+    const nextErrors = validate();
+    setErrors(nextErrors);
 
-    if (!fullName?.trim()) return "Ingresa tu nombre completo.";
-    if (!rut?.trim()) return "Ingresa tu RUT.";
-    if (!isValidRut(rut)) return "El RUT ingresado no es válido.";
-    if (!email?.trim()) return "Ingresa tu correo electrónico.";
-    if (!phone?.trim()) return "Ingresa tu teléfono.";
-    if (!userType?.trim()) return "Selecciona un tipo de usuario.";
-    if (!password) return "Ingresa una contraseña.";
-    if (password.length < 6) return "La contraseña debe tener al menos 6 caracteres.";
-    if (password !== confirmPassword) return "Las contraseñas no coinciden.";
-    if (!acceptTerms)
-      return "Debes aceptar los Términos y Condiciones para crear tu cuenta.";
-
-    return null;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    const validationError = validateForm();
-    if (validationError) {
-      setErrorMessage(validationError);
+    if (Object.keys(nextErrors).length > 0) {
+      setErrorMessage("Revisa los campos marcados antes de continuar.");
       return;
     }
 
-    setIsSubmitting(true);
-    setErrorMessage("");
-    setSuccessMessage("");
+    const normalizedRut = normalizeRut(form.rut);
 
     try {
-      const rutNormalized = normalizeRut(formData.rut);
+      setLoading(true);
 
       const { data, error } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
+        email: form.email.trim(),
+        password: form.password,
         options: {
           data: {
-            full_name: formData.fullName,
-            rut: rutNormalized,
-            phone: formData.phone,
-            user_type: formData.userType,
+            full_name: form.fullName.trim(),
+            rut: normalizedRut,
+            phone: form.phone.trim(),
+            userType: form.userType,
           },
+          emailRedirectTo:
+            typeof window !== "undefined"
+              ? `${window.location.origin}/login`
+              : undefined,
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const msg = (error.message || "").toLowerCase();
 
-      setSuccessMessage(
-        "Cuenta creada. Revisa tu correo para confirmar tu registro."
-      );
+        if (msg.includes("already registered") || msg.includes("already exists")) {
+          setErrorMessage(
+            "Este correo ya tiene una cuenta en TixSwap. Intenta iniciar sesión o recupera tu contraseña."
+          );
+        } else {
+          setErrorMessage("Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente.");
+        }
+        return;
+      }
 
-      // Si Supabase devuelve sesión (según config), puedes redirigir directo
-      // Si NO devuelve sesión (por confirmación email), mejor enviar a /login con mensaje
-      setTimeout(() => {
-        router.push("/login");
-      }, 900);
+      if (data?.user) {
+        setSuccessMessage(
+          "Cuenta creada ✅ Te enviamos un correo para confirmar tu cuenta. Revisa tu bandeja o spam."
+        );
+
+        setForm({
+          fullName: "",
+          rut: "",
+          email: "",
+          phone: "",
+          userType: "Usuario general",
+          password: "",
+          passwordConfirm: "",
+        });
+        setAcceptTerms(false);
+
+        // Si quieres, lo mandamos directo al login después de 2.5s:
+        setTimeout(() => router.push("/login"), 2500);
+      }
     } catch (err) {
-      setErrorMessage(err?.message || "No pudimos crear tu cuenta. Intenta nuevamente.");
+      console.error(err);
+      setErrorMessage("Ocurrió un problema al crear tu cuenta. Inténtalo nuevamente.");
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
-  };
+  }
 
   return (
-    <main className="min-h-screen bg-white">
-      <div className="mx-auto max-w-md px-4 py-12">
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+    <div className="min-h-screen bg-white">
+      <div className="mx-auto max-w-5xl px-4 py-10">
+        <div className="mx-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-bold text-gray-900">Crear cuenta</h1>
           <p className="mt-1 text-sm text-gray-600">
             Regístrate para comprar y vender entradas de forma segura.
           </p>
 
-          {errorMessage && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {errorMessage}
+          {(errorMessage || successMessage) && (
+            <div
+              className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+                successMessage
+                  ? "border-green-200 bg-green-50 text-green-800"
+                  : "border-red-200 bg-red-50 text-red-800"
+              }`}
+            >
+              {successMessage || errorMessage}
             </div>
           )}
 
-          {successMessage && (
-            <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-              {successMessage}
-            </div>
-          )}
-
-          <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="mb-1 block text-sm font-medium text-gray-700">
                 Nombre completo
               </label>
               <input
                 name="fullName"
-                type="text"
-                value={formData.fullName}
+                value={form.fullName}
                 onChange={handleChange}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                placeholder="Ej: Juan Pérez"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                  errors.fullName ? "border-red-300" : "border-gray-200"
+                }`}
+                placeholder="Ej: David Chacón"
                 autoComplete="name"
               />
+              {errors.fullName && (
+                <p className="mt-1 text-xs text-red-600">{errors.fullName}</p>
+              )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">RUT</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">RUT</label>
               <input
                 name="rut"
-                type="text"
-                value={formData.rut}
+                value={form.rut}
                 onChange={handleChange}
-                onBlur={() =>
-                  setFormData((prev) => ({ ...prev, rut: formatRut(prev.rut) }))
-                }
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                placeholder="12.345.678-9"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                  errors.rut ? "border-red-300" : "border-gray-200"
+                }`}
+                placeholder="Ej: 12.345.678-5"
+                inputMode="text"
                 autoComplete="off"
               />
               <p className="mt-1 text-xs text-gray-500">
                 Validaremos que el RUT sea correcto (incluyendo dígito verificador).
               </p>
+              {errors.rut && <p className="mt-1 text-xs text-red-600">{errors.rut}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="mb-1 block text-sm font-medium text-gray-700">
                 Correo electrónico
               </label>
               <input
                 name="email"
-                type="email"
-                value={formData.email}
+                value={form.email}
                 onChange={handleChange}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                placeholder="tucorreo@correo.com"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                  errors.email ? "border-red-300" : "border-gray-200"
+                }`}
+                placeholder="tucorreo@gmail.com"
                 autoComplete="email"
               />
+              {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Teléfono
-              </label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Teléfono</label>
               <input
                 name="phone"
-                type="tel"
-                value={formData.phone}
+                value={form.phone}
                 onChange={handleChange}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
-                placeholder="+56912345678"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                  errors.phone ? "border-red-300" : "border-gray-200"
+                }`}
+                placeholder="+569XXXXXXXX"
                 autoComplete="tel"
               />
+              {errors.phone && <p className="mt-1 text-xs text-red-600">{errors.phone}</p>}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="mb-1 block text-sm font-medium text-gray-700">
                 Tipo de usuario
               </label>
               <select
                 name="userType"
-                value={formData.userType}
+                value={form.userType}
                 onChange={handleChange}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none"
               >
-                <option>Comprador frecuente</option>
-                <option>Vendedor frecuente</option>
+                {USER_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Contraseña
-              </label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Contraseña</label>
               <input
-                name="password"
                 type="password"
-                value={formData.password}
+                name="password"
+                value={form.password}
                 onChange={handleChange}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                  errors.password ? "border-red-300" : "border-gray-200"
+                }`}
+                placeholder="••••••••"
                 autoComplete="new-password"
               />
+              {errors.password && (
+                <p className="mt-1 text-xs text-red-600">{errors.password}</p>
+              )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">
+              <label className="mb-1 block text-sm font-medium text-gray-700">
                 Repetir contraseña
               </label>
               <input
-                name="confirmPassword"
                 type="password"
-                value={formData.confirmPassword}
+                name="passwordConfirm"
+                value={form.passwordConfirm}
                 onChange={handleChange}
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none ${
+                  errors.passwordConfirm ? "border-red-300" : "border-gray-200"
+                }`}
+                placeholder="••••••••"
                 autoComplete="new-password"
               />
+              {errors.passwordConfirm && (
+                <p className="mt-1 text-xs text-red-600">{errors.passwordConfirm}</p>
+              )}
             </div>
 
-            {/* ✅ Términos */}
+            {/* ✅ Terms */}
             <div className="pt-1">
               <label className="flex items-start gap-3 text-sm text-gray-700">
                 <input
                   type="checkbox"
                   checked={acceptTerms}
-                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                  onChange={(e) => {
+                    setAcceptTerms(e.target.checked);
+                    setErrors((prev) => ({ ...prev, acceptTerms: "" }));
+                    setErrorMessage("");
+                  }}
                   className="mt-1 h-4 w-4 rounded border-gray-300"
                 />
                 <span>
                   He leído y acepto los{" "}
                   <Link
-                    href="/legal/terms"
+                    href="/terms"
                     className="font-medium text-blue-600 hover:underline"
                     target="_blank"
+                    rel="noopener noreferrer"
                   >
                     Términos y Condiciones
                   </Link>{" "}
                   de TixSwap.
-                  <div className="mt-1 text-xs text-gray-500">
+                  <span className="mt-1 block text-xs text-gray-500">
                     Si no aceptas los Términos, no podrás crear tu cuenta.
-                  </div>
+                  </span>
                 </span>
               </label>
+              {errors.acceptTerms && (
+                <p className="mt-2 text-xs text-red-600">{errors.acceptTerms}</p>
+              )}
             </div>
 
-            {/* ✅ Botón: ahora ES submit, no revienta */}
             <button
               type="submit"
-              disabled={isSubmitting || !acceptTerms}
+              disabled={isSubmitDisabled}
               className={`w-full rounded-xl px-4 py-3 text-sm font-semibold text-white transition ${
-                isSubmitting || !acceptTerms
-                  ? "bg-blue-300 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700"
+                isSubmitDisabled ? "bg-blue-300" : "bg-blue-600 hover:bg-blue-700"
               }`}
             >
-              {isSubmitting ? "Creando..." : "Crear cuenta"}
+              {loading ? "Creando..." : "Crear cuenta"}
             </button>
 
             <p className="text-center text-sm text-gray-600">
@@ -282,6 +348,6 @@ export default function RegisterPage() {
           </form>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
