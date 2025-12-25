@@ -55,11 +55,9 @@ export default function TermsPage() {
 
           <H2>1) Identificación del titular</H2>
           <P>
-            La plataforma es operada por <b>TixSwap</b> (en adelante, “TixSwap”
-            o el “Titular”).{" "}
+            La plataforma es operada por <b>TixSwap</b> (en adelante, “TixSwap”).{" "}
             <b>
-              (Recomendación: aquí después pegamos razón social, RUT y domicilio
-              cuando lo tengas definido.)
+              (Rut 78.300.554-9)
             </b>
           </P>
 
