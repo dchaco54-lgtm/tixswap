@@ -1,303 +1,311 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-
 import { supabase } from "../lib/supabaseClient";
-import { validateRut, sanitizeRut } from "../lib/rutUtils";
+import { isValidRut, normalizeRut } from "../lib/rutUtils";
 
-const DEFAULT_ROLE = "basic";
+function withTimeout(promise, ms = 15000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("timeout")), ms)
+    ),
+  ]);
+}
 
 export default function RegisterPage() {
-  const router = useRouter();
+  const [formData, setFormData] = useState({
+    name: "",
+    rut: "",
+    email: "",
+    phone: "",
+    password: "",
+    confirmPassword: "",
+  });
 
-  const [fullName, setFullName] = useState("");
-  const [rut, setRut] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const [password, setPassword] = useState("");
-  const [password2, setPassword2] = useState("");
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
 
-  const [acceptTerms, setAcceptTerms] = useState(false);
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
-
-  const feedbackRef = useRef(null);
-
-  const isFormComplete = useMemo(() => {
-    return (
-      fullName.trim().length >= 2 &&
-      rut.trim().length >= 8 &&
-      email.trim().length >= 5 &&
-      phone.trim().length >= 8 &&
-      password.length >= 6 &&
-      password2.length >= 6
-    );
-  }, [fullName, rut, email, phone, password, password2]);
-
-  const canSubmit = useMemo(() => {
-    return acceptTerms && isFormComplete && !isSubmitting;
-  }, [acceptTerms, isFormComplete, isSubmitting]);
-
-  const scrollToFeedback = () => {
-    // Para que SIEMPRE veas el error/ok aunque estés scrolleado abajo
-    feedbackRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  const handleRutChange = (e) => {
+    const value = e.target.value;
+    // Deja que escriba libre, pero normaliza al vuelo para evitar formatos raros
+    setFormData((prev) => ({ ...prev, rut: value }));
   };
 
   const handleSubmit = async (e) => {
-    e?.preventDefault?.();
+    e.preventDefault();
+    setError("");
+    setSuccess("");
 
-    setErrorMessage("");
-    setSuccessMessage("");
+    const name = formData.name.trim();
+    const rutNormalized = normalizeRut(formData.rut);
+    const email = formData.email.trim();
+    const phone = formData.phone.trim();
+    const password = formData.password;
+    const confirmPassword = formData.confirmPassword;
 
-    // Validaciones UX (rápidas y claras)
-    if (!acceptTerms) {
-      setErrorMessage("Debes aceptar los Términos y Condiciones para crear tu cuenta.");
-      scrollToFeedback();
+    if (!name) {
+      setError("Debes ingresar tu nombre completo.");
       return;
     }
 
-    if (!isFormComplete) {
-      setErrorMessage("Completa todos los campos para continuar.");
-      scrollToFeedback();
+    if (!isValidRut(rutNormalized)) {
+      setError("El RUT ingresado no es válido. Revisa el formato y dígito verificador.");
       return;
     }
 
-    if (password !== password2) {
-      setErrorMessage("Las contraseñas no coinciden.");
-      scrollToFeedback();
+    if (!email) {
+      setError("Debes ingresar un correo electrónico.");
       return;
     }
 
-    if (!validateRut(rut)) {
-      setErrorMessage("RUT inválido. Revisa el formato y el dígito verificador.");
-      scrollToFeedback();
+    if (!phone) {
+      setError("Debes ingresar un teléfono.");
       return;
     }
 
-    const rutSanitized = sanitizeRut(rut);
+    if (!password || password.length < 6) {
+      setError("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Las contraseñas no coinciden.");
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setError("Debes aceptar los Términos y Condiciones para crear tu cuenta.");
+      return;
+    }
+
+    setLoading(true);
 
     try {
-      setIsSubmitting(true);
+      const origin =
+        typeof window !== "undefined" ? window.location.origin : "";
 
-      // 1) Crear usuario en Auth (email confirm)
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            full_name: fullName.trim(),
-            rut: rutSanitized,
-            phone: phone.trim(),
-            role: DEFAULT_ROLE,
+      const { data, error: signUpError } = await withTimeout(
+        supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            // OJO: mantenemos /login porque en tu proyecto es donde el usuario sigue el flujo
+            emailRedirectTo: `${origin}/login`,
+            data: {
+              full_name: name,
+              rut: rutNormalized,
+              phone,
+              accepted_terms: true,
+              accepted_terms_at: new Date().toISOString(),
+              accepted_terms_version: "1.0",
+            },
           },
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/auth/callback`
-              : undefined,
-        },
-      });
+        }),
+        15000
+      );
 
-      if (error) {
-        setErrorMessage(error.message || "No se pudo crear la cuenta. Intenta nuevamente.");
-        scrollToFeedback();
+      if (signUpError) {
+        setError(signUpError.message || "No se pudo crear la cuenta.");
         return;
       }
 
-      // 2) Intentar upsert en profiles (NO BLOQUEAR si falla por RLS)
-      // OJO: si tu proyecto exige confirmación de email, aquí muchas veces NO hay sesión aún.
-      if (data?.user?.id) {
-        const { error: profileError } = await supabase.from("profiles").upsert(
-          {
-            id: data.user.id,
-            email: email.trim(),
-            full_name: fullName.trim(),
-            rut: rutSanitized,
-            phone: phone.trim(),
-            role: DEFAULT_ROLE,
-            status: "active",
-          },
-          { onConflict: "id" }
-        );
+      // Supabase normalmente no crea sesión hasta que confirma email (según tu config)
+      // Así que lo correcto es mostrar “revisa tu correo”
+      setSuccess(
+        "Cuenta creada ✅ Revisa tu correo para confirmar tu email antes de iniciar sesión."
+      );
 
-        // Si falla, NO detenemos el registro (el usuario ya quedó creado en Auth)
-        if (profileError) {
-          // Puedes mirar esto en consola si quieres, pero al usuario no le bloqueamos el flujo
-          console.warn("profiles.upsert falló (probable RLS / sin sesión):", profileError.message);
-        }
-      }
-
-      setSuccessMessage("¡Cuenta creada! Te enviamos un correo para validar tu email ✅");
-      scrollToFeedback();
-
-      // Redirigir a login después de un ratito
-      setTimeout(() => {
-        router.push("/login");
-      }, 1800);
+      // Limpia password para evitar que quede guardada en pantalla
+      setFormData((prev) => ({
+        ...prev,
+        password: "",
+        confirmPassword: "",
+      }));
     } catch (err) {
-      setErrorMessage("Ocurrió un error inesperado. Intenta nuevamente.");
-      scrollToFeedback();
+      if (err?.message === "timeout") {
+        setError(
+          "La solicitud se demoró demasiado (timeout). Revisa tu conexión o la configuración de Supabase (Redirect URLs) e inténtalo de nuevo."
+        );
+      } else {
+        setError("Ocurrió un error inesperado. Inténtalo nuevamente.");
+      }
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      {/* Contenedor */}
-      <div className="mx-auto max-w-md px-4 py-10">
-        <div className="rounded-2xl bg-white p-6 shadow-sm border">
-          <h1 className="text-2xl font-semibold text-gray-900">Crear cuenta</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Regístrate para comprar y vender entradas de forma segura.
-          </p>
+    <div className="min-h-screen bg-white flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <h1 className="text-2xl font-bold text-gray-900">Crear cuenta</h1>
+        <p className="text-gray-500 mt-1">
+          Regístrate para comprar y vender entradas de forma segura.
+        </p>
 
-          {/* Feedback SIEMPRE cerca del botón */}
-          <div ref={feedbackRef} className="mt-4">
-            {errorMessage ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {errorMessage}
-              </div>
-            ) : null}
-
-            {successMessage ? (
-              <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-                {successMessage}
-              </div>
-            ) : null}
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Nombre completo
+            </label>
+            <input
+              type="text"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
+              placeholder="Ej: Juan Pérez"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
           </div>
 
-          <form onSubmit={handleSubmit} className="mt-5 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Nombre completo</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-200"
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="Ej: David Chacón"
-                autoComplete="name"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">RUT</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-200"
-                type="text"
-                value={rut}
-                onChange={(e) => setRut(e.target.value)}
-                placeholder="Ej: 12.345.678-9"
-                required
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Validaremos que el RUT sea correcto (incluyendo dígito verificador).
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Correo electrónico</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-200"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="tucorreo@email.com"
-                autoComplete="email"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Teléfono</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-200"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+569XXXXXXXX"
-                autoComplete="tel"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Contraseña</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-200"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mínimo 6 caracteres"
-                autoComplete="new-password"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Repetir contraseña</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-4 py-3 outline-none focus:ring-2 focus:ring-blue-200"
-                type="password"
-                value={password2}
-                onChange={(e) => setPassword2(e.target.value)}
-                placeholder="Repite tu contraseña"
-                autoComplete="new-password"
-                required
-              />
-            </div>
-
-            {/* Terms */}
-            <div className="pt-1">
-              <label className="flex items-start gap-3 text-sm text-gray-700 select-none">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4"
-                  checked={acceptTerms}
-                  onChange={(e) => setAcceptTerms(e.target.checked)}
-                />
-                <span>
-                  He leído y acepto los{" "}
-                  <Link
-                    href="/terms"
-                    className="text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Términos y Condiciones
-                  </Link>{" "}
-                  de TixSwap.
-                  <span className="block mt-1 text-xs text-gray-500">
-                    Si no aceptas los Términos, no podrás crear tu cuenta.
-                  </span>
-                </span>
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className={`w-full rounded-xl px-4 py-3 text-white font-semibold transition ${
-                canSubmit ? "bg-blue-600 hover:bg-blue-700" : "bg-blue-300 cursor-not-allowed"
-              }`}
-            >
-              {isSubmitting ? "Creando cuenta..." : "Crear cuenta"}
-            </button>
-
-            <p className="text-center text-sm text-gray-600">
-              ¿Ya tienes cuenta?{" "}
-              <Link href="/login" className="text-blue-600 hover:underline">
-                Iniciar sesión
-              </Link>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">RUT</label>
+            <input
+              type="text"
+              name="rut"
+              value={formData.rut}
+              onChange={handleRutChange}
+              placeholder="Ej: 12345678-9"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Validaremos que el RUT sea correcto (incluyendo dígito verificador).
             </p>
-          </form>
-        </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Correo electrónico
+            </label>
+            <input
+              type="email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              placeholder="ej: correo@dominio.com"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Teléfono
+            </label>
+            <input
+              type="tel"
+              name="phone"
+              value={formData.phone}
+              onChange={handleChange}
+              placeholder="+569XXXXXXXX"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Contraseña
+            </label>
+            <input
+              type="password"
+              name="password"
+              value={formData.password}
+              onChange={handleChange}
+              placeholder="••••••••"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              Repetir contraseña
+            </label>
+            <input
+              type="password"
+              name="confirmPassword"
+              value={formData.confirmPassword}
+              onChange={handleChange}
+              placeholder="••••••••"
+              className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          {/* Términos */}
+          <div className="pt-1">
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => setAcceptedTerms(e.target.checked)}
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                He leído y acepto los{" "}
+                <Link
+                  href="/legal/terms"
+                  className="text-blue-600 hover:underline font-medium"
+                  target="_blank"
+                >
+                  Términos y Condiciones
+                </Link>{" "}
+                de TixSwap.
+                <div className="text-xs text-gray-500 mt-1">
+                  Si no aceptas los Términos, no podrás crear tu cuenta.
+                </div>
+              </span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading || !acceptedTerms}
+            className={`w-full mt-2 px-4 py-3 rounded-lg text-white font-semibold transition ${
+              loading || !acceptedTerms
+                ? "bg-[#1f52f0] opacity-50 cursor-not-allowed"
+                : "bg-[#1f52f0] hover:bg-blue-700"
+            }`}
+          >
+            {loading ? "Creando..." : "Crear cuenta"}
+          </button>
+
+          {error && (
+            <div className="p-3 bg-red-50 text-red-700 text-sm rounded-md">
+              {error}
+            </div>
+          )}
+
+          {success && (
+            <div className="p-3 bg-green-50 text-green-700 text-sm rounded-md">
+              {success}
+              <div className="mt-2">
+                <Link href="/login" className="text-blue-600 hover:underline">
+                  Ir a iniciar sesión
+                </Link>
+              </div>
+            </div>
+          )}
+
+          <p className="text-sm text-gray-600 text-center mt-2">
+            ¿Ya tienes cuenta?{" "}
+            <Link href="/login" className="text-blue-600 hover:underline">
+              Iniciar sesión
+            </Link>
+          </p>
+        </form>
       </div>
-    </main>
+    </div>
   );
 }
