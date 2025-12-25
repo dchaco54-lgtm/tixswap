@@ -140,7 +140,7 @@ export default function PrivacyPage() {
           <P>
             Si tienes dudas sobre privacidad o quieres solicitar cambios en tus datos,
             contáctanos en:{" "}
-            <a className="text-blue-600 underline" href="mailto:privacidad@tixswap.cl">
+            <a className="text-blue-600 underline" href="mailto:soporte@tixswap.cl">
               privacidad@tixswap.cl
             </a>
           </P>
