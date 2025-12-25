@@ -4,41 +4,36 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabaseClient';
-
-const ROLE_OPTIONS = [
-  { value: 'user', label: 'Usuario normal' },
-  { value: 'premium', label: 'Premium (2% comisión)' },
-  { value: 'super_premium', label: 'Super premium (0% comisión)' },
-  { value: 'admin', label: 'Admin' },
-];
+import { ROLE_OPTIONS, normalizeRole } from '@/lib/roles';
 
 export default function AdminUsersPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+
+  const [checking, setChecking] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+
   const [users, setUsers] = useState([]);
-  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const [query, setQuery] = useState('');
   const [savingId, setSavingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  // 1) Verificar sesión + rol admin
   useEffect(() => {
-    const checkSessionAndRole = async () => {
-      setLoading(true);
+    const init = async () => {
+      setChecking(true);
       setErrorMsg(null);
 
       const {
         data: { user },
-        error,
       } = await supabase.auth.getUser();
 
-      if (error || !user) {
-        // No hay sesión → mandar a login
+      if (!user) {
         router.push('/login');
         return;
       }
 
-      // Traer perfil
+      // Verificar admin por profiles.role
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role, email')
@@ -47,21 +42,22 @@ export default function AdminUsersPage() {
 
       if (profileError) {
         console.error(profileError);
-        setErrorMsg('No pudimos cargar tu perfil. Intenta nuevamente.');
-        setLoading(false);
+        setErrorMsg('No pudimos cargar tu perfil.');
+        setChecking(false);
         return;
       }
 
-      // Solo admins pueden ver esta página
-      if (profile.role !== 'admin') {
-        setIsAdmin(false);
-        setLoading(false);
+      if (profile?.role !== 'admin') {
+        setErrorMsg('No tienes permisos para ver esta página.');
+        setChecking(false);
         return;
       }
 
       setIsAdmin(true);
+      setChecking(false);
 
-      // Cargar listado de usuarios
+      // Cargar usuarios
+      setLoading(true);
       const { data: allUsers, error: usersError } = await supabase
         .from('profiles')
         .select('id, email, full_name, rut, role, is_blocked')
@@ -78,7 +74,7 @@ export default function AdminUsersPage() {
       setLoading(false);
     };
 
-    checkSessionAndRole();
+    init();
   }, [router]);
 
   const handleChangeRole = async (userId, newRole) => {
@@ -112,19 +108,19 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleToggleBlock = async (userId, currentValue) => {
+  const handleToggleBlock = async (userId, current) => {
     try {
       setSavingId(userId);
       setErrorMsg(null);
 
       const { error } = await supabase
         .from('profiles')
-        .update({ is_blocked: !currentValue })
+        .update({ is_blocked: !current })
         .eq('id', userId);
 
       if (error) {
         console.error(error);
-        setErrorMsg('No se pudo actualizar el estado del usuario.');
+        setErrorMsg('No se pudo actualizar el estado.');
         return;
       }
 
@@ -133,7 +129,7 @@ export default function AdminUsersPage() {
           u.id === userId
             ? {
                 ...u,
-                is_blocked: !currentValue,
+                is_blocked: !current,
               }
             : u
         )
@@ -143,180 +139,131 @@ export default function AdminUsersPage() {
     }
   };
 
-  const filteredUsers = users.filter((u) => {
-    const term = filter.trim().toLowerCase();
-    if (!term) return true;
-
+  if (checking) {
     return (
-      (u.email && u.email.toLowerCase().includes(term)) ||
-      (u.rut && u.rut.toLowerCase().includes(term)) ||
-      (u.full_name && u.full_name.toLowerCase().includes(term))
-    );
-  });
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Cargando…</p>
+      <div className="tix-container tix-section">
+        <p className="text-slate-600">Cargando…</p>
       </div>
     );
   }
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center">
-          <h1 className="text-lg font-semibold text-gray-900 mb-2">
-            Sin acceso
-          </h1>
-          <p className="text-sm text-gray-500">
-            Esta sección es solo para administradores. Si crees que esto es un
-            error, escríbenos a{' '}
-            <span className="font-medium text-blue-600">
-              soporte@tixswap.cl
-            </span>
-            .
-          </p>
-        </div>
+      <div className="tix-container tix-section">
+        <h1 className="text-2xl font-bold mb-2">Usuarios</h1>
+        <p className="text-slate-600">{errorMsg || 'No autorizado.'}</p>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 py-10">
-      <div className="mx-auto max-w-5xl px-4">
-        {/* Título */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Usuarios</h1>
-            <p className="text-sm text-gray-500">
-              Administra roles, bloquea cuentas y busca usuarios por correo,
-              nombre o RUT.
-            </p>
-          </div>
-        </div>
+  const filtered = users.filter((u) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const email = (u.email || '').toLowerCase();
+    const name = (u.full_name || '').toLowerCase();
+    const rut = (u.rut || '').toLowerCase();
+    return email.includes(q) || name.includes(q) || rut.includes(q);
+  });
 
-        {/* Filtros / búsqueda */}
-        <div className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div className="w-full md:w-80">
-            <input
-              type="text"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Buscar por correo, nombre o RUT..."
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-            />
-          </div>
-          <p className="text-xs text-gray-500">
-            Total usuarios: {users.length}
+  return (
+    <div className="tix-container tix-section">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Usuarios</h1>
+          <p className="text-slate-600 mt-1">
+            Administra roles, bloquea cuentas y busca usuarios por correo, nombre o RUT.
           </p>
         </div>
 
-        {errorMsg && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
+        <div className="text-sm text-slate-500 mt-2">
+          Total usuarios: <b>{users.length}</b>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        {errorMsg ? (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {errorMsg}
           </div>
-        )}
+        ) : null}
 
-        {/* Tabla de usuarios */}
-        <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Correo
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Nombre
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  RUT
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Rol
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-gray-600">
-                  Estado
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-gray-600">
-                  Acciones
-                </th>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar por correo, nombre o RUT…"
+          className="w-full max-w-md border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+
+        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-100 bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="py-3 px-4 text-left font-medium">Correo</th>
+                <th className="py-3 px-4 text-left font-medium">Nombre</th>
+                <th className="py-3 px-4 text-left font-medium">RUT</th>
+                <th className="py-3 px-4 text-left font-medium">Rol</th>
+                <th className="py-3 px-4 text-left font-medium">Estado</th>
+                <th className="py-3 px-4 text-left font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.length === 0 ? (
+              {loading ? (
                 <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-6 text-center text-xs text-gray-400"
-                  >
-                    No se encontraron usuarios con ese filtro.
+                  <td className="py-6 px-4 text-slate-600" colSpan={6}>
+                    Cargando usuarios…
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td className="py-6 px-4 text-slate-600" colSpan={6}>
+                    No encontramos usuarios para tu búsqueda.
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => (
-                  <tr
-                    key={u.id}
-                    className="border-b border-gray-50 last:border-b-0"
-                  >
-                    <td className="px-4 py-3 text-gray-900">
-                      {u.email || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {u.full_name || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">
-                      {u.rut || '-'}
-                    </td>
-                    <td className="px-4 py-3">
+                filtered.map((u) => (
+                  <tr key={u.id} className="border-t border-slate-100">
+                    <td className="py-3 px-4 text-slate-900">{u.email || '—'}</td>
+                    <td className="py-3 px-4 text-slate-700">{u.full_name || '—'}</td>
+                    <td className="py-3 px-4 text-slate-700">{u.rut || '—'}</td>
+
+                    <td className="py-3 px-4">
                       <select
-                        value={u.role || 'user'}
-                        onChange={(e) =>
-                          handleChangeRole(u.id, e.target.value)
-                        }
-                        className="rounded-lg border border-gray-300 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        value={normalizeRole(u.role || 'basic')}
                         disabled={savingId === u.id}
+                        onChange={(e) => handleChangeRole(u.id, e.target.value)}
+                        className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white"
                       >
-                        {ROLE_OPTIONS.map((r) => (
-                          <option key={r.value} value={r.value}>
-                            {r.label}
+                        {ROLE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
                           </option>
                         ))}
                       </select>
                     </td>
-                    <td className="px-4 py-3">
-                      {u.is_blocked ? (
-                        <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                          Bloqueado
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                          Activo
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleToggleBlock(u.id, !!u.is_blocked)
-                        }
-                        disabled={savingId === u.id}
-                        className={`inline-flex items-center rounded-lg border px-3 py-1 text-xs font-medium transition ${
+
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
                           u.is_blocked
-                            ? 'border-emerald-500 text-emerald-700 hover:bg-emerald-50'
-                            : 'border-red-500 text-red-700 hover:bg-red-50'
-                        } ${
-                          savingId === u.id
-                            ? 'opacity-60 cursor-not-allowed'
-                            : ''
+                            ? 'bg-red-50 text-red-700 border border-red-200'
+                            : 'bg-green-50 text-green-700 border border-green-200'
                         }`}
                       >
-                        {savingId === u.id
-                          ? 'Guardando...'
-                          : u.is_blocked
-                          ? 'Desbloquear'
-                          : 'Bloquear'}
+                        {u.is_blocked ? 'Bloqueado' : 'Activo'}
+                      </span>
+                    </td>
+
+                    <td className="py-3 px-4">
+                      <button
+                        onClick={() => handleToggleBlock(u.id, !!u.is_blocked)}
+                        disabled={savingId === u.id}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                          u.is_blocked
+                            ? 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            : 'bg-white text-red-700 border-red-200 hover:bg-red-50'
+                        }`}
+                      >
+                        {u.is_blocked ? 'Desbloquear' : 'Bloquear'}
                       </button>
                     </td>
                   </tr>
@@ -327,11 +274,13 @@ export default function AdminUsersPage() {
         </div>
 
         <p className="mt-4 text-[11px] text-gray-400">
-          Tip: recuerda que los usuarios con rol{' '}
-          <span className="font-semibold">premium</span> y{' '}
-          <span className="font-semibold">super premium</span> pueden tener
-          comisiones más bajas. Asegúrate de que este rol coincida con la
-          lógica que uses para calcular las comisiones.
+          Tip: roles y comisiones —{" "}
+          <span className="font-semibold">Básico</span> (3,5%),{" "}
+          <span className="font-semibold">Pro</span> (2,5%),{" "}
+          <span className="font-semibold">Premium</span> (1,5%),{" "}
+          <span className="font-semibold">Elite</span> (0,5%) y{" "}
+          <span className="font-semibold">Ultra Premium</span> (0%).
+          Ultra Premium es por invitación/manual. Asegúrate de que este rol coincida con la lógica que uses para calcular las comisiones.
         </p>
       </div>
     </div>
