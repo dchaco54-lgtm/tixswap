@@ -149,10 +149,11 @@ export default function HomePage() {
 
       <EventGrid title="Eventos destacados" events={events} />
 
-      <div id="como-funciona">
-        <Categories />
-      </div>
-
+      <section id="como-funciona" className="scroll-mt-24">
+  {/* Compatibilidad por si algún link viejo apunta a #how-it-works */}
+  <div id="how-it-works" className="h-0" />
+  <Categories />
+</section>
       <CTA />
       <Footer />
     </main>
