@@ -30,7 +30,6 @@ export default function Footer() {
   }, []);
 
   const goProtected = async (target) => {
-    // Para no depender 100% del state (por race conditions)
     const { data } = await supabase.auth.getUser();
     const current = data?.user || user;
 
@@ -42,9 +41,12 @@ export default function Footer() {
     router.push(`/login?redirectTo=${encodeURIComponent(target)}`);
   };
 
-  const Item = ({ children, onClick, href }) => {
+  const Item = ({ children, onClick, href, muted = false }) => {
     const common =
-      "block text-left text-sm text-gray-300 hover:text-white transition-colors";
+      "block text-left text-sm transition-colors " +
+      (muted
+        ? "text-gray-500 cursor-default"
+        : "text-gray-300 hover:text-white");
 
     if (href) {
       return (
@@ -52,6 +54,10 @@ export default function Footer() {
           {children}
         </a>
       );
+    }
+
+    if (muted) {
+      return <span className={common}>{children}</span>;
     }
 
     return (
@@ -72,11 +78,8 @@ export default function Footer() {
         <div>
           <h4 className="font-bold mb-3 text-white">Plataforma</h4>
           <div className="space-y-2">
-            {/* Comprar/Vender: si no hay sesión -> login */}
             <Item onClick={() => goProtected("/events")}>Comprar</Item>
             <Item onClick={() => goProtected("/sell")}>Vender</Item>
-
-            {/* Cómo funciona: va al page “Saber más” */}
             <Item onClick={() => router.push("/how-it-works")}>
               Cómo funciona
             </Item>
@@ -86,15 +89,12 @@ export default function Footer() {
         <div>
           <h4 className="font-bold mb-3 text-white">Soporte</h4>
           <div className="space-y-2">
-            {/* Centro de ayuda: crear ticket (requiere sesión) */}
             <Item onClick={() => goProtected("/dashboard?section=support")}>
               Centro de ayuda
             </Item>
 
-            {/* Contacto: correo libre */}
             <Item href="mailto:soporte@tixswap.cl">Contacto</Item>
 
-            {/* Disputas: página informativa */}
             <Item onClick={() => router.push("/disputes")}>Disputas</Item>
           </div>
         </div>
@@ -102,13 +102,11 @@ export default function Footer() {
         <div>
           <h4 className="font-bold mb-3 text-white">Legal</h4>
           <div className="space-y-2">
-            <span className="block text-sm text-gray-500">Términos (pronto)</span>
-            <span className="block text-sm text-gray-500">
-              Privacidad (pronto)
-            </span>
-            <span className="block text-sm text-gray-500">
-              Seguridad (pronto)
-            </span>
+            <Item onClick={() => router.push("/legal/privacy")}>Privacidad</Item>
+            <Item onClick={() => router.push("/legal/security")}>
+              Seguridad y antifraude
+            </Item>
+            <Item muted>Términos (pronto)</Item>
           </div>
         </div>
       </div>
@@ -119,4 +117,3 @@ export default function Footer() {
     </footer>
   );
 }
-
