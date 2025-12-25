@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 import WalletSection from "./WalletSection";
 import {
-  ROLE_OPTIONS,
   normalizeRole,
   roleCommissionLabel,
   getUpgradeProgress,
@@ -32,11 +31,20 @@ export default function DashboardPage() {
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
+  // Perfil desde DB (fuente principal)
+  const [profileRow, setProfileRow] = useState(null); // { email, phone, rut, full_name, role, created_at }
   const [isAdmin, setIsAdmin] = useState(false);
-
   const [userRole, setUserRole] = useState("basic");
+
+  // Progreso upgrade
   const [operationsCount, setOperationsCount] = useState(null);
   const [loadingOps, setLoadingOps] = useState(false);
+
+  // Mis datos (editable solo email/phone)
+  const [profileForm, setProfileForm] = useState({ email: "", phone: "" });
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
 
   // Soporte
   const [tickets, setTickets] = useState([]);
@@ -50,36 +58,22 @@ export default function DashboardPage() {
   const [ticketError, setTicketError] = useState("");
   const [ticketSuccess, setTicketSuccess] = useState("");
 
-  // Perfil editable
-  const [profileForm, setProfileForm] = useState({
-    fullName: "",
-    email: "",
-    phone: "",
-    userType: "basic",
-  });
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [profileError, setProfileError] = useState("");
-  const [profileSuccess, setProfileSuccess] = useState("");
-
   // Deep link /dashboard?section=wallet
   useEffect(() => {
     const section = searchParams?.get("section");
     if (!section) return;
-    const exists = BASE_SECTIONS.some((s) => s.id === section) || section === "admin";
+    const exists =
+      BASE_SECTIONS.some((s) => s.id === section) || section === "admin";
     if (exists) setCurrentSection(section);
   }, [searchParams]);
 
-  // Cargar usuario + rol + tickets
   useEffect(() => {
     const load = async () => {
       setLoadingUser(true);
 
       const {
         data: { user },
-        error,
       } = await supabase.auth.getUser();
-
-      if (error) console.warn(error);
 
       if (!user) {
         router.push("/login");
@@ -88,26 +82,28 @@ export default function DashboardPage() {
 
       setUser(user);
 
-      // rol (profiles.role) + contar operaciones
-      let roleFromProfile = "basic";
-      try {
-        const { data: profileRow, error: profileErr } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .maybeSingle();
+      // 1) Cargar perfiles completos (DB)
+      const { data: prof, error: profErr } = await supabase
+        .from("profiles")
+        .select("id, email, phone, rut, full_name, role, created_at")
+        .eq("id", user.id)
+        .maybeSingle();
 
-        if (!profileErr && profileRow?.role) {
-          roleFromProfile = normalizeRole(profileRow.role);
-          if (roleFromProfile === "admin") setIsAdmin(true);
-        }
-      } catch (e) {
-        console.warn("No se pudo leer role en profiles:", e);
-      }
+      if (profErr) console.warn(profErr);
 
+      setProfileRow(prof || null);
+
+      const roleFromProfile = normalizeRole(prof?.role || "basic");
       setUserRole(roleFromProfile);
+      setIsAdmin(roleFromProfile === "admin");
 
-      // contar operaciones (compras + ventas) para progreso de upgrade
+      // 2) Prefill form (email/phone)
+      setProfileForm({
+        email: (prof?.email || user.email || "").trim(),
+        phone: (prof?.phone || user.user_metadata?.phone || "").trim(),
+      });
+
+      // 3) Contar operaciones (si falla por RLS, queda null)
       try {
         setLoadingOps(true);
 
@@ -136,23 +132,7 @@ export default function DashboardPage() {
         setLoadingOps(false);
       }
 
-      // perfil desde metadata (NO tocar RUT/NOMBRE acá)
-      const fullNameMeta =
-        user.user_metadata?.name ||
-        user.user_metadata?.full_name ||
-        user.user_metadata?.fullName ||
-        "";
-      const phoneMeta = user.user_metadata?.phone || "";
-      const userTypeMeta = roleFromProfile; // viene desde profiles.role
-
-      setProfileForm({
-        fullName: fullNameMeta,
-        email: user.email || "",
-        phone: phoneMeta,
-        userType: userTypeMeta,
-      });
-
-      // tickets del usuario
+      // 4) Tickets
       setLoadingTickets(true);
       const { data: ticketsData, error: ticketsErr } = await supabase
         .from("support_tickets")
@@ -178,26 +158,23 @@ export default function DashboardPage() {
     router.push("/login");
   };
 
+  // Valores para mostrar (DB -> fallback metadata)
   const fullName =
+    profileRow?.full_name ||
     user?.user_metadata?.name ||
     user?.user_metadata?.full_name ||
     user?.user_metadata?.fullName ||
     "Usuario";
 
-  // ✅ datos duros vienen de metadata (como lo tenías antes)
-  const rut = user?.user_metadata?.rut || "—";
-  const phone = user?.user_metadata?.phone || "—";
-  const email = user?.email || "—";
+  const rut = profileRow?.rut || user?.user_metadata?.rut || "—";
+  const phoneDisplay = profileRow?.phone || user?.user_metadata?.phone || "—";
+  const emailDisplay = profileRow?.email || user?.email || "—";
 
-  // ✅ Tipo de usuario viene de profiles.role (NO de metadata)
   const displayedUserType = roleCommissionLabel(isAdmin ? "admin" : userRole);
 
-  // -------- Perfil: actualizar datos (SOLO email + phone) --------
-  const handleProfileChange = (field) => (e) => {
-    setProfileForm((prev) => ({
-      ...prev,
-      [field]: e.target.value,
-    }));
+  // ------ Mis datos: cambios ------
+  const handleProfileField = (field) => (e) => {
+    setProfileForm((prev) => ({ ...prev, [field]: e.target.value }));
   };
 
   const handleSaveProfile = async (e) => {
@@ -206,11 +183,14 @@ export default function DashboardPage() {
     setProfileSuccess("");
 
     if (!user) {
-      setProfileError("Debes iniciar sesión para actualizar tus datos.");
+      setProfileError("Debes iniciar sesión.");
       return;
     }
 
-    if (!profileForm.email.trim()) {
+    const newEmail = (profileForm.email || "").trim();
+    const newPhone = (profileForm.phone || "").trim();
+
+    if (!newEmail) {
       setProfileError("El correo no puede estar vacío.");
       return;
     }
@@ -218,35 +198,68 @@ export default function DashboardPage() {
     try {
       setSavingProfile(true);
 
-      // ✅ MUY IMPORTANTE: mantener metadata existente (rut/nombre/etc)
-      const { data, error } = await supabase.auth.updateUser({
-        email: profileForm.email.trim(),
-        data: {
-          ...user.user_metadata,
-          phone: profileForm.phone.trim(),
-        },
-      });
+      // 1) Guardar en profiles (fuente de tu web)
+      const { error: upErr } = await supabase
+        .from("profiles")
+        .update({ email: newEmail, phone: newPhone })
+        .eq("id", user.id);
 
-      if (error) {
-        console.error(error);
-        setProfileError("Ocurrió un problema al actualizar tus datos.");
+      if (upErr) {
+        console.error(upErr);
+        setProfileError("No se pudo guardar en tu perfil. Intenta de nuevo.");
         return;
       }
 
-      if (data?.user) setUser(data.user);
+      // 2) Si cambió el correo, actualizar Auth (solo para el usuario actual)
+      //    (Supabase usualmente envía mail de confirmación)
+      const currentAuthEmail = (user.email || "").trim().toLowerCase();
+      if (newEmail.toLowerCase() !== currentAuthEmail) {
+        const { data, error: authErr } = await supabase.auth.updateUser({
+          email: newEmail,
+          // Mantenemos metadata existente, solo actualizamos phone
+          data: { ...user.user_metadata, phone: newPhone },
+        });
 
-      setProfileSuccess("Tus datos fueron actualizados correctamente.");
+        if (authErr) {
+          console.warn(authErr);
+          // Ojo: el perfil se guardó igual. Avisamos sin romper.
+          setProfileSuccess(
+            "Guardado en tu perfil. Ojo: el cambio de correo de inicio de sesión puede requerir confirmación por email."
+          );
+        } else {
+          if (data?.user) setUser(data.user);
+          setProfileSuccess(
+            "Listo ✅ Se guardó tu correo/teléfono. Si cambiaste el correo, revisa tu email para confirmar."
+          );
+        }
+      } else {
+        // solo phone (y además metadata phone para coherencia)
+        const { data, error: metaErr } = await supabase.auth.updateUser({
+          data: { ...user.user_metadata, phone: newPhone },
+        });
+        if (!metaErr && data?.user) setUser(data.user);
+
+        setProfileSuccess("Listo ✅ Se guardó tu teléfono.");
+      }
+
+      // Refrescar profileRow local
+      setProfileRow((prev) => ({
+        ...(prev || {}),
+        email: newEmail,
+        phone: newPhone,
+      }));
     } catch (err) {
       console.error(err);
-      setProfileError("Ocurrió un problema al actualizar tus datos.");
+      setProfileError("Ocurrió un error guardando tus datos.");
     } finally {
       setSavingProfile(false);
     }
   };
 
-  // -------- Soporte: crear ticket --------
+  // ------ Soporte ------
   const handleTicketChange = (field) => (e) => {
-    setTicketForm((prev) => ({ ...prev, [field]: e.target.value }));
+    const value = e.target.value;
+    setTicketForm((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleCreateTicket = async (e) => {
@@ -296,34 +309,34 @@ export default function DashboardPage() {
     }
   };
 
-  // -------- Render --------
+  // ------ Render ------
   const renderSection = () => {
     if (currentSection === "overview") {
       return (
         <div className="grid gap-6 md:grid-cols-2">
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
             <h2 className="text-lg font-semibold mb-4">Datos de la cuenta</h2>
+
             <p className="text-sm text-slate-700">
-              <span className="font-medium">Correo:</span> {email}
+              <span className="font-medium">Correo:</span> {emailDisplay}
             </p>
             <p className="text-sm text-slate-700">
               <span className="font-medium">RUT:</span> {rut}
             </p>
             <p className="text-sm text-slate-700">
-              <span className="font-medium">Teléfono:</span> {phone}
+              <span className="font-medium">Teléfono:</span> {phoneDisplay}
             </p>
             <p className="text-sm text-slate-700">
               <span className="font-medium">Tipo de usuario:</span>{" "}
               {displayedUserType}
             </p>
 
-            {/* Progreso de upgrade */}
             <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
               {(() => {
                 const prog = getUpgradeProgress({
                   role: isAdmin ? "admin" : userRole,
                   operationsCount: operationsCount ?? 0,
-                  userCreatedAt: user?.created_at || null,
+                  userCreatedAt: profileRow?.created_at || user?.created_at || null,
                 });
 
                 if (!prog.nextLabel) {
@@ -358,7 +371,7 @@ export default function DashboardPage() {
 
                       <p>
                         Tiempo mínimo: <b>{prog.minMonths} meses</b>{" "}
-                        {user?.created_at ? (
+                        {prog.monthsOnPlatform !== null ? (
                           <span className="text-slate-500">
                             (llevas {prog.monthsOnPlatform}, faltan {prog.monthsRemaining})
                           </span>
@@ -395,16 +408,9 @@ export default function DashboardPage() {
       return (
         <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100 max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Mis datos</h2>
+
           <p className="text-sm text-slate-500 mb-4">
-            Por seguridad, el nombre y el RUT no se modifican desde aquí. Si
-            necesitas cambiar algo, escríbenos a{" "}
-            <a
-              href="mailto:soporte@tixswap.cl"
-              className="text-blue-600 hover:underline"
-            >
-              soporte@tixswap.cl
-            </a>
-            .
+            Puedes actualizar tu <b>correo</b> y <b>teléfono</b>. Por seguridad, <b>nombre</b> y <b>RUT</b> solo los modifica el Admin.
           </p>
 
           <form onSubmit={handleSaveProfile} className="space-y-4">
@@ -413,11 +419,13 @@ export default function DashboardPage() {
                 Nombre completo
               </label>
               <input
-                type="text"
-                value={profileForm.fullName}
+                value={fullName}
                 disabled
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                Este dato solo lo puede cambiar el Admin.
+              </p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -426,47 +434,42 @@ export default function DashboardPage() {
                   RUT
                 </label>
                 <input
-                  type="text"
                   value={rut}
                   disabled
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500"
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  Este dato solo lo puede cambiar el Admin.
+                </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
                   Tipo de usuario
                 </label>
-                <select
-                  value={isAdmin ? "admin" : userRole}
+                <input
+                  value={displayedUserType}
                   disabled
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
-                >
-                  {ROLE_OPTIONS.filter((o) => o.value !== "admin").map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                  {isAdmin ? <option value="admin">Admin</option> : null}
-                </select>
-                <p className="mt-2 text-xs text-slate-500">
-                  Los upgrades se evalúan por <b>operaciones</b> + <b>tiempo mínimo</b>. Ultra Premium es por invitación.
-                </p>
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
+                />
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Correo electrónico
+                  Correo
                 </label>
                 <input
                   type="email"
                   value={profileForm.email}
-                  onChange={handleProfileChange("email")}
+                  onChange={handleProfileField("email")}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="tucorreo@ejemplo.cl"
+                  placeholder="tucorreo@ejemplo.com"
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  Si cambias el correo, puede requerir confirmación por email.
+                </p>
               </div>
 
               <div>
@@ -476,64 +479,52 @@ export default function DashboardPage() {
                 <input
                   type="tel"
                   value={profileForm.phone}
-                  onChange={handleProfileChange("phone")}
+                  onChange={handleProfileField("phone")}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="+56 9 ..."
                 />
               </div>
             </div>
 
-            {profileError && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            {profileError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {profileError}
-              </p>
-            )}
+              </div>
+            ) : null}
 
-            {profileSuccess && (
-              <p className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+            {profileSuccess ? (
+              <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
                 {profileSuccess}
-              </p>
-            )}
+              </div>
+            ) : null}
 
             <button
               type="submit"
               disabled={savingProfile}
-              className="inline-flex items-center justify-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {savingProfile ? "Guardando..." : "Guardar cambios"}
             </button>
+
+            {isAdmin ? (
+              <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
+                <b>Admin:</b> para editar usuarios (correo/teléfono/rol) entra a{" "}
+                <button
+                  className="underline font-semibold"
+                  type="button"
+                  onClick={() => router.push("/admin/users")}
+                >
+                  /admin/users
+                </button>
+                .
+              </div>
+            ) : null}
           </form>
         </div>
       );
     }
 
-    if (currentSection === "sales") {
-      return (
-        <PlaceholderCard title="Mis ventas">
-          Próximamente: tus ventas, estado de pago (retenido / listo / pagado),
-          y calificaciones como vendedor.
-        </PlaceholderCard>
-      );
-    }
-
-    if (currentSection === "purchases") {
-      return (
-        <PlaceholderCard title="Mis compras">
-          Próximamente: tus compras, botón “Aprobar” y opción de “Reclamar”.
-        </PlaceholderCard>
-      );
-    }
-
-    if (currentSection === "ratings") {
-      return (
-        <PlaceholderCard title="Mis calificaciones">
-          Próximamente: reputación comprador/vendedor (estrellas + detalle).
-        </PlaceholderCard>
-      );
-    }
-
     if (currentSection === "wallet") {
-      // ✅ pasar user para que vuelva Nombre/RUT "duros"
       return <WalletSection user={user} />;
     }
 
@@ -543,12 +534,7 @@ export default function DashboardPage() {
       return (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)]">
           <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-            <h2 className="text-lg font-semibold mb-4">
-              Crear solicitud de soporte
-            </h2>
-            <p className="text-sm text-slate-500 mb-4">
-              Si tuviste un problema con una compra, venta o cuenta, cuéntanos.
-            </p>
+            <h2 className="text-lg font-semibold mb-4">Crear solicitud de soporte</h2>
 
             <form onSubmit={handleCreateTicket} className="space-y-4">
               <div>
@@ -630,9 +616,7 @@ export default function DashboardPage() {
             {loadingTickets ? (
               <p className="text-sm text-slate-500">Cargando tickets…</p>
             ) : tickets.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                Aún no has creado tickets de soporte.
-              </p>
+              <p className="text-sm text-slate-500">Aún no has creado tickets.</p>
             ) : (
               <>
                 <ul className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
@@ -659,9 +643,7 @@ export default function DashboardPage() {
                       </p>
                       {t.admin_response && (
                         <p className="text-[11px] text-slate-500 border-t border-slate-100 pt-1 mt-1">
-                          <span className="font-semibold">
-                            Respuesta de soporte:{" "}
-                          </span>
+                          <span className="font-semibold">Respuesta: </span>
                           {t.admin_response}
                         </p>
                       )}
@@ -689,9 +671,7 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-lg font-semibold">Todos mis tickets</h2>
-              <p className="text-xs text-slate-500">
-                Historial completo de solicitudes.
-              </p>
+              <p className="text-xs text-slate-500">Historial completo.</p>
             </div>
             <button
               type="button"
@@ -709,14 +689,9 @@ export default function DashboardPage() {
           ) : (
             <ul className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
               {tickets.map((t) => (
-                <li
-                  key={t.id}
-                  className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm"
-                >
+                <li key={t.id} className="border border-slate-200 rounded-xl px-3 py-2.5 text-sm">
                   <div className="flex items-center justify-between mb-1">
-                    <p className="font-medium text-slate-800 truncate">
-                      {t.subject}
-                    </p>
+                    <p className="font-medium text-slate-800 truncate">{t.subject}</p>
                     <StatusPill status={t.status} />
                   </div>
                   <p className="text-xs text-slate-500 mb-1">
@@ -726,14 +701,10 @@ export default function DashboardPage() {
                       timeStyle: "short",
                     })}
                   </p>
-                  <p className="text-xs text-slate-600 mb-1 whitespace-pre-wrap">
-                    {t.message}
-                  </p>
+                  <p className="text-xs text-slate-600 whitespace-pre-wrap">{t.message}</p>
                   {t.admin_response && (
                     <p className="text-[11px] text-slate-500 border-t border-slate-100 pt-1 mt-1">
-                      <span className="font-semibold">
-                        Respuesta de soporte:{" "}
-                      </span>
+                      <span className="font-semibold">Respuesta: </span>
                       {t.admin_response}
                     </p>
                   )}
@@ -748,45 +719,36 @@ export default function DashboardPage() {
     if (currentSection === "admin" && isAdmin) {
       return (
         <div className="grid gap-6 md:grid-cols-3">
-          <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-            <h2 className="text-lg font-semibold mb-2">Eventos</h2>
-            <p className="text-sm text-slate-500 mb-4">Gestor de eventos.</p>
-            <button
-              type="button"
-              onClick={() => router.push("/admin/events")}
-              className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Abrir gestor de eventos
-            </button>
-          </div>
-
-          <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-            <h2 className="text-lg font-semibold mb-2">Tickets de soporte</h2>
-            <p className="text-sm text-slate-500 mb-4">Revisar solicitudes.</p>
-            <button
-              type="button"
-              onClick={() => router.push("/admin/support")}
-              className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Ver tickets de soporte
-            </button>
-          </div>
-
-          <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-            <h2 className="text-lg font-semibold mb-2">Usuarios</h2>
-            <p className="text-sm text-slate-500 mb-4">
-              Administración de usuarios.
-            </p>
-            <button
-              type="button"
-              onClick={() => router.push("/admin/users")}
-              className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Administrar usuarios
-            </button>
-          </div>
+          <AdminCard
+            title="Eventos"
+            desc="Gestor de eventos."
+            onClick={() => router.push("/admin/events")}
+            button="Abrir gestor de eventos"
+          />
+          <AdminCard
+            title="Tickets de soporte"
+            desc="Revisar solicitudes."
+            onClick={() => router.push("/admin/support")}
+            button="Ver tickets de soporte"
+          />
+          <AdminCard
+            title="Usuarios"
+            desc="Administración de usuarios."
+            onClick={() => router.push("/admin/users")}
+            button="Administrar usuarios"
+          />
         </div>
       );
+    }
+
+    // placeholders
+    if (["sales", "purchases", "ratings"].includes(currentSection)) {
+      const map = {
+        sales: { t: "Mis ventas", d: "Próximamente: tus ventas y estado de pago." },
+        purchases: { t: "Mis compras", d: "Próximamente: historial de compras y reclamos." },
+        ratings: { t: "Mis calificaciones", d: "Próximamente: reputación comprador/vendedor." },
+      };
+      return <PlaceholderCard title={map[currentSection].t}>{map[currentSection].d}</PlaceholderCard>;
     }
 
     return null;
@@ -801,8 +763,8 @@ export default function DashboardPage() {
   }
 
   const sidebarSections = isAdmin
-    ? [...BASE_SECTIONS.filter((s) => s.id !== "admin"), { id: "admin", label: "Admin" }]
-    : BASE_SECTIONS.filter((s) => s.id !== "admin");
+    ? [...BASE_SECTIONS, { id: "admin", label: "Admin" }]
+    : BASE_SECTIONS;
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -871,28 +833,39 @@ export default function DashboardPage() {
   );
 }
 
+function AdminCard({ title, desc, onClick, button }) {
+  return (
+    <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+      <h2 className="text-lg font-semibold mb-2">{title}</h2>
+      <p className="text-sm text-slate-500 mb-4">{desc}</p>
+      <button
+        type="button"
+        onClick={onClick}
+        className="text-sm px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+      >
+        {button}
+      </button>
+    </div>
+  );
+}
+
 function PlaceholderCard({ title, children }) {
   return (
     <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
       <h2 className="text-lg font-semibold mb-3">{title}</h2>
       <p className="text-sm text-slate-500 mb-2">{children}</p>
-      <p className="text-xs text-slate-400">
-        Esta sección está en construcción para el MVP.
-      </p>
+      <p className="text-xs text-slate-400">Esta sección está en construcción para el MVP.</p>
     </div>
   );
 }
 
 function StatusPill({ status }) {
-  const base =
-    "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium";
-
+  const base = "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium";
   const map = {
     open: base + " bg-amber-50 text-amber-700 border border-amber-100",
     in_progress: base + " bg-blue-50 text-blue-700 border border-blue-100",
     closed: base + " bg-emerald-50 text-emerald-700 border border-emerald-100",
   };
-
   return <span className={map[status] || base}>{formatStatus(status)}</span>;
 }
 
