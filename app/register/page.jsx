@@ -3,104 +3,86 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
-import { validateRut, formatRut, cleanRut } from "../lib/rutUtils";
+import supabase from "../lib/supabaseClient";
+import { formatRut, isValidRut, normalizeRut } from "../lib/rutUtils";
 
 export default function RegisterPage() {
   const router = useRouter();
 
-  const [form, setForm] = useState({
+  const [formData, setFormData] = useState({
     fullName: "",
     rut: "",
     email: "",
     phone: "",
     userType: "Comprador frecuente",
     password: "",
-    passwordConfirm: "",
+    confirmPassword: "",
   });
 
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+
+    // Formateo suave del RUT mientras escriben
+    if (name === "rut") {
+      setFormData((prev) => ({ ...prev, rut: value }));
+      return;
+    }
+
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleRutBlur = () => {
-    const raw = form.rut.trim();
-    if (!raw) return;
+  const validateForm = () => {
+    setErrorMessage("");
+    setSuccessMessage("");
 
-    const cleaned = cleanRut(raw);
-    if (!validateRut(cleaned)) return;
+    const { fullName, rut, email, phone, userType, password, confirmPassword } =
+      formData;
 
-    setForm((prev) => ({ ...prev, rut: formatRut(cleaned) }));
+    if (!fullName?.trim()) return "Ingresa tu nombre completo.";
+    if (!rut?.trim()) return "Ingresa tu RUT.";
+    if (!isValidRut(rut)) return "El RUT ingresado no es válido.";
+    if (!email?.trim()) return "Ingresa tu correo electrónico.";
+    if (!phone?.trim()) return "Ingresa tu teléfono.";
+    if (!userType?.trim()) return "Selecciona un tipo de usuario.";
+    if (!password) return "Ingresa una contraseña.";
+    if (password.length < 6) return "La contraseña debe tener al menos 6 caracteres.";
+    if (password !== confirmPassword) return "Las contraseñas no coinciden.";
+    if (!acceptTerms)
+      return "Debes aceptar los Términos y Condiciones para crear tu cuenta.";
+
+    return null;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    const validationError = validateForm();
+    if (validationError) {
+      setErrorMessage(validationError);
+      return;
+    }
+
+    setIsSubmitting(true);
     setErrorMessage("");
     setSuccessMessage("");
 
-    const fullName = form.fullName.trim();
-    const rut = form.rut.trim();
-    const email = form.email.trim();
-    const phone = form.phone.trim();
-    const userType = form.userType;
-
-    if (
-      !fullName ||
-      !rut ||
-      !email ||
-      !phone ||
-      !form.password ||
-      !form.passwordConfirm
-    ) {
-      setErrorMessage("Por favor completa todos los campos.");
-      return;
-    }
-
-    if (!acceptTerms) {
-      setErrorMessage(
-        "Debes aceptar los Términos y Condiciones para crear tu cuenta."
-      );
-      return;
-    }
-
-    const cleanedRut = cleanRut(rut);
-    if (!validateRut(cleanedRut)) {
-      setErrorMessage("El RUT no es válido. Revisa el formato y el dígito verificador.");
-      return;
-    }
-
-    if (form.password.length < 6) {
-      setErrorMessage("La contraseña debe tener al menos 6 caracteres.");
-      return;
-    }
-
-    if (form.password !== form.passwordConfirm) {
-      setErrorMessage("Las contraseñas no coinciden.");
-      return;
-    }
-
-    setLoading(true);
-
     try {
+      const rutNormalized = normalizeRut(formData.rut);
+
       const { data, error } = await supabase.auth.signUp({
-        email,
-        password: form.password,
+        email: formData.email,
+        password: formData.password,
         options: {
           data: {
-            full_name: fullName,
-            rut: cleanedRut, // guardamos limpio para consistencia
-            phone,
-            user_type: userType,
-
-            // ✅ consentimiento T&C (importante para respaldo)
-            accepted_terms: true,
-            accepted_terms_at: new Date().toISOString(),
-            terms_version: "v1",
+            full_name: formData.fullName,
+            rut: rutNormalized,
+            phone: formData.phone,
+            user_type: formData.userType,
           },
         },
       });
@@ -108,223 +90,198 @@ export default function RegisterPage() {
       if (error) throw error;
 
       setSuccessMessage(
-        "Cuenta creada ✅ Revisa tu correo para confirmar tu cuenta (si aplica)."
+        "Cuenta creada. Revisa tu correo para confirmar tu registro."
       );
 
-      // Si tu flujo actual no requiere confirmación, puedes redirigir
+      // Si Supabase devuelve sesión (según config), puedes redirigir directo
+      // Si NO devuelve sesión (por confirmación email), mejor enviar a /login con mensaje
       setTimeout(() => {
         router.push("/login");
       }, 900);
     } catch (err) {
-      setErrorMessage(err?.message || "Ocurrió un error al crear la cuenta.");
+      setErrorMessage(err?.message || "No pudimos crear tu cuenta. Intenta nuevamente.");
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Header simple */}
-      <header className="w-full border-b bg-white">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-xl font-semibold text-blue-600">TixSwap</span>
-            <span className="text-sm text-gray-500">Reventa segura, en un clic</span>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className="px-4 py-2 rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
-            >
-              Iniciar sesión
-            </Link>
-            <Link
-              href="/register"
-              className="px-4 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Crear cuenta
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Contenido */}
-      <main className="max-w-6xl mx-auto px-6 py-10 flex justify-center">
-        <div className="w-full max-w-md bg-white border border-gray-100 rounded-2xl shadow-sm p-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-1">Crear cuenta</h1>
-          <p className="text-gray-500 mb-6">
+    <main className="min-h-screen bg-white">
+      <div className="mx-auto max-w-md px-4 py-12">
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-bold text-gray-900">Crear cuenta</h1>
+          <p className="mt-1 text-sm text-gray-600">
             Regístrate para comprar y vender entradas de forma segura.
           </p>
 
-          {errorMessage ? (
-            <div className="mb-4 rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-red-700 text-sm">
+          {errorMessage && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {errorMessage}
             </div>
-          ) : null}
+          )}
 
-          {successMessage ? (
-            <div className="mb-4 rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-green-700 text-sm">
+          {successMessage && (
+            <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
               {successMessage}
             </div>
-          ) : null}
+          )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Nombre */}
+          <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700">
                 Nombre completo
               </label>
               <input
+                name="fullName"
                 type="text"
-                placeholder="Ej: David Chacón"
-                value={form.fullName}
-                onChange={(e) => handleChange("fullName", e.target.value)}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={formData.fullName}
+                onChange={handleChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                placeholder="Ej: Juan Pérez"
+                autoComplete="name"
               />
             </div>
 
-            {/* RUT */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                RUT
-              </label>
+              <label className="block text-sm font-medium text-gray-700">RUT</label>
               <input
+                name="rut"
                 type="text"
-                placeholder="Ej: 12.345.678-9"
-                value={form.rut}
-                onChange={(e) => handleChange("rut", e.target.value)}
-                onBlur={handleRutBlur}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={formData.rut}
+                onChange={handleChange}
+                onBlur={() =>
+                  setFormData((prev) => ({ ...prev, rut: formatRut(prev.rut) }))
+                }
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                placeholder="12.345.678-9"
+                autoComplete="off"
               />
               <p className="mt-1 text-xs text-gray-500">
                 Validaremos que el RUT sea correcto (incluyendo dígito verificador).
               </p>
             </div>
 
-            {/* Email */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700">
                 Correo electrónico
               </label>
               <input
+                name="email"
                 type="email"
-                placeholder="tucorreo@gmail.com"
-                value={form.email}
-                onChange={(e) => handleChange("email", e.target.value)}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={formData.email}
+                onChange={handleChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                placeholder="tucorreo@correo.com"
+                autoComplete="email"
               />
             </div>
 
-            {/* Teléfono */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700">
                 Teléfono
               </label>
               <input
+                name="phone"
                 type="tel"
-                placeholder="+569..."
-                value={form.phone}
-                onChange={(e) => handleChange("phone", e.target.value)}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={formData.phone}
+                onChange={handleChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                placeholder="+56912345678"
+                autoComplete="tel"
               />
             </div>
 
-            {/* Tipo */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700">
                 Tipo de usuario
               </label>
               <select
-                value={form.userType}
-                onChange={(e) => handleChange("userType", e.target.value)}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                name="userType"
+                value={formData.userType}
+                onChange={handleChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
               >
                 <option>Comprador frecuente</option>
                 <option>Vendedor frecuente</option>
-                <option>Ambos (comprar y vender)</option>
               </select>
             </div>
 
-            {/* Password */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700">
                 Contraseña
               </label>
               <input
+                name="password"
                 type="password"
-                placeholder="********"
-                value={form.password}
-                onChange={(e) => handleChange("password", e.target.value)}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={formData.password}
+                onChange={handleChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                autoComplete="new-password"
               />
             </div>
 
-            {/* Confirmar password */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700">
                 Repetir contraseña
               </label>
               <input
+                name="confirmPassword"
                 type="password"
-                placeholder="********"
-                value={form.passwordConfirm}
-                onChange={(e) => handleChange("passwordConfirm", e.target.value)}
-                className="w-full rounded-xl border border-gray-200 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                autoComplete="new-password"
               />
             </div>
 
-            {/* ✅ Términos y condiciones (OBLIGATORIO) */}
+            {/* ✅ Términos */}
             <div className="pt-1">
-              <label className="flex items-start gap-3 cursor-pointer select-none">
+              <label className="flex items-start gap-3 text-sm text-gray-700">
                 <input
                   type="checkbox"
                   checked={acceptTerms}
-                  onChange={(e) => {
-                    const checked = e.target.checked;
-                    setAcceptTerms(checked);
-                    if (checked) setErrorMessage("");
-                  }}
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-200"
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300"
                 />
-                <span className="text-sm text-gray-700 leading-5">
+                <span>
                   He leído y acepto los{" "}
                   <Link
                     href="/legal/terms"
+                    className="font-medium text-blue-600 hover:underline"
                     target="_blank"
-                    className="text-blue-600 hover:underline font-medium"
                   >
                     Términos y Condiciones
                   </Link>{" "}
                   de TixSwap.
+                  <div className="mt-1 text-xs text-gray-500">
+                    Si no aceptas los Términos, no podrás crear tu cuenta.
+                  </div>
                 </span>
               </label>
-              <p className="mt-2 text-xs text-gray-500">
-                Si no aceptas los Términos, no podrás crear tu cuenta.
-              </p>
             </div>
 
+            {/* ✅ Botón: ahora ES submit, no revienta */}
             <button
               type="submit"
-              disabled={loading || !acceptTerms}
-              className={`w-full rounded-xl px-4 py-3 font-semibold text-white transition ${
-                loading || !acceptTerms
+              disabled={isSubmitting || !acceptTerms}
+              className={`w-full rounded-xl px-4 py-3 text-sm font-semibold text-white transition ${
+                isSubmitting || !acceptTerms
                   ? "bg-blue-300 cursor-not-allowed"
                   : "bg-blue-600 hover:bg-blue-700"
               }`}
             >
-              {loading ? "Creando..." : "Crear cuenta"}
+              {isSubmitting ? "Creando..." : "Crear cuenta"}
             </button>
 
-            <p className="text-sm text-gray-600 text-center">
+            <p className="text-center text-sm text-gray-600">
               ¿Ya tienes cuenta?{" "}
-              <Link href="/login" className="text-blue-600 hover:underline">
+              <Link href="/login" className="font-medium text-blue-600 hover:underline">
                 Iniciar sesión
               </Link>
             </p>
           </form>
         </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
