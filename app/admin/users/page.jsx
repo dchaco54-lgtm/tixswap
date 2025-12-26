@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
-import { ROLE_OPTIONS, normalizeRole } from "@/lib/roles";
+import { ROLE_OPTIONS, normalizeRole, roleCommissionLabel } from "@/lib/roles";
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -16,11 +16,20 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
 
   const [query, setQuery] = useState("");
-  const [savingId, setSavingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  // edición local por fila (no auto-save)
-  const [edits, setEdits] = useState({}); // { [id]: { email, phone } }
+  // modal edit
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [editForm, setEditForm] = useState({
+    full_name: "",
+    rut: "",
+    email: "",
+    phone: "",
+    role: "basic",
+    is_blocked: false,
+  });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -83,17 +92,6 @@ export default function AdminUsersPage() {
     }
 
     setUsers(allUsers || []);
-
-    // preload edits
-    const initEdits = {};
-    (allUsers || []).forEach((u) => {
-      initEdits[u.id] = {
-        email: u.email || "",
-        phone: u.phone || "",
-      };
-    });
-    setEdits(initEdits);
-
     setLoading(false);
   };
 
@@ -109,100 +107,76 @@ export default function AdminUsersPage() {
     });
   }, [query, users]);
 
-  const handleChangeRole = async (userId, newRole) => {
-    try {
-      setSavingId(userId);
-      setErrorMsg(null);
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ role: newRole })
-        .eq("id", userId);
-
-      if (error) {
-        console.error(error);
-        setErrorMsg("No se pudo actualizar el rol.");
-        return;
-      }
-
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-      );
-    } finally {
-      setSavingId(null);
-    }
+  const openEditModal = (u) => {
+    setSelectedUser(u);
+    setEditForm({
+      full_name: u.full_name || "",
+      rut: u.rut || "",
+      email: u.email || "",
+      phone: u.phone || "",
+      role: normalizeRole(u.role || "basic"),
+      is_blocked: !!u.is_blocked,
+    });
+    setIsModalOpen(true);
   };
 
-  const handleToggleBlock = async (userId, current) => {
-    try {
-      setSavingId(userId);
-      setErrorMsg(null);
-
-      const { error } = await supabase
-        .from("profiles")
-        .update({ is_blocked: !current })
-        .eq("id", userId);
-
-      if (error) {
-        console.error(error);
-        setErrorMsg("No se pudo actualizar el estado.");
-        return;
-      }
-
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, is_blocked: !current } : u))
-      );
-    } finally {
-      setSavingId(null);
-    }
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedUser(null);
+    setSaving(false);
+    setEditForm({
+      full_name: "",
+      rut: "",
+      email: "",
+      phone: "",
+      role: "basic",
+      is_blocked: false,
+    });
   };
 
-  const handleEditField = (userId, field) => (e) => {
-    const value = e.target.value;
-    setEdits((prev) => ({
-      ...prev,
-      [userId]: {
-        ...prev[userId],
-        [field]: value,
-      },
-    }));
+  const handleFormChange = (field) => (e) => {
+    const value = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    setEditForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSaveContact = async (userId) => {
+  const handleSave = async () => {
+    if (!selectedUser?.id) return;
+
     try {
-      setSavingId(userId);
+      setSaving(true);
       setErrorMsg(null);
 
       const payload = {
-        email: (edits[userId]?.email || "").trim(),
-        phone: (edits[userId]?.phone || "").trim(),
+        full_name: String(editForm.full_name || "").trim(),
+        rut: String(editForm.rut || "").trim(),
+        email: String(editForm.email || "").trim().toLowerCase(),
+        phone: String(editForm.phone || "").trim(),
+        role: normalizeRole(editForm.role || "basic"),
+        is_blocked: !!editForm.is_blocked,
       };
 
       const { error } = await supabase
         .from("profiles")
         .update(payload)
-        .eq("id", userId);
+        .eq("id", selectedUser.id);
 
       if (error) {
         console.error(error);
-        setErrorMsg("No se pudo guardar correo/teléfono.");
+        setErrorMsg(
+          error.message || "No se pudo guardar el perfil. Revisa los datos."
+        );
         return;
       }
 
+      // reflejar en tabla (sin recargar todo)
       setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, ...payload } : u))
+        prev.map((u) => (u.id === selectedUser.id ? { ...u, ...payload } : u))
       );
-    } finally {
-      setSavingId(null);
-    }
-  };
 
-  const handleResetContact = (userId) => {
-    const u = users.find((x) => x.id === userId);
-    setEdits((prev) => ({
-      ...prev,
-      [userId]: { email: u?.email || "", phone: u?.phone || "" },
-    }));
+      closeModal();
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (checking) {
@@ -271,7 +245,7 @@ export default function AdminUsersPage() {
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500">
               <tr>
-                <th className="py-3 px-4 text-left font-medium">Correo (contacto)</th>
+                <th className="py-3 px-4 text-left font-medium">Correo</th>
                 <th className="py-3 px-4 text-left font-medium">Teléfono</th>
                 <th className="py-3 px-4 text-left font-medium">Nombre</th>
                 <th className="py-3 px-4 text-left font-medium">RUT</th>
@@ -295,99 +269,50 @@ export default function AdminUsersPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((u) => {
-                  const rowEdit = edits[u.id] || { email: u.email || "", phone: u.phone || "" };
-                  const isDirty = rowEdit.email !== (u.email || "") || rowEdit.phone !== (u.phone || "");
-                  const disabled = savingId === u.id;
+                filtered.map((u) => (
+                  <tr key={u.id} className="border-t border-slate-100">
+                    <td className="py-2.5 px-4 text-slate-800">
+                      <div className="max-w-[260px] truncate">{u.email || "—"}</div>
+                    </td>
 
-                  return (
-                    <tr key={u.id} className="border-t border-slate-100">
-                      <td className="py-3 px-4">
-                        <input
-                          value={rowEdit.email}
-                          onChange={handleEditField(u.id, "email")}
-                          disabled={disabled}
-                          className="w-[260px] border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
-                        />
-                        <p className="mt-1 text-[10px] text-slate-400">
-                          *Correo de contacto (no cambia el login)
-                        </p>
-                      </td>
+                    <td className="py-2.5 px-4 text-slate-700">
+                      {u.phone || "—"}
+                    </td>
 
-                      <td className="py-3 px-4">
-                        <input
-                          value={rowEdit.phone}
-                          onChange={handleEditField(u.id, "phone")}
-                          disabled={disabled}
-                          className="w-[160px] border border-slate-200 rounded-lg px-2 py-1.5 text-sm"
-                          placeholder="+56 9..."
-                        />
-                      </td>
+                    <td className="py-2.5 px-4 text-slate-700">
+                      {u.full_name || "—"}
+                    </td>
 
-                      <td className="py-3 px-4 text-slate-700">{u.full_name || "—"}</td>
-                      <td className="py-3 px-4 text-slate-700">{u.rut || "—"}</td>
+                    <td className="py-2.5 px-4 text-slate-700">
+                      {u.rut || "—"}
+                    </td>
 
-                      <td className="py-3 px-4">
-                        <select
-                          value={normalizeRole(u.role || "basic")}
-                          disabled={disabled}
-                          onChange={(e) => handleChangeRole(u.id, e.target.value)}
-                          className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white"
-                        >
-                          {ROLE_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
+                    <td className="py-2.5 px-4 text-slate-700">
+                      {u.role ? roleCommissionLabel(u.role) : roleCommissionLabel("basic")}
+                    </td>
 
-                      <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                            u.is_blocked
-                              ? "bg-red-50 text-red-700 border border-red-200"
-                              : "bg-green-50 text-green-700 border border-green-200"
-                          }`}
-                        >
-                          {u.is_blocked ? "Bloqueado" : "Activo"}
-                        </span>
-                      </td>
+                    <td className="py-2.5 px-4">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                          u.is_blocked
+                            ? "bg-red-50 text-red-700 border border-red-200"
+                            : "bg-green-50 text-green-700 border border-green-200"
+                        }`}
+                      >
+                        {u.is_blocked ? "Bloqueado" : "Activo"}
+                      </span>
+                    </td>
 
-                      <td className="py-3 px-4">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => handleToggleBlock(u.id, !!u.is_blocked)}
-                            disabled={disabled}
-                            className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
-                              u.is_blocked
-                                ? "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                                : "bg-white text-red-700 border-red-200 hover:bg-red-50"
-                            }`}
-                          >
-                            {u.is_blocked ? "Desbloquear" : "Bloquear"}
-                          </button>
-
-                          <button
-                            onClick={() => handleSaveContact(u.id)}
-                            disabled={disabled || !isDirty}
-                            className="rounded-lg px-3 py-1.5 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            Guardar
-                          </button>
-
-                          <button
-                            onClick={() => handleResetContact(u.id)}
-                            disabled={disabled || !isDirty}
-                            className="rounded-lg px-3 py-1.5 text-xs font-medium border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                    <td className="py-2.5 px-4">
+                      <button
+                        onClick={() => openEditModal(u)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+                      >
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -398,6 +323,151 @@ export default function AdminUsersPage() {
           Ultra Premium es por invitación/manual.
         </p>
       </div>
+
+      {/* MODAL */}
+      {isModalOpen && selectedUser ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          {/* overlay */}
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={saving ? undefined : closeModal}
+          />
+
+          {/* card */}
+          <div className="relative w-full max-w-lg rounded-2xl bg-white shadow-xl border border-slate-100 p-6">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Editar usuario</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  ID: <span className="font-mono text-[12px]">{selectedUser.id}</span>
+                </p>
+              </div>
+
+              <button
+                onClick={saving ? undefined : closeModal}
+                className="rounded-lg px-3 py-1.5 text-sm border border-slate-200 bg-white hover:bg-slate-50"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Nombre
+                </label>
+                <input
+                  value={editForm.full_name}
+                  onChange={handleFormChange("full_name")}
+                  disabled={saving}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  RUT
+                </label>
+                <input
+                  value={editForm.rut}
+                  onChange={handleFormChange("rut")}
+                  disabled={saving}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Correo
+                </label>
+                <input
+                  value={editForm.email}
+                  onChange={handleFormChange("email")}
+                  disabled={saving}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Teléfono
+                </label>
+                <input
+                  value={editForm.phone}
+                  onChange={handleFormChange("phone")}
+                  disabled={saving}
+                  placeholder="+569..."
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Rol
+                </label>
+                <select
+                  value={editForm.role}
+                  onChange={handleFormChange("role")}
+                  disabled={saving}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
+                >
+                  {ROLE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">Estado</p>
+                  <p className="text-xs text-slate-500">
+                    Si está bloqueado, no debería operar en la plataforma.
+                  </p>
+                </div>
+
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <span className="text-slate-700">
+                    {editForm.is_blocked ? "Bloqueado" : "Activo"}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_blocked}
+                    onChange={handleFormChange("is_blocked")}
+                    disabled={saving}
+                    className="h-4 w-4"
+                  />
+                </label>
+              </div>
+            </div>
+
+            {errorMsg ? (
+              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {errorMsg}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                onClick={closeModal}
+                disabled={saving}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancelar
+              </button>
+
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {saving ? "Guardando…" : "Guardar cambios"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
