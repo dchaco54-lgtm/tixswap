@@ -25,7 +25,7 @@ export async function GET(req) {
       auth: { persistSession: false },
     });
 
-    // Auth Bearer
+    // Bearer token
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return json({ error: "UNAUTHORIZED" }, 401);
@@ -34,13 +34,13 @@ export async function GET(req) {
     if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
 
     // Validar admin
-    const { data: prof } = await supabaseAdmin
+    const { data: prof, error: profErr } = await supabaseAdmin
       .from("profiles")
       .select("role")
       .eq("id", u.user.id)
       .maybeSingle();
 
-    if (prof?.role !== "admin") return json({ error: "FORBIDDEN" }, 403);
+    if (profErr || prof?.role !== "admin") return json({ error: "FORBIDDEN" }, 403);
 
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") || "").trim();
@@ -52,19 +52,17 @@ export async function GET(req) {
       .order("created_at", { ascending: false })
       .limit(500);
 
-    if (status && status !== "all") {
-      query = query.eq("status", status);
-    }
+    if (status !== "all") query = query.eq("status", status);
 
-    // Filtro server-side opcional (además del filtro en el front)
     if (q) {
       const qLower = q.toLowerCase();
       const digits = qLower.replace("ts-", "").replace(/[^0-9]/g, "");
+
       if (digits.length) {
         const n = Number(digits);
         if (!Number.isNaN(n)) query = query.eq("ticket_number", n);
       } else {
-        // Si tus columnas existen (en tu UI ya se usan, así que deberían)
+        // Ajustado a tus campos típicos
         query = query.or(
           `subject.ilike.%${q}%,requester_email.ilike.%${q}%,requester_rut.ilike.%${q}%`
         );
