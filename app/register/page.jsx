@@ -1,10 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 import { formatRut, isValidRut } from "../lib/rutUtils";
 
 export default function RegisterPage() {
+  const router = useRouter();
   const topRef = useRef(null);
 
   const [fullName, setFullName] = useState("");
@@ -20,7 +22,6 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
 
   const scrollTop = () => {
-    // para que veas el error aunque estés scrolleado abajo
     if (topRef.current) {
       topRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
     } else if (typeof window !== "undefined") {
@@ -29,13 +30,11 @@ export default function RegisterPage() {
   };
 
   const normalizeRutForDb = (rutAny) => {
-    // deja: 12345678-9 (sin puntos, DV en mayúscula)
     const clean = String(rutAny || "")
       .replace(/\./g, "")
       .replace(/\s/g, "")
       .toUpperCase();
 
-    // si viene como 123456789, intenta armarlo
     if (!clean.includes("-") && clean.length >= 2) {
       const body = clean.slice(0, -1);
       const dv = clean.slice(-1);
@@ -46,8 +45,7 @@ export default function RegisterPage() {
 
   const isFakeRut = (rutNormalized) => {
     const body = (rutNormalized || "").split("-")[0] || "";
-    // bloquea 11111111, 22222222, etc.
-    return /^(\d)\1+$/.test(body);
+    return /^(\d)\1+$/.test(body); // 11111111, 22222222, etc.
   };
 
   const handleSubmit = async (e) => {
@@ -55,8 +53,6 @@ export default function RegisterPage() {
     setError("");
     setMessage("");
 
-    // doble seguro: aunque el botón esté deshabilitado, y aunque exista required,
-    // igual validamos por JS (por si el usuario manda Enter, etc.)
     if (!acceptedTerms) {
       setError("Debes aceptar los Términos y Condiciones.");
       scrollTop();
@@ -108,7 +104,7 @@ export default function RegisterPage() {
         return;
       }
 
-      // 2) Crear cuenta (correo de confirmación lo maneja Supabase si está activado)
+      // 2) Crear cuenta (Supabase manda correo si Confirm Email está ON)
       const redirectTo =
         typeof window !== "undefined"
           ? `${window.location.origin}/login`
@@ -129,25 +125,28 @@ export default function RegisterPage() {
 
       if (signUpError) {
         const msg = (signUpError.message || "").toLowerCase();
-
-        // Mensajes más claros (porque si no, parece que "no hizo nada")
         if (msg.includes("redirect") && msg.includes("not allowed")) {
           throw new Error(
             "El link de confirmación no se pudo generar (redirect no permitido). Revisa en Supabase: Auth → URL Configuration (Site URL / Redirect URLs)."
           );
         }
-
         throw signUpError;
       }
 
+      // Caso SaaS normal: user creado, pero sin sesión => esperar confirmación
       if (data?.user && !data?.session) {
         setMessage(
-          "¡Cuenta creada! Revisa tu correo para confirmar tu cuenta (incluye spam)."
+          "Te enviamos un correo para validar tu cuenta. Revisa tu bandeja (y spam)."
         );
-      } else {
-        setMessage("¡Cuenta creada y sesión iniciada!");
+        scrollTop();
+
+        // manda a página de espera clara tipo SaaS
+        router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+        return;
       }
 
+      // Si por algún motivo quedó logeado inmediatamente
+      setMessage("¡Cuenta creada y sesión iniciada!");
       scrollTop();
 
       setFullName("");
@@ -196,6 +195,7 @@ export default function RegisterPage() {
               placeholder="Juan Perez"
               className="w-full bg-[#eaf2ff] rounded-xl px-4 py-3 outline-none"
               required
+              disabled={loading}
             />
           </div>
 
@@ -208,6 +208,7 @@ export default function RegisterPage() {
               placeholder="12.345.678-9"
               className="w-full bg-[#eaf2ff] rounded-xl px-4 py-3 outline-none"
               required
+              disabled={loading}
             />
           </div>
 
@@ -222,6 +223,7 @@ export default function RegisterPage() {
               placeholder="correo@ejemplo.com"
               className="w-full bg-[#eaf2ff] rounded-xl px-4 py-3 outline-none"
               required
+              disabled={loading}
             />
           </div>
 
@@ -234,6 +236,7 @@ export default function RegisterPage() {
               placeholder="+56912345678"
               className="w-full bg-[#eaf2ff] rounded-xl px-4 py-3 outline-none"
               required
+              disabled={loading}
             />
           </div>
 
@@ -245,6 +248,7 @@ export default function RegisterPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-white border rounded-xl px-4 py-3 outline-none"
               required
+              disabled={loading}
             />
           </div>
 
@@ -258,6 +262,7 @@ export default function RegisterPage() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full bg-white border rounded-xl px-4 py-3 outline-none"
               required
+              disabled={loading}
             />
           </div>
 
@@ -303,3 +308,4 @@ export default function RegisterPage() {
     </div>
   );
 }
+
