@@ -1,286 +1,490 @@
 // app/dashboard/tickets/page.jsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 
-export default function TicketsPage() {
+const STATUS = [
+  { v: "submitted", l: "Enviado" },
+  { v: "in_review", l: "En revisión" },
+  { v: "waiting_user", l: "Pendiente de antecedentes" },
+  { v: "rejected", l: "Rechazado" },
+  { v: "resolved", l: "Finalizado" },
+];
+
+const CATEGORY_LABEL = (c) => {
+  if (c === "soporte") return "Soporte general";
+  if (c === "disputa_compra") return "Disputa por compra";
+  if (c === "disputa_venta") return "Disputa por venta";
+  if (c === "reclamo") return "Reclamo";
+  if (c === "sugerencia") return "Sugerencia";
+  if (c === "otro") return "Otro";
+  return c || "—";
+};
+
+function fmtCL(dt) {
+  if (!dt) return "—";
+  return new Date(dt).toLocaleString("es-CL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+export default function MyTicketsPage() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
-  const [loadingUser, setLoadingUser] = useState(true);
 
+  const [boot, setBoot] = useState(true);
   const [tickets, setTickets] = useState([]);
-  const [loadingTickets, setLoadingTickets] = useState(true);
+  const [loadingList, setLoadingList] = useState(true);
 
+  const [selectedId, setSelectedId] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [attachments, setAttachments] = useState([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [categoryFilter, setCategoryFilter] = useState("all");
+
+  const [draft, setDraft] = useState("");
+  const [pendingUploads, setPendingUploads] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const [err, setErr] = useState("");
+
+  const getAccessToken = async () => {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || null;
+  };
+
+  const refreshList = async () => {
+    setLoadingList(true);
+    setErr("");
+
+    try {
+      const token = await getAccessToken();
+      const url = new URL(window.location.origin + "/support/my/tickets");
+      url.searchParams.set("status", statusFilter);
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No pudimos cargar tickets");
+
+      setTickets(json.tickets || []);
+      if (!selectedId && (json.tickets || []).length) setSelectedId(json.tickets[0].id);
+    } catch (e) {
+      setErr(e.message || "Error cargando tickets");
+      setTickets([]);
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  const loadDetail = async (ticketId) => {
+    setLoadingDetail(true);
+    setErr("");
+    setDraft("");
+    setPendingUploads([]);
+
+    try {
+      const token = await getAccessToken();
+      const url = new URL(window.location.origin + "/support/my/ticket");
+      url.searchParams.set("id", ticketId);
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No pudimos abrir el ticket");
+
+      setSelected(json.ticket);
+      setMessages(json.messages || []);
+      setAttachments(json.attachments || []);
+    } catch (e) {
+      setErr(e.message || "Error abriendo ticket");
+      setSelected(null);
+      setMessages([]);
+      setAttachments([]);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      const {
-        data: { user },
-        error,
-      } = await supabase.auth.getUser();
-
-      if (error) {
-        console.error(error);
-      }
-
-      if (!user) {
+    const init = async () => {
+      setBoot(true);
+      const { data } = await supabase.auth.getUser();
+      if (!data?.user) {
         router.push("/login");
         return;
       }
-
-      setUser(user);
-
-      const { data: ticketsData, error: ticketsError } = await supabase
-        .from("support_tickets")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (ticketsError) {
-        console.error(ticketsError);
-        setTickets([]);
-      } else {
-        setTickets(ticketsData || []);
-      }
-
-      setLoadingTickets(false);
-      setLoadingUser(false);
+      setBoot(false);
+      await refreshList();
     };
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    load();
-  }, [router]);
+  useEffect(() => {
+    if (boot) return;
+    refreshList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
 
-  const goHome = () => router.push("/");
-  const goDashboard = () => router.push("/dashboard");
+  useEffect(() => {
+    if (!selectedId) return;
+    loadDetail(selectedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
-  const filteredTickets = tickets.filter((t) => {
-    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return tickets;
+    return tickets.filter((t) => {
+      const n = `ts-${t.ticket_number || ""}`.toLowerCase();
+      const subj = (t.subject || "").toLowerCase();
+      return n.includes(qq) || subj.includes(qq);
+    });
+  }, [q, tickets]);
 
-    if (categoryFilter !== "all") {
-      if (categoryFilter === "disputas") {
-        return (
-          t.category === "disputa" ||
-          t.category === "disputa_compra" ||
-          t.category === "disputa_venta"
-        );
+  const onPickFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !selected?.id) return;
+
+    setUploading(true);
+    setErr("");
+
+    try {
+      const token = await getAccessToken();
+      const uploaded = [];
+
+      for (const f of files) {
+        const form = new FormData();
+        form.append("ticketId", selected.id);
+        form.append("file", f);
+
+        const res = await fetch("/support/upload", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error || "Upload falló");
+
+        uploaded.push(json.attachment);
       }
-      if (categoryFilter === "sugerencias") {
-        return t.category === "sugerencia";
-      }
-      if (categoryFilter === "reclamos") {
-        return t.category === "reclamo";
-      }
-      if (categoryFilter === "soporte") {
-        return t.category === "soporte";
-      }
-      if (categoryFilter === "otros") {
-        return (
-          t.category !== "soporte" &&
-          t.category !== "disputa" &&
-          t.category !== "disputa_compra" &&
-          t.category !== "disputa_venta" &&
-          t.category !== "sugerencia" &&
-          t.category !== "reclamo"
-        );
-      }
+
+      setPendingUploads((prev) => [...prev, ...uploaded]);
+      e.target.value = "";
+    } catch (e2) {
+      setErr(e2.message || "Error subiendo archivos");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const canReply =
+    selected &&
+    selected.status !== "resolved" &&
+    selected.status !== "rejected";
+
+  const sendMessage = async () => {
+    if (!selected?.id) return;
+    if (!draft.trim() && pendingUploads.length === 0) {
+      setErr("Escribe un mensaje o adjunta algo.");
+      return;
     }
 
-    return true;
-  });
+    setSending(true);
+    setErr("");
 
-  if (loadingUser) {
+    try {
+      const token = await getAccessToken();
+      const res = await fetch("/support/message", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ticket_id: selected.id,
+          body: draft.trim(),
+          attachment_ids: pendingUploads.map((a) => a.id),
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo enviar el mensaje");
+
+      setDraft("");
+      setPendingUploads([]);
+      await loadDetail(selected.id);
+      await refreshList();
+    } catch (e) {
+      setErr(e.message || "Error enviando mensaje");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (boot) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-sm text-slate-500">Cargando tu cuenta…</p>
+        <p className="text-sm text-slate-500">Cargando…</p>
       </main>
     );
   }
 
   return (
     <main className="min-h-screen bg-slate-50">
-      <div className="max-w-5xl mx-auto px-4 py-10 md:py-12">
-        <div className="flex items-center justify-between mb-8">
+      <div className="max-w-7xl mx-auto px-4 py-10">
+        <div className="flex items-start justify-between gap-3 mb-6">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
-              Mis tickets de soporte
+              Mis tickets
             </h1>
             <p className="text-sm text-slate-500">
-              Revisa el historial completo de tus solicitudes a TixSwap.
+              Aquí queda el historial y el chat con soporte.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={goDashboard}
-              className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
-            >
-              Volver al panel
-            </button>
-            <button
-              onClick={goHome}
-              className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
-            >
-              Comprar / vender entradas
-            </button>
-          </div>
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="text-sm px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
+          >
+            Volver al panel
+          </button>
         </div>
 
-        {/* Filtros */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm mb-6">
-          <div className="flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
-            <div className="flex flex-wrap gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Estado
-                </label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="all">Todos</option>
-                  <option value="open">Abierto</option>
-                  <option value="in_progress">En revisión</option>
-                  <option value="closed">Cerrado</option>
-                </select>
-              </div>
+        {err ? (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {err}
+          </div>
+        ) : null}
 
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">
-                  Tipo de ticket
-                </label>
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="all">Todos</option>
-                  <option value="soporte">Soporte general</option>
-                  <option value="disputas">Disputas compra/venta</option>
-                  <option value="sugerencias">Sugerencias TixSwap</option>
-                  <option value="reclamos">Reclamos TixSwap</option>
-                  <option value="otros">Otros</option>
-                </select>
-              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
+          {/* LISTA */}
+          <div className="bg-white border border-slate-100 rounded-2xl p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-semibold text-slate-900">Tickets</h2>
+              <button
+                onClick={refreshList}
+                className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+              >
+                Recargar
+              </button>
             </div>
 
-            <p className="text-xs text-slate-400">
-              {filteredTickets.length} ticket
-              {filteredTickets.length === 1 ? "" : "s"} encontrados.
-            </p>
-          </div>
-        </div>
+            <div className="mt-3">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar TS-1001 o asunto..."
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
 
-        {/* Lista completa */}
-        <div className="bg-white border border-slate-100 rounded-2xl p-4 md:p-6 shadow-sm">
-          {loadingTickets ? (
-            <p className="text-sm text-slate-500">
-              Cargando tus tickets de soporte…
-            </p>
-          ) : filteredTickets.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              No encontramos tickets con los filtros seleccionados.
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {filteredTickets.map((t) => (
-                <li
-                  key={t.id}
-                  className="border border-slate-200 rounded-xl px-3 py-3 text-sm"
-                >
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-1.5">
-                    <div>
-                      <p className="font-medium text-slate-900">
-                        {t.subject}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {formatCategory(t.category)} ·{" "}
-                        {new Date(t.created_at).toLocaleString("es-CL", {
-                          dateStyle: "short",
-                          timeStyle: "short",
-                        })}
-                      </p>
+            <div className="mt-2">
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Estado
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
+              >
+                <option value="all">Todos</option>
+                {STATUS.map((s) => (
+                  <option key={s.v} value={s.v}>
+                    {s.l}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-4 space-y-2 max-h-[70vh] overflow-auto pr-1">
+              {loadingList ? (
+                <p className="text-sm text-slate-500">Cargando…</p>
+              ) : filtered.length === 0 ? (
+                <p className="text-sm text-slate-500">No hay tickets.</p>
+              ) : (
+                filtered.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedId(t.id)}
+                    className={`w-full text-left rounded-2xl border px-3 py-3 hover:bg-slate-50 ${
+                      selectedId === t.id
+                        ? "border-blue-200 bg-blue-50/40"
+                        : "border-slate-100 bg-white"
+                    }`}
+                  >
+                    <div className="text-xs font-semibold text-slate-700">
+                      TS-{t.ticket_number}
                     </div>
-                    <StatusPill status={t.status} />
+                    <p className="text-sm font-semibold text-slate-900 line-clamp-1 mt-1">
+                      {t.subject || "Sin asunto"}
+                    </p>
+                    <p className="text-xs text-slate-500 line-clamp-1 mt-1">
+                      {CATEGORY_LABEL(t.category)} · Último:{" "}
+                      {fmtCL(t.last_message_at || t.created_at)}
+                    </p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* DETALLE */}
+          <div className="bg-white border border-slate-100 rounded-2xl p-4">
+            {!selected ? (
+              <p className="text-sm text-slate-500">
+                Selecciona un ticket para verlo.
+              </p>
+            ) : loadingDetail ? (
+              <p className="text-sm text-slate-500">Cargando ticket…</p>
+            ) : (
+              <>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">
+                    TS-{selected.ticket_number}
+                  </h2>
+                  <p className="text-sm text-slate-700 mt-1 font-semibold">
+                    {selected.subject}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {CATEGORY_LABEL(selected.category)} · Creado:{" "}
+                    {fmtCL(selected.created_at)} · Estado:{" "}
+                    <b>{STATUS.find((x) => x.v === selected.status)?.l || selected.status}</b>
+                  </p>
+                </div>
+
+                <div className="mt-4 border-t border-slate-100 pt-4">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-3">
+                    Conversación
+                  </h3>
+
+                  <div className="space-y-3 max-h-[46vh] overflow-auto pr-1">
+                    {messages.map((m) => {
+                      const mine = m.sender_type === "user";
+                      const related = attachments.filter((a) => a.message_id === m.id);
+                      return (
+                        <div
+                          key={m.id}
+                          className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                        >
+                          <div
+                            className={`max-w-[85%] rounded-2xl border px-3 py-2 ${
+                              mine
+                                ? "bg-blue-50 border-blue-100"
+                                : "bg-slate-50 border-slate-100"
+                            }`}
+                          >
+                            <div className="text-[11px] text-slate-500 flex items-center justify-between gap-3">
+                              <span className="font-semibold">
+                                {mine ? "Tú" : "TixSwap"}
+                              </span>
+                              <span>{fmtCL(m.created_at)}</span>
+                            </div>
+
+                            {m.body ? (
+                              <p className="text-sm text-slate-800 whitespace-pre-line mt-1">
+                                {m.body}
+                              </p>
+                            ) : null}
+
+                            {related.length ? (
+                              <div className="mt-2 space-y-1">
+                                {related.map((a) => (
+                                  <a
+                                    key={a.id}
+                                    href={a.signed_url || "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block text-xs text-blue-700 hover:underline"
+                                  >
+                                    📎 {a.file_name || "archivo"}{" "}
+                                    <span className="text-slate-400">
+                                      ({a.mime_type || "—"})
+                                    </span>
+                                  </a>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  <div className="space-y-1.5">
-                    <div>
-                      <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                        Tu mensaje
-                      </p>
-                      <p className="text-xs text-slate-700 whitespace-pre-line">
-                        {t.message}
-                      </p>
+                  <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-sm font-semibold text-slate-900">
+                        Responder
+                      </label>
+
+                      <label
+                        className={`text-xs font-semibold cursor-pointer ${
+                          canReply ? "text-blue-700" : "text-slate-400 cursor-not-allowed"
+                        }`}
+                      >
+                        {uploading ? "Subiendo…" : "Adjuntar"}
+                        <input
+                          type="file"
+                          multiple
+                          onChange={canReply ? onPickFiles : undefined}
+                          className="hidden"
+                          accept="application/pdf,image/*,audio/*"
+                          disabled={!canReply || uploading}
+                        />
+                      </label>
                     </div>
 
-                    {t.admin_response && (
-                      <div className="mt-2 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
-                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
-                          Respuesta de TixSwap
-                        </p>
-                        <p className="text-xs text-slate-800 whitespace-pre-line">
-                          {t.admin_response}
-                        </p>
-                      </div>
+                    {!canReply ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Este ticket está cerrado. Si necesitas algo nuevo, crea otro ticket.
+                      </p>
+                    ) : (
+                      <>
+                        {pendingUploads.length ? (
+                          <div className="mt-2 text-xs text-slate-600 space-y-1">
+                            {pendingUploads.map((a) => (
+                              <div key={a.id}>📎 {a.file_name}</div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        <textarea
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          placeholder="Cuéntanos más detalles…"
+                          className="mt-3 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[90px] bg-white"
+                        />
+
+                        <div className="mt-3 flex justify-end">
+                          <button
+                            onClick={sendMessage}
+                            disabled={sending || uploading}
+                            className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                          >
+                            {sending ? "Enviando…" : "Enviar mensaje"}
+                          </button>
+                        </div>
+                      </>
                     )}
                   </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="mt-6 text-xs text-slate-400">
-          ¿No encuentras algo? Puedes escribirnos a{" "}
-          <Link
-            href="mailto:soporte@tixswap.cl"
-            className="text-blue-600 hover:underline"
-          >
-            soporte@tixswap.cl
-          </Link>
-          .
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </main>
   );
-}
-
-// --- helpers reutilizados ----
-
-function StatusPill({ status }) {
-  const base =
-    "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium";
-
-  const map = {
-    open: base + " bg-amber-50 text-amber-700 border border-amber-100",
-    in_progress:
-      base + " bg-blue-50 text-blue-700 border border-blue-100",
-    closed:
-      base + " bg-emerald-50 text-emerald-700 border border-emerald-100",
-  };
-
-  return <span className={map[status] || base}>{formatStatus(status)}</span>;
-}
-
-function formatStatus(status) {
-  if (status === "open") return "Abierto";
-  if (status === "in_progress") return "En revisión";
-  if (status === "closed") return "Cerrado";
-  return status || "—";
-}
-
-function formatCategory(category) {
-  if (category === "soporte") return "Soporte general";
-  if (category === "disputa_compra") return "Disputa por compra";
-  if (category === "disputa_venta") return "Disputa por venta";
-  if (category === "sugerencia") return "Sugerencia para TixSwap";
-  if (category === "reclamo") return "Reclamo para TixSwap";
-  if (category === "disputa") return "Disputa";
-  if (category === "otro") return "Otro";
-  return category || "—";
 }
