@@ -1,4 +1,4 @@
-// app/support/admin/tickets/route.js
+// app/support/admin/ticket/route.js
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -15,10 +15,6 @@ function env(name) {
   return v && String(v).trim().length ? String(v).trim() : null;
 }
 
-function cleanQ(q) {
-  return (q || "").toString().trim();
-}
-
 export async function GET(req) {
   try {
     const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
@@ -29,7 +25,6 @@ export async function GET(req) {
       auth: { persistSession: false },
     });
 
-    // auth
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return json({ error: "UNAUTHORIZED" }, 401);
@@ -37,7 +32,6 @@ export async function GET(req) {
     const { data: u } = await supabaseAdmin.auth.getUser(token);
     if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
 
-    // admin check
     const { data: prof } = await supabaseAdmin
       .from("profiles")
       .select("role")
@@ -47,42 +41,48 @@ export async function GET(req) {
     if (prof?.role !== "admin") return json({ error: "FORBIDDEN" }, 403);
 
     const url = new URL(req.url);
-    const q = cleanQ(url.searchParams.get("q"));
-    const status = cleanQ(url.searchParams.get("status")) || "all";
+    const id = url.searchParams.get("id");
+    if (!id) return json({ error: "Missing id" }, 400);
 
-    let query = supabaseAdmin
+    const { data: ticket, error: tErr } = await supabaseAdmin
       .from("support_tickets")
       .select("*")
-      .order("created_at", { ascending: false })
-      .limit(500);
+      .eq("id", id)
+      .single();
 
-    if (status && status !== "all") {
-      query = query.eq("status", status);
+    if (tErr || !ticket) return json({ error: "Ticket not found" }, 404);
+
+    const { data: msgs } = await supabaseAdmin
+      .from("support_ticket_messages")
+      .select("*")
+      .eq("ticket_id", id)
+      .order("created_at", { ascending: true });
+
+    const { data: atts } = await supabaseAdmin
+      .from("support_ticket_attachments")
+      .select("*")
+      .eq("ticket_id", id)
+      .order("created_at", { ascending: true });
+
+    // signed urls
+    const attachments = [];
+    for (const a of atts || []) {
+      const { data: signed } = await supabaseAdmin.storage
+        .from(a.bucket)
+        .createSignedUrl(a.path, 60 * 30);
+
+      attachments.push({
+        ...a,
+        signed_url: signed?.signedUrl || null,
+      });
     }
 
-    // Filtro server-side opcional (si viene q)
-    // OJO: el front también filtra, esto solo ayuda en escala.
-    if (q) {
-      const qLower = q.toLowerCase();
-      const digits = qLower.replace("ts-", "").replace(/[^0-9]/g, "");
-      if (digits.length) {
-        const n = Number(digits);
-        if (!Number.isNaN(n)) {
-          query = query.eq("ticket_number", n);
-        }
-      } else {
-        // Si tus columnas existen, esto ayuda. Si alguna no existe, Supabase puede tirar error.
-        // Si te llegara a dar error aquí, me dices y lo dejamos solo por subject.
-        query = query.or(
-          `subject.ilike.%${q}%,requester_email.ilike.%${q}%,requester_rut.ilike.%${q}%`
-        );
-      }
-    }
-
-    const { data: tickets, error } = await query;
-    if (error) return json({ error: error.message }, 500);
-
-    return json({ ok: true, tickets: tickets || [] });
+    return json({
+      ok: true,
+      ticket,
+      messages: msgs || [],
+      attachments,
+    });
   } catch (e) {
     return json(
       { error: "Unexpected error", details: e?.message || String(e) },
