@@ -1,96 +1,320 @@
 // app/admin/soporte/page.jsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 
-const STATUS_OPTIONS = [
-  { value: "open", label: "Abierto" },
-  { value: "in_progress", label: "En revisión" },
-  { value: "closed", label: "Cerrado" },
+const STATUS = [
+  { v: "submitted", l: "Enviado" },
+  { v: "in_review", l: "En revisión" },
+  { v: "waiting_user", l: "Pendiente de antecedentes" },
+  { v: "rejected", l: "Rechazado" },
+  { v: "resolved", l: "Finalizado" },
 ];
 
-export default function AdminSupportPage() {
-  const router = useRouter();
-  const [loadingUser, setLoadingUser] = useState(true);
-  const [tickets, setTickets] = useState([]);
-  const [loadingTickets, setLoadingTickets] = useState(true);
-  const [savingId, setSavingId] = useState(null);
-  const [error, setError] = useState("");
+const CATEGORY_LABEL = (c) => {
+  if (c === "soporte") return "Soporte general";
+  if (c === "disputa_compra") return "Disputa por compra";
+  if (c === "disputa_venta") return "Disputa por venta";
+  if (c === "reclamo") return "Reclamo";
+  if (c === "sugerencia") return "Sugerencia";
+  if (c === "otro") return "Otro";
+  return c || "—";
+};
 
+function statusPill(status) {
+  const base =
+    "inline-flex items-center px-2 py-1 rounded-full text-[11px] font-semibold border";
+  if (status === "resolved")
+    return base + " bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (status === "rejected")
+    return base + " bg-red-50 text-red-700 border-red-200";
+  if (status === "waiting_user")
+    return base + " bg-amber-50 text-amber-800 border-amber-200";
+  if (status === "in_review")
+    return base + " bg-blue-50 text-blue-700 border-blue-200";
+  return base + " bg-slate-50 text-slate-700 border-slate-200";
+}
+
+function fmtCL(dt) {
+  if (!dt) return "—";
+  return new Date(dt).toLocaleString("es-CL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function isOverdue(ticket) {
+  if (!ticket?.due_at) return false;
+  if (ticket.status === "resolved" || ticket.status === "rejected") return false;
+  return new Date(ticket.due_at).getTime() < Date.now();
+}
+
+export default function AdminSupportConsole() {
+  const router = useRouter();
+
+  const [booting, setBooting] = useState(true);
+  const [me, setMe] = useState(null);
+
+  const [tickets, setTickets] = useState([]);
+  const [loadingList, setLoadingList] = useState(true);
+
+  const [selectedId, setSelectedId] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [attachments, setAttachments] = useState([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const [adminStatus, setAdminStatus] = useState("");
+  const [savingStatus, setSavingStatus] = useState(false);
+
+  const [draft, setDraft] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState([]); // [{id, file_name, signed_url, mime_type}]
+  const [sending, setSending] = useState(false);
+
+  const [err, setErr] = useState("");
+
+  // ---- boot: auth + admin ----
   useEffect(() => {
     const init = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      setBooting(true);
+      setErr("");
 
-      if (!user) {
+      const { data } = await supabase.auth.getUser();
+      if (!data?.user) {
         router.push("/login");
         return;
       }
+      setMe(data.user);
 
-      setLoadingUser(false);
-      await fetchTickets();
+      // validar admin por profiles.role
+      const { data: prof, error: profErr } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.user.id)
+        .single();
+
+      if (profErr || prof?.role !== "admin") {
+        setErr("No tienes permisos para ver este panel.");
+        setBooting(false);
+        return;
+      }
+
+      setBooting(false);
+      await refreshList();
     };
 
     init();
-  }, [router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const fetchTickets = async () => {
-    setLoadingTickets(true);
-    setError("");
+  const getAccessToken = async () => {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || null;
+  };
 
-    const { data, error } = await supabase
-      .from("support_tickets")
-      .select("*")
-      .order("created_at", { ascending: false });
+  const refreshList = async () => {
+    setLoadingList(true);
+    setErr("");
 
-    if (error) {
-      console.error(error);
-      setError("No pudimos cargar los tickets. Intenta de nuevo.");
+    try {
+      const token = await getAccessToken();
+      const url = new URL(window.location.origin + "/support/admin/tickets");
+      url.searchParams.set("q", q.trim());
+      url.searchParams.set("status", statusFilter);
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No pudimos cargar tickets");
+
+      setTickets(json.tickets || []);
+      if (!selectedId && (json.tickets || []).length) {
+        setSelectedId(json.tickets[0].id);
+      }
+    } catch (e) {
+      setErr(e.message || "Error cargando tickets");
       setTickets([]);
-    } else {
-      setTickets(data || []);
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  // auto refresh list on filters change
+  useEffect(() => {
+    if (booting) return;
+    refreshList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
+
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return tickets;
+    return tickets.filter((t) => {
+      const n = `ts-${t.ticket_number || ""}`.toLowerCase();
+      const subj = (t.subject || "").toLowerCase();
+      const mail = (t.requester_email || "").toLowerCase();
+      const rut = (t.requester_rut || "").toLowerCase();
+      return n.includes(qq) || subj.includes(qq) || mail.includes(qq) || rut.includes(qq);
+    });
+  }, [q, tickets]);
+
+  const loadDetail = async (ticketId) => {
+    setLoadingDetail(true);
+    setErr("");
+    setPendingUploads([]);
+    setDraft("");
+
+    try {
+      const token = await getAccessToken();
+      const url = new URL(window.location.origin + "/support/admin/ticket");
+      url.searchParams.set("id", ticketId);
+
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No pudimos abrir el ticket");
+
+      setSelected(json.ticket);
+      setAdminStatus(json.ticket?.status || "submitted");
+      setMessages(json.messages || []);
+      setAttachments(json.attachments || []);
+    } catch (e) {
+      setErr(e.message || "Error abriendo ticket");
+      setSelected(null);
+      setMessages([]);
+      setAttachments([]);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedId) return;
+    loadDetail(selectedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
+
+  const handleUpdateStatus = async () => {
+    if (!selected?.id) return;
+    setSavingStatus(true);
+    setErr("");
+
+    try {
+      const token = await getAccessToken();
+      const res = await fetch("/support/admin/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ticket_id: selected.id,
+          status: adminStatus,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
+
+      // refrescar detalle + lista
+      await loadDetail(selected.id);
+      await refreshList();
+    } catch (e) {
+      setErr(e.message || "Error actualizando estado");
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const onPickFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !selected?.id) return;
+
+    setUploading(true);
+    setErr("");
+
+    try {
+      const token = await getAccessToken();
+      const uploaded = [];
+
+      for (const f of files) {
+        const form = new FormData();
+        form.append("ticketId", selected.id);
+        form.append("file", f);
+
+        const res = await fetch("/support/upload", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error || "Upload falló");
+
+        uploaded.push(json.attachment);
+      }
+
+      setPendingUploads((prev) => [...prev, ...uploaded]);
+      // limpiar input
+      e.target.value = "";
+    } catch (e2) {
+      setErr(e2.message || "Error subiendo archivos");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!selected?.id) return;
+    if (!draft.trim() && pendingUploads.length === 0) {
+      setErr("Escribe un mensaje o adjunta algo.");
+      return;
     }
 
-    setLoadingTickets(false);
-  };
+    setSending(true);
+    setErr("");
 
-  const handleFieldChange = (id, field, value) => {
-    setTickets((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              [field]: value,
-            }
-          : t
-      )
-    );
-  };
+    try {
+      const token = await getAccessToken();
+      const res = await fetch("/support/message", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ticket_id: selected.id,
+          body: draft.trim(),
+          attachment_ids: pendingUploads.map((a) => a.id),
+        }),
+      });
 
-  const handleSaveTicket = async (ticket) => {
-    setSavingId(ticket.id);
-    setError("");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "No se pudo enviar el mensaje");
 
-    const { error } = await supabase
-      .from("support_tickets")
-      .update({
-        status: ticket.status,
-        admin_response: ticket.admin_response || null,
-      })
-      .eq("id", ticket.id);
-
-    if (error) {
-      console.error(error);
-      setError("No pudimos actualizar el ticket. Intenta nuevamente.");
+      // refrescar
+      setDraft("");
+      setPendingUploads([]);
+      await loadDetail(selected.id);
+      await refreshList();
+    } catch (e) {
+      setErr(e.message || "Error enviando mensaje");
+    } finally {
+      setSending(false);
     }
-
-    setSavingId(null);
   };
 
-  if (loadingUser) {
+  if (booting) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-slate-50">
         <p className="text-sm text-slate-500">Cargando…</p>
@@ -98,151 +322,311 @@ export default function AdminSupportPage() {
     );
   }
 
+  if (err && !me) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+        <div className="max-w-md w-full bg-white border border-slate-100 rounded-2xl p-6">
+          <h1 className="text-xl font-bold text-slate-900">Soporte · Admin</h1>
+          <p className="text-slate-600 mt-2">{err}</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50">
-      <div className="max-w-6xl mx-auto px-4 py-8 md:py-10">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex items-start justify-between gap-3 mb-6">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
               Soporte · Admin
             </h1>
             <p className="text-sm text-slate-500">
-              Revisa y responde los tickets creados por los usuarios.
+              Cola de tickets + chat + adjuntos + SLA.
             </p>
           </div>
 
           <button
-            onClick={() => router.push("/")}
-            className="text-sm px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+            onClick={() => router.push("/dashboard")}
+            className="text-sm px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
           >
-            Volver al inicio
+            Volver a mi cuenta
           </button>
         </div>
 
-        {error && (
-          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
-            {error}
+        {err ? (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {err}
           </div>
-        )}
+        ) : null}
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Tickets de soporte
-            </h2>
-            {loadingTickets ? (
-              <span className="text-xs text-slate-400">Cargando…</span>
-            ) : (
-              <span className="text-xs text-slate-400">
-                {tickets.length} ticket
-                {tickets.length === 1 ? "" : "s"}
-              </span>
-            )}
-          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
+          {/* LISTA */}
+          <div className="bg-white border border-slate-100 rounded-2xl p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-semibold text-slate-900">Tickets</h2>
+              <button
+                onClick={refreshList}
+                className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+              >
+                Recargar
+              </button>
+            </div>
 
-          {loadingTickets ? (
-            <p className="text-sm text-slate-500">
-              Cargando tickets de soporte…
-            </p>
-          ) : tickets.length === 0 ? (
-            <p className="text-sm text-slate-500">
-              Aún no hay tickets creados por los usuarios.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {tickets.map((t) => (
-                <div
-                  key={t.id}
-                  className="border border-slate-200 rounded-xl p-4 text-sm bg-slate-50/60"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                    <div>
-                      <p className="font-semibold text-slate-900">
-                        {t.subject}
+            <div className="mt-3 flex gap-2">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar TS-1001, correo, rut..."
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="mt-2">
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Estado
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
+              >
+                <option value="all">Todos</option>
+                {STATUS.map((s) => (
+                  <option key={s.v} value={s.v}>
+                    {s.l}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-4 space-y-2 max-h-[70vh] overflow-auto pr-1">
+              {loadingList ? (
+                <p className="text-sm text-slate-500">Cargando…</p>
+              ) : filtered.length === 0 ? (
+                <p className="text-sm text-slate-500">No hay tickets.</p>
+              ) : (
+                filtered.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedId(t.id)}
+                    className={`w-full text-left rounded-2xl border px-3 py-3 hover:bg-slate-50 ${
+                      selectedId === t.id
+                        ? "border-blue-200 bg-blue-50/40"
+                        : "border-slate-100 bg-white"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-slate-700">
+                        TS-{t.ticket_number}
+                      </div>
+                      <span className={statusPill(t.status)}>{STATUS.find(x=>x.v===t.status)?.l || t.status}</span>
+                    </div>
+
+                    <div className="mt-1">
+                      <p className="text-sm font-semibold text-slate-900 line-clamp-1">
+                        {t.subject || "Sin asunto"}
                       </p>
-                      <p className="text-xs text-slate-500">
-                        {formatCategory(t.category)} ·{" "}
-                        {new Date(t.created_at).toLocaleString("es-CL", {
-                          dateStyle: "short",
-                          timeStyle: "short",
-                        })}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Usuario ID:{" "}
-                        <span className="font-mono">{t.user_id}</span>
+                      <p className="text-xs text-slate-500 line-clamp-1">
+                        {t.requester_email || "—"} · {CATEGORY_LABEL(t.category)}
                       </p>
                     </div>
 
+                    <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                      <span>Último: {fmtCL(t.last_message_at || t.created_at)}</span>
+                      {isOverdue(t) ? (
+                        <span className="text-red-700 font-semibold">VENCIDO</span>
+                      ) : (
+                        <span>Vence: {fmtCL(t.due_at)}</span>
+                      )}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* DETALLE */}
+          <div className="bg-white border border-slate-100 rounded-2xl p-4">
+            {!selected ? (
+              <p className="text-sm text-slate-500">
+                Selecciona un ticket para verlo.
+              </p>
+            ) : loadingDetail ? (
+              <p className="text-sm text-slate-500">Cargando ticket…</p>
+            ) : (
+              <>
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                  <div>
                     <div className="flex items-center gap-2">
-                      <label className="text-xs text-slate-500">
-                        Estado:
-                      </label>
+                      <h2 className="text-xl font-bold text-slate-900">
+                        TS-{selected.ticket_number}
+                      </h2>
+                      <span className={statusPill(selected.status)}>
+                        {STATUS.find((x) => x.v === selected.status)?.l || selected.status}
+                      </span>
+                      {isOverdue(selected) ? (
+                        <span className="text-xs font-semibold text-red-700">
+                          · Vencido (SLA)
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <p className="text-sm text-slate-700 mt-1 font-semibold">
+                      {selected.subject}
+                    </p>
+
+                    <p className="text-xs text-slate-500 mt-1">
+                      {CATEGORY_LABEL(selected.category)} · Creado: {fmtCL(selected.created_at)} · Vence:{" "}
+                      {fmtCL(selected.due_at)}
+                    </p>
+
+                    <p className="text-xs text-slate-500 mt-1">
+                      Usuario: <b>{selected.requester_name || "—"}</b> ·{" "}
+                      {selected.requester_email || "—"} · RUT {selected.requester_rut || "—"}
+                    </p>
+                  </div>
+
+                  <div className="min-w-[260px]">
+                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                      Estado del ticket
+                    </label>
+                    <div className="flex gap-2">
                       <select
-                        value={t.status}
-                        onChange={(e) =>
-                          handleFieldChange(t.id, "status", e.target.value)
-                        }
-                        className="border border-slate-300 rounded-lg px-2 py-1 text-xs bg-white"
+                        value={adminStatus}
+                        onChange={(e) => setAdminStatus(e.target.value)}
+                        className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
                       >
-                        {STATUS_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
+                        {STATUS.map((s) => (
+                          <option key={s.v} value={s.v}>
+                            {s.l}
                           </option>
                         ))}
                       </select>
+                      <button
+                        onClick={handleUpdateStatus}
+                        disabled={savingStatus}
+                        className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {savingStatus ? "Guardando…" : "Guardar"}
+                      </button>
                     </div>
                   </div>
+                </div>
 
-                  <div className="mb-3">
-                    <p className="text-xs font-semibold text-slate-700 mb-1">
-                      Mensaje del usuario
-                    </p>
-                    <p className="text-xs text-slate-700 whitespace-pre-line">
-                      {t.message}
-                    </p>
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <h3 className="text-sm font-semibold text-slate-900 mb-3">
+                    Conversación
+                  </h3>
+
+                  <div className="space-y-3 max-h-[46vh] overflow-auto pr-1">
+                    {messages.map((m) => {
+                      const mine = m.sender_type === "admin";
+                      const related = attachments.filter((a) => a.message_id === m.id);
+                      return (
+                        <div
+                          key={m.id}
+                          className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                        >
+                          <div
+                            className={`max-w-[85%] rounded-2xl border px-3 py-2 ${
+                              mine
+                                ? "bg-blue-50 border-blue-100"
+                                : "bg-slate-50 border-slate-100"
+                            }`}
+                          >
+                            <div className="text-[11px] text-slate-500 flex items-center justify-between gap-3">
+                              <span className="font-semibold">
+                                {mine ? "TixSwap (Admin)" : "Usuario"}
+                              </span>
+                              <span>{fmtCL(m.created_at)}</span>
+                            </div>
+
+                            {m.body ? (
+                              <p className="text-sm text-slate-800 whitespace-pre-line mt-1">
+                                {m.body}
+                              </p>
+                            ) : null}
+
+                            {related.length ? (
+                              <div className="mt-2 space-y-1">
+                                {related.map((a) => (
+                                  <a
+                                    key={a.id}
+                                    href={a.signed_url || "#"}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block text-xs text-blue-700 hover:underline"
+                                  >
+                                    📎 {a.file_name || "archivo"}{" "}
+                                    <span className="text-slate-400">
+                                      ({a.mime_type || "—"})
+                                    </span>
+                                  </a>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  <div className="mb-3">
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Respuesta de soporte
-                    </label>
+                  <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-sm font-semibold text-slate-900">
+                        Responder
+                      </label>
+
+                      <label className="text-xs font-semibold text-blue-700 cursor-pointer">
+                        {uploading ? "Subiendo…" : "Adjuntar"}
+                        <input
+                          type="file"
+                          multiple
+                          onChange={onPickFiles}
+                          className="hidden"
+                          accept="application/pdf,image/*,audio/*"
+                          disabled={uploading}
+                        />
+                      </label>
+                    </div>
+
+                    {pendingUploads.length ? (
+                      <div className="mt-2 text-xs text-slate-600 space-y-1">
+                        {pendingUploads.map((a) => (
+                          <div key={a.id}>📎 {a.file_name}</div>
+                        ))}
+                      </div>
+                    ) : null}
+
                     <textarea
-                      className="w-full border border-slate-300 rounded-lg px-2 py-1 text-xs min-h-[80px] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Escribe aquí la respuesta que verá el usuario en su panel."
-                      value={t.admin_response || ""}
-                      onChange={(e) =>
-                        handleFieldChange(
-                          t.id,
-                          "admin_response",
-                          e.target.value
-                        )
-                      }
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      placeholder="Escribe tu respuesta al usuario…"
+                      className="mt-3 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[90px] bg-white"
                     />
-                  </div>
 
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => handleSaveTicket(t)}
-                      disabled={savingId === t.id}
-                      className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60"
-                    >
-                      {savingId === t.id ? "Guardando…" : "Guardar cambios"}
-                    </button>
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        onClick={sendMessage}
+                        disabled={sending || uploading}
+                        className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {sending ? "Enviando…" : "Enviar mensaje"}
+                      </button>
+                    </div>
+
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Al responder, TixSwap envía correo al usuario (si configuraste Resend).
+                    </p>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </main>
   );
 }
 
-function formatCategory(category) {
-  if (category === "soporte") return "Soporte general";
-  if (category === "disputa") return "Disputa";
-  if (category === "otro") return "Otro";
-  return category || "—";
-}
