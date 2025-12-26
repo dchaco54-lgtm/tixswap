@@ -9,12 +9,10 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Si venías desde /sell, acá viene ?redirectTo=/sell
-  // Si no, por defecto te mando al dashboard
   const redirectTo = searchParams.get("redirectTo") || "/dashboard";
 
   const [form, setForm] = useState({
-    email: "",
+    identifier: "", // RUT o email
     password: "",
   });
 
@@ -22,49 +20,73 @@ export default function LoginPage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const handleChange = (field) => (e) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: e.target.value,
-    }));
+    setForm((prev) => ({ ...prev, [field]: e.target.value }));
   };
+
+  const normalizeEmail = (v) => String(v || "").trim().toLowerCase();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage("");
     setLoading(true);
 
-    const { email, password } = form;
+    const identifier = String(form.identifier || "").trim();
+    const password = String(form.password || "");
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      // Si tiene @ => email login normal
+      if (identifier.includes("@")) {
+        const email = normalizeEmail(identifier);
 
-      if (error) {
-        const msg = (error.message || "").toLowerCase();
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-        if (msg.includes("email not confirmed")) {
-          setErrorMessage(
-            "Debes confirmar tu correo antes de iniciar sesión. Revisa tu bandeja de entrada o spam."
-          );
-        } else if (msg.includes("invalid login credentials")) {
-          setErrorMessage("Correo o contraseña incorrectos.");
-        } else {
-          setErrorMessage(
-            "Ocurrió un problema al iniciar sesión. Inténtalo de nuevo en unos minutos."
-          );
+        if (error) {
+          const msg = (error.message || "").toLowerCase();
+
+          if (msg.includes("email not confirmed")) {
+            setErrorMessage(
+              "Debes confirmar tu correo antes de iniciar sesión. Revisa tu bandeja de entrada o spam."
+            );
+          } else if (msg.includes("invalid login credentials")) {
+            setErrorMessage("RUT/correo o contraseña incorrectos.");
+          } else {
+            setErrorMessage(
+              "Ocurrió un problema al iniciar sesión. Inténtalo de nuevo en unos minutos."
+            );
+          }
+          return;
         }
+
+        router.push(redirectTo);
         return;
       }
 
-      // ✅ Login correcto → respetamos redirectTo (sell, dashboard, etc.)
+      // Si NO tiene @ => asumimos RUT login via API (sin filtrar email al cliente)
+      const res = await fetch("/api/auth/rut-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rut: identifier, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setErrorMessage(data?.message || "RUT/correo o contraseña incorrectos.");
+        return;
+      }
+
+      // Setea sesión en el cliente supabase
+      await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      });
+
       router.push(redirectTo);
     } catch (err) {
-      console.error(err);
-      setErrorMessage(
-        "Ocurrió un problema al iniciar sesión. Inténtalo de nuevo."
-      );
+      setErrorMessage("Ocurrió un problema al iniciar sesión. Inténtalo de nuevo.");
     } finally {
       setLoading(false);
     }
@@ -72,7 +94,6 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Barra arriba para volver al inicio */}
       <div className="w-full max-w-5xl mx-auto px-4 pt-4 flex items-center justify-between">
         <Link
           href="/"
@@ -86,14 +107,13 @@ export default function LoginPage() {
         </Link>
       </div>
 
-      {/* Contenido centrado */}
       <div className="flex-1 flex items-center justify-center px-4 pb-10">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-lg p-8 border border-slate-100">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">
             Iniciar sesión
           </h1>
           <p className="text-sm text-gray-500 mb-6">
-            Accede a tu cuenta de TixSwap.
+            Ingresa con tu RUT o tu correo.
           </p>
 
           {errorMessage && (
@@ -105,14 +125,14 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Correo electrónico
+                RUT o correo electrónico
               </label>
               <input
-                type="email"
+                type="text"
                 required
-                placeholder="tu@email.com"
-                value={form.email}
-                onChange={handleChange("email")}
+                placeholder="12.345.678-9 o tu@email.com"
+                value={form.identifier}
+                onChange={handleChange("identifier")}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -165,3 +185,4 @@ export default function LoginPage() {
     </main>
   );
 }
+
