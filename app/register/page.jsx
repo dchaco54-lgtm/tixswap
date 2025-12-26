@@ -39,6 +39,8 @@ export default function RegisterPage() {
     return /^(\d)\1+$/.test(body); // 11111111, 22222222, etc.
   };
 
+  const normalizeEmail = (e) => String(e || "").trim().toLowerCase();
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -61,6 +63,7 @@ export default function RegisterPage() {
 
     const rutFormatted = formatRut(rut);
     const rutNormalized = normalizeRutForDb(rutFormatted);
+    const emailNormalized = normalizeEmail(email);
 
     if (!isValidRut(rutFormatted)) {
       setError("RUT inválido. Revisa el formato y el dígito verificador.");
@@ -75,8 +78,8 @@ export default function RegisterPage() {
     try {
       setLoading(true);
 
-      // 1) Validar si el RUT ya existe en BD (profiles)
-      const { data: existingProfile, error: rutCheckError } = await supabase
+      // 1) Validar RUT duplicado
+      const { data: rutExists, error: rutCheckError } = await supabase
         .from("profiles")
         .select("id")
         .in("rut", [rutFormatted, rutNormalized])
@@ -84,19 +87,33 @@ export default function RegisterPage() {
 
       if (rutCheckError) throw rutCheckError;
 
-      if (Array.isArray(existingProfile) && existingProfile.length > 0) {
+      if (Array.isArray(rutExists) && rutExists.length > 0) {
         setError("Rut ya con cuenta en Tixswap, debes iniciar sesión");
         return;
       }
 
-      // 2) Crear cuenta (Supabase manda correo si Confirm Email está ON)
+      // 2) Validar EMAIL duplicado (case-insensitive)
+      const { data: emailExists, error: emailCheckError } = await supabase
+        .from("profiles")
+        .select("id")
+        .ilike("email", emailNormalized) // exact match pero case-insensitive
+        .limit(1);
+
+      if (emailCheckError) throw emailCheckError;
+
+      if (Array.isArray(emailExists) && emailExists.length > 0) {
+        setError("Correo ya con cuenta en Tixswap, debes iniciar sesión");
+        return;
+      }
+
+      // 3) Crear cuenta
       const redirectTo =
         typeof window !== "undefined"
           ? `${window.location.origin}/login`
           : undefined;
 
       const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
+        email: emailNormalized,
         password,
         options: {
           data: {
@@ -108,24 +125,14 @@ export default function RegisterPage() {
         },
       });
 
-      if (signUpError) {
-        const msg = (signUpError.message || "").toLowerCase();
-        if (msg.includes("redirect") && msg.includes("not allowed")) {
-          throw new Error(
-            "El link de confirmación no se pudo generar (redirect no permitido). Revisa en Supabase: Auth → URL Configuration (Site URL / Redirect URLs)."
-          );
-        }
-        throw signUpError;
-      }
+      if (signUpError) throw signUpError;
 
-      // Caso SaaS típico: user creado pero sin sesión -> esperar confirmación
+      // SaaS flow: user creado pero sin sesión => email confirm
       if (data?.user && !data?.session) {
-        // redirigimos a pantalla de verificación
-        router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+        router.push(`/verify-email?email=${encodeURIComponent(emailNormalized)}`);
         return;
       }
 
-      // Si por algún motivo quedó logeado inmediatamente
       setMessage("¡Cuenta creada y sesión iniciada!");
       setFullName("");
       setRut("");
@@ -261,7 +268,6 @@ export default function RegisterPage() {
             {loading ? "Creando..." : "Crear cuenta"}
           </button>
 
-          {/* ✅ Mensajes abajo del botón (UX correcto) */}
           {error && (
             <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">
               {error}
@@ -285,5 +291,4 @@ export default function RegisterPage() {
     </div>
   );
 }
-
 
