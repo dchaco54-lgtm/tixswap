@@ -1,4 +1,4 @@
-// app/support/admin/ticket/route.js
+// app/support/admin/tickets/route.js
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -25,6 +25,7 @@ export async function GET(req) {
       auth: { persistSession: false },
     });
 
+    // Auth Bearer
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return json({ error: "UNAUTHORIZED" }, 401);
@@ -32,6 +33,7 @@ export async function GET(req) {
     const { data: u } = await supabaseAdmin.auth.getUser(token);
     if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
 
+    // Validar admin
     const { data: prof } = await supabaseAdmin
       .from("profiles")
       .select("role")
@@ -41,48 +43,38 @@ export async function GET(req) {
     if (prof?.role !== "admin") return json({ error: "FORBIDDEN" }, 403);
 
     const url = new URL(req.url);
-    const id = url.searchParams.get("id");
-    if (!id) return json({ error: "Missing id" }, 400);
+    const q = (url.searchParams.get("q") || "").trim();
+    const status = (url.searchParams.get("status") || "all").trim();
 
-    const { data: ticket, error: tErr } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("support_tickets")
       .select("*")
-      .eq("id", id)
-      .single();
+      .order("created_at", { ascending: false })
+      .limit(500);
 
-    if (tErr || !ticket) return json({ error: "Ticket not found" }, 404);
-
-    const { data: msgs } = await supabaseAdmin
-      .from("support_ticket_messages")
-      .select("*")
-      .eq("ticket_id", id)
-      .order("created_at", { ascending: true });
-
-    const { data: atts } = await supabaseAdmin
-      .from("support_ticket_attachments")
-      .select("*")
-      .eq("ticket_id", id)
-      .order("created_at", { ascending: true });
-
-    // signed urls
-    const attachments = [];
-    for (const a of atts || []) {
-      const { data: signed } = await supabaseAdmin.storage
-        .from(a.bucket)
-        .createSignedUrl(a.path, 60 * 30);
-
-      attachments.push({
-        ...a,
-        signed_url: signed?.signedUrl || null,
-      });
+    if (status && status !== "all") {
+      query = query.eq("status", status);
     }
 
-    return json({
-      ok: true,
-      ticket,
-      messages: msgs || [],
-      attachments,
-    });
+    // Filtro server-side opcional (además del filtro en el front)
+    if (q) {
+      const qLower = q.toLowerCase();
+      const digits = qLower.replace("ts-", "").replace(/[^0-9]/g, "");
+      if (digits.length) {
+        const n = Number(digits);
+        if (!Number.isNaN(n)) query = query.eq("ticket_number", n);
+      } else {
+        // Si tus columnas existen (en tu UI ya se usan, así que deberían)
+        query = query.or(
+          `subject.ilike.%${q}%,requester_email.ilike.%${q}%,requester_rut.ilike.%${q}%`
+        );
+      }
+    }
+
+    const { data: tickets, error } = await query;
+    if (error) return json({ error: error.message }, 500);
+
+    return json({ ok: true, tickets: tickets || [] });
   } catch (e) {
     return json(
       { error: "Unexpected error", details: e?.message || String(e) },
