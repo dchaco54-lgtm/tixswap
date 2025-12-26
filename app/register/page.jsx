@@ -1,280 +1,307 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { supabase } from '../lib/supabaseClient';
-import { formatRut, validateRut } from '../lib/rutUtils';
+import React, { useState } from "react";
+import Link from "next/link";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { isValidRut, normalizeRut, formatRut } from "../lib/rutUtils";
 
 export default function RegisterPage() {
-  const router = useRouter();
+  const supabase = createClientComponentClient();
 
-  const [formData, setFormData] = useState({
-    fullName: '',
-    rut: '',
-    email: '',
-    phone: '',
-    password: '',
-    confirmPassword: '',
-  });
+  const [fullName, setFullName] = useState("");
+  const [rut, setRut] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [accepted, setAccepted] = useState(false);
 
-  // Rol fijo por ahora (sin selector en UI)
-  const DEFAULT_ROLE = 'basic';
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
 
-  const [acceptTerms, setAcceptTerms] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const cleanPhone = (value = "") =>
+    String(value).replace(/[^\d+]/g, "").slice(0, 20);
 
-  const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
-
-  const isFormComplete = useMemo(() => {
-    const { fullName, rut, email, phone, password, confirmPassword } = formData;
-    return (
-      fullName.trim() &&
-      rut.trim() &&
-      email.trim() &&
-      phone.trim() &&
-      password &&
-      confirmPassword
-    );
-  }, [formData]);
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-
-    if (name === 'rut') {
-      setFormData((prev) => ({ ...prev, rut: formatRut(value) }));
-      return;
-    }
-
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  const handleRutBlur = () => {
+    // deja bonito el RUT (17.684.316-0)
+    if (rut?.trim()) setRut(formatRut(rut));
   };
 
   const handleSubmit = async (e) => {
-    e?.preventDefault?.();
+    e.preventDefault();
+    setErrorMsg("");
+    setSuccessMsg("");
 
-    setErrorMessage('');
-    setSuccessMessage('');
-
-    const { fullName, rut, email, phone, password, confirmPassword } = formData;
-
-    if (!isFormComplete) {
-      setErrorMessage('Completa todos los campos para crear tu cuenta.');
+    if (!accepted) {
+      setErrorMsg("Debes aceptar los Términos y Condiciones.");
       return;
     }
 
-    if (!acceptTerms) {
-      setErrorMessage('Debes aceptar los Términos y Condiciones para continuar.');
+    if (!fullName.trim()) {
+      setErrorMsg("Ingresa tu nombre completo.");
       return;
     }
 
-    const rutClean = rut.replace(/\./g, '').toUpperCase();
-    if (!validateRut(rutClean)) {
-      setErrorMessage('El RUT ingresado no es válido.');
+    const rutNorm = normalizeRut(rut);
+    if (!rutNorm || !isValidRut(rutNorm)) {
+      setErrorMsg("El RUT no es válido. Revisa el dígito verificador.");
       return;
     }
 
-    if (password.length < 8) {
-      setErrorMessage('La contraseña debe tener al menos 8 caracteres.');
+    const phoneClean = cleanPhone(phone);
+    if (!phoneClean || phoneClean.length < 8) {
+      setErrorMsg("Ingresa un teléfono válido.");
       return;
     }
 
-    if (password !== confirmPassword) {
-      setErrorMessage('Las contraseñas no coinciden.');
+    if (!email.trim()) {
+      setErrorMsg("Ingresa tu correo.");
       return;
     }
+
+    if (!password || password.length < 6) {
+      setErrorMsg("La contraseña debe tener al menos 6 caracteres.");
+      return;
+    }
+
+    if (password !== password2) {
+      setErrorMsg("Las contraseñas no coinciden.");
+      return;
+    }
+
+    setLoading(true);
 
     try {
-      setIsSubmitting(true);
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback`
+          : undefined;
 
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
+          emailRedirectTo: redirectTo,
           data: {
             full_name: fullName.trim(),
-            rut: rutClean,
-            phone: phone.trim(),
-            role: DEFAULT_ROLE,
+            rut: rutNorm,
+            phone: phoneClean,
           },
         },
       });
 
       if (error) {
-        setErrorMessage(error.message || 'No pudimos crear tu cuenta. Intenta de nuevo.');
+        setErrorMsg(error.message || "Error creando usuario.");
+        setLoading(false);
         return;
       }
 
-      const needsEmailConfirm = !data?.session;
-
-      setSuccessMessage(
-        needsEmailConfirm
-          ? 'Cuenta creada ✅ Revisa tu correo para confirmar y luego inicia sesión.'
-          : 'Cuenta creada ✅ Ya puedes iniciar sesión.'
+      // Si Supabase tiene email confirmation ON, normalmente:
+      // - data.user existe
+      // - data.session es null hasta que confirme el mail
+      setSuccessMsg(
+        "¡Listo! Te enviamos un correo para confirmar tu cuenta. Revisa spam/promociones si no aparece."
       );
 
-      setFormData({
-        fullName: '',
-        rut: '',
-        email: '',
-        phone: '',
-        password: '',
-        confirmPassword: '',
-      });
-      setAcceptTerms(false);
-
-      router.push('/login?registered=1');
+      // opcional: limpiar form
+      setFullName("");
+      setRut("");
+      setPhone("");
+      setEmail("");
+      setPassword("");
+      setPassword2("");
+      setAccepted(false);
     } catch (err) {
-      setErrorMessage('Ocurrió un error inesperado. Intenta de nuevo.');
+      setErrorMsg(String(err?.message || err));
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-[calc(100vh-80px)] flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-100 p-7">
-        <h1 className="text-2xl font-bold text-gray-900">Crear cuenta</h1>
-        <p className="mt-1 text-gray-600">
-          Regístrate para comprar y vender entradas de forma segura.
-        </p>
+    <div className="min-h-screen bg-[#F6F9FF]">
+      {/* Header */}
+      <header className="w-full bg-white border-b border-[#E5ECFF]">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-3">
+            <span className="text-2xl font-bold text-[#1E5BFF]">TixSwap</span>
+            <span className="text-sm text-gray-500 hidden sm:block">
+              Reventa segura, en un clic
+            </span>
+          </Link>
 
-        {(errorMessage || successMessage) && (
-          <div className="mt-4 space-y-2">
-            {errorMessage && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
-                {errorMessage}
-              </div>
-            )}
-            {successMessage && (
-              <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-700">
-                {successMessage}
-              </div>
-            )}
-          </div>
-        )}
+          <nav className="hidden md:flex items-center gap-6 text-sm text-gray-700">
+            <Link href="/buy" className="hover:text-[#1E5BFF]">
+              Comprar
+            </Link>
+            <Link href="/sell" className="hover:text-[#1E5BFF]">
+              Vender
+            </Link>
+            <Link href="/saber-mas" className="hover:text-[#1E5BFF]">
+              Cómo funciona
+            </Link>
+          </nav>
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Nombre completo</label>
-            <input
-              name="fullName"
-              type="text"
-              value={formData.fullName}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500"
-              placeholder="Ej: Juan Pérez"
-              autoComplete="name"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">RUT</label>
-            <input
-              name="rut"
-              type="text"
-              value={formData.rut}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500"
-              placeholder="Ej: 12.345.678-9"
-              inputMode="text"
-              autoComplete="off"
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              Validaremos que el RUT sea correcto (incluyendo dígito verificador).
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Correo electrónico</label>
-            <input
-              name="email"
-              type="email"
-              value={formData.email}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500"
-              placeholder="tu@correo.com"
-              autoComplete="email"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Teléfono</label>
-            <input
-              name="phone"
-              type="tel"
-              value={formData.phone}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500"
-              placeholder="+56912345678"
-              autoComplete="tel"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Contraseña</label>
-            <input
-              name="password"
-              type="password"
-              value={formData.password}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500"
-              placeholder="Mínimo 8 caracteres"
-              autoComplete="new-password"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Repetir contraseña</label>
-            <input
-              name="confirmPassword"
-              type="password"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-              className="mt-1 w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500"
-              placeholder="Repite tu contraseña"
-              autoComplete="new-password"
-            />
-          </div>
-
-          <div className="pt-1">
-            <label className="flex items-start gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={acceptTerms}
-                onChange={(e) => setAcceptTerms(e.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-gray-300"
-              />
-              <span className="text-sm text-gray-700">
-                He leído y acepto los{' '}
-                <Link href="/legal/terms" className="text-blue-600 hover:underline">
-                  Términos y Condiciones
-                </Link>{' '}
-                de TixSwap.
-                <span className="block mt-1 text-xs text-gray-500">
-                  Si no aceptas los Términos, no podrás crear tu cuenta.
-                </span>
-              </span>
-            </label>
-          </div>
-
-          <button
-            type="submit"
-            disabled={!acceptTerms || isSubmitting}
-            className="w-full rounded-xl bg-blue-600 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSubmitting ? 'Creando cuenta…' : 'Crear cuenta'}
-          </button>
-
-          <p className="text-center text-sm text-gray-600">
-            ¿Ya tienes cuenta?{' '}
-            <Link href="/login" className="text-blue-600 hover:underline">
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="px-4 py-2 rounded-full border border-[#D6E2FF] text-[#1E5BFF] hover:bg-[#F2F6FF]"
+            >
               Iniciar sesión
             </Link>
+            <Link
+              href="/register"
+              className="px-4 py-2 rounded-full bg-[#1E5BFF] text-white hover:bg-[#164BDB]"
+            >
+              Crear cuenta
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {/* Content */}
+      <main className="max-w-6xl mx-auto px-4 py-10">
+        <div className="max-w-md mx-auto bg-white rounded-2xl shadow-sm border border-[#E5ECFF] p-8">
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            Crear cuenta
+          </h1>
+          <p className="text-sm text-gray-600 mb-6">
+            Validaremos que el RUT sea correcto (incluyendo dígito verificador).
           </p>
-        </form>
-      </div>
+
+          {errorMsg ? (
+            <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+              {errorMsg}
+            </div>
+          ) : null}
+
+          {successMsg ? (
+            <div className="mb-4 p-3 rounded-xl bg-green-50 border border-green-200 text-green-700 text-sm">
+              {successMsg}
+            </div>
+          ) : null}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Nombre completo
+              </label>
+              <input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-[#EEF5FF] border border-[#D6E2FF] outline-none focus:ring-2 focus:ring-[#1E5BFF]/30"
+                placeholder="Ej: David Chacón Pérez"
+                autoComplete="name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                RUT
+              </label>
+              <input
+                value={rut}
+                onChange={(e) => setRut(e.target.value)}
+                onBlur={handleRutBlur}
+                className="w-full px-4 py-3 rounded-xl bg-[#EEF5FF] border border-[#D6E2FF] outline-none focus:ring-2 focus:ring-[#1E5BFF]/30"
+                placeholder="Ej: 17.684.316-0"
+                inputMode="text"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Correo electrónico
+              </label>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-[#EEF5FF] border border-[#D6E2FF] outline-none focus:ring-2 focus:ring-[#1E5BFF]/30"
+                placeholder="tucorreo@ejemplo.com"
+                type="email"
+                autoComplete="email"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Teléfono
+              </label>
+              <input
+                value={phone}
+                onChange={(e) => setPhone(cleanPhone(e.target.value))}
+                className="w-full px-4 py-3 rounded-xl bg-[#EEF5FF] border border-[#D6E2FF] outline-none focus:ring-2 focus:ring-[#1E5BFF]/30"
+                placeholder="+569XXXXXXXX"
+                inputMode="tel"
+                autoComplete="tel"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Contraseña
+              </label>
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-white border border-[#D6E2FF] outline-none focus:ring-2 focus:ring-[#1E5BFF]/30"
+                type="password"
+                autoComplete="new-password"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Repetir contraseña
+              </label>
+              <input
+                value={password2}
+                onChange={(e) => setPassword2(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-white border border-[#D6E2FF] outline-none focus:ring-2 focus:ring-[#1E5BFF]/30"
+                type="password"
+                autoComplete="new-password"
+              />
+            </div>
+
+            <label className="flex items-start gap-3 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={accepted}
+                onChange={(e) => setAccepted(e.target.checked)}
+                className="mt-1 h-4 w-4"
+              />
+              <span>
+                He leído y acepto los{" "}
+                <Link href="/terms" className="text-[#1E5BFF] hover:underline">
+                  Términos y Condiciones
+                </Link>{" "}
+                de TixSwap.
+                <div className="text-xs text-gray-500 mt-1">
+                  Si no aceptas los Términos, no podrás crear tu cuenta.
+                </div>
+              </span>
+            </label>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full mt-2 px-4 py-3 rounded-xl bg-[#1E5BFF] text-white font-semibold hover:bg-[#164BDB] disabled:opacity-60"
+            >
+              {loading ? "Creando cuenta..." : "Crear cuenta"}
+            </button>
+
+            <p className="text-sm text-gray-600 text-center pt-2">
+              ¿Ya tienes cuenta?{" "}
+              <Link href="/login" className="text-[#1E5BFF] hover:underline">
+                Iniciar sesión
+              </Link>
+            </p>
+          </form>
+        </div>
+      </main>
     </div>
   );
 }
+
 
