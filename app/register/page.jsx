@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { formatRut, isValidRut } from "../lib/rutUtils";
 
 export default function RegisterPage() {
+  const topRef = useRef(null);
+
   const [fullName, setFullName] = useState("");
   const [rut, setRut] = useState("");
   const [email, setEmail] = useState("");
@@ -16,6 +18,15 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const scrollTop = () => {
+    // para que veas el error aunque estés scrolleado abajo
+    if (topRef.current) {
+      topRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
 
   const normalizeRutForDb = (rutAny) => {
     // deja: 12345678-9 (sin puntos, DV en mayúscula)
@@ -35,7 +46,7 @@ export default function RegisterPage() {
 
   const isFakeRut = (rutNormalized) => {
     const body = (rutNormalized || "").split("-")[0] || "";
-    // bloquea 11111111, 22222222, etc
+    // bloquea 11111111, 22222222, etc.
     return /^(\d)\1+$/.test(body);
   };
 
@@ -44,18 +55,23 @@ export default function RegisterPage() {
     setError("");
     setMessage("");
 
+    // doble seguro: aunque el botón esté deshabilitado, y aunque exista required,
+    // igual validamos por JS (por si el usuario manda Enter, etc.)
     if (!acceptedTerms) {
       setError("Debes aceptar los Términos y Condiciones.");
+      scrollTop();
       return;
     }
 
     if (!fullName.trim()) {
       setError("Debes ingresar tu nombre.");
+      scrollTop();
       return;
     }
 
     if (password !== confirmPassword) {
       setError("Las contraseñas no coinciden.");
+      scrollTop();
       return;
     }
 
@@ -64,11 +80,13 @@ export default function RegisterPage() {
 
     if (!isValidRut(rutFormatted)) {
       setError("RUT inválido. Revisa el formato y el dígito verificador.");
+      scrollTop();
       return;
     }
 
     if (isFakeRut(rutNormalized)) {
       setError("RUT no válido por razones de seguridad.");
+      scrollTop();
       return;
     }
 
@@ -76,8 +94,6 @@ export default function RegisterPage() {
       setLoading(true);
 
       // 1) Validar si el RUT ya existe en BD (profiles)
-      // OJO: buscamos tanto con formato (con puntos) como normalizado (sin puntos),
-      // por si en tu BD quedó guardado de una u otra forma.
       const { data: existingProfile, error: rutCheckError } = await supabase
         .from("profiles")
         .select("id")
@@ -88,10 +104,16 @@ export default function RegisterPage() {
 
       if (Array.isArray(existingProfile) && existingProfile.length > 0) {
         setError("Rut ya con cuenta en Tixswap, debes iniciar sesión");
+        scrollTop();
         return;
       }
 
-      // 2) Crear cuenta en Supabase Auth (esto dispara correo de confirmación si está habilitado)
+      // 2) Crear cuenta (correo de confirmación lo maneja Supabase si está activado)
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/login`
+          : undefined;
+
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
@@ -101,16 +123,23 @@ export default function RegisterPage() {
             rut: rutNormalized,
             phone: phone,
           },
-          emailRedirectTo:
-            typeof window !== "undefined"
-              ? `${window.location.origin}/login`
-              : undefined,
+          emailRedirectTo: redirectTo,
         },
       });
 
-      if (signUpError) throw signUpError;
+      if (signUpError) {
+        const msg = (signUpError.message || "").toLowerCase();
 
-      // Si email confirmations están ON: data.user existe pero no hay session
+        // Mensajes más claros (porque si no, parece que "no hizo nada")
+        if (msg.includes("redirect") && msg.includes("not allowed")) {
+          throw new Error(
+            "El link de confirmación no se pudo generar (redirect no permitido). Revisa en Supabase: Auth → URL Configuration (Site URL / Redirect URLs)."
+          );
+        }
+
+        throw signUpError;
+      }
+
       if (data?.user && !data?.session) {
         setMessage(
           "¡Cuenta creada! Revisa tu correo para confirmar tu cuenta (incluye spam)."
@@ -118,6 +147,8 @@ export default function RegisterPage() {
       } else {
         setMessage("¡Cuenta creada y sesión iniciada!");
       }
+
+      scrollTop();
 
       setFullName("");
       setRut("");
@@ -128,6 +159,7 @@ export default function RegisterPage() {
       setAcceptedTerms(false);
     } catch (err) {
       setError(err?.message || "Ocurrió un error al crear la cuenta.");
+      scrollTop();
     } finally {
       setLoading(false);
     }
@@ -135,6 +167,7 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#f4f7ff] px-4">
+      <div ref={topRef} />
       <div className="w-full max-w-md bg-white rounded-2xl shadow-md p-8">
         <h1 className="text-2xl font-bold text-center mb-2">Crear cuenta</h1>
         <p className="text-center text-gray-500 mb-6">
@@ -234,6 +267,8 @@ export default function RegisterPage() {
               checked={acceptedTerms}
               onChange={(e) => setAcceptedTerms(e.target.checked)}
               className="mt-1"
+              required
+              disabled={loading}
             />
             <div className="text-sm">
               <p>
@@ -251,8 +286,8 @@ export default function RegisterPage() {
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full rounded-xl py-3 font-semibold text-white bg-[#2563eb] hover:bg-[#1d4ed8] transition disabled:opacity-60"
+            disabled={loading || !acceptedTerms}
+            className="w-full rounded-xl py-3 font-semibold text-white bg-[#2563eb] hover:bg-[#1d4ed8] transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? "Creando..." : "Crear cuenta"}
           </button>
