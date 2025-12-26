@@ -1,13 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 import { formatRut, isValidRut } from "../lib/rutUtils";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const topRef = useRef(null);
 
   const [fullName, setFullName] = useState("");
   const [rut, setRut] = useState("");
@@ -20,14 +19,6 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-
-  const scrollTop = () => {
-    if (topRef.current) {
-      topRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    } else if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
 
   const normalizeRutForDb = (rutAny) => {
     const clean = String(rutAny || "")
@@ -55,19 +46,16 @@ export default function RegisterPage() {
 
     if (!acceptedTerms) {
       setError("Debes aceptar los Términos y Condiciones.");
-      scrollTop();
       return;
     }
 
     if (!fullName.trim()) {
       setError("Debes ingresar tu nombre.");
-      scrollTop();
       return;
     }
 
     if (password !== confirmPassword) {
       setError("Las contraseñas no coinciden.");
-      scrollTop();
       return;
     }
 
@@ -76,13 +64,11 @@ export default function RegisterPage() {
 
     if (!isValidRut(rutFormatted)) {
       setError("RUT inválido. Revisa el formato y el dígito verificador.");
-      scrollTop();
       return;
     }
 
     if (isFakeRut(rutNormalized)) {
       setError("RUT no válido por razones de seguridad.");
-      scrollTop();
       return;
     }
 
@@ -100,7 +86,6 @@ export default function RegisterPage() {
 
       if (Array.isArray(existingProfile) && existingProfile.length > 0) {
         setError("Rut ya con cuenta en Tixswap, debes iniciar sesión");
-        scrollTop();
         return;
       }
 
@@ -133,22 +118,15 @@ export default function RegisterPage() {
         throw signUpError;
       }
 
-      // Caso SaaS normal: user creado, pero sin sesión => esperar confirmación
+      // Caso SaaS típico: user creado pero sin sesión -> esperar confirmación
       if (data?.user && !data?.session) {
-        setMessage(
-          "Te enviamos un correo para validar tu cuenta. Revisa tu bandeja (y spam)."
-        );
-        scrollTop();
-
-        // manda a página de espera clara tipo SaaS
+        // redirigimos a pantalla de verificación
         router.push(`/verify-email?email=${encodeURIComponent(email)}`);
         return;
       }
 
       // Si por algún motivo quedó logeado inmediatamente
       setMessage("¡Cuenta creada y sesión iniciada!");
-      scrollTop();
-
       setFullName("");
       setRut("");
       setEmail("");
@@ -158,7 +136,6 @@ export default function RegisterPage() {
       setAcceptedTerms(false);
     } catch (err) {
       setError(err?.message || "Ocurrió un error al crear la cuenta.");
-      scrollTop();
     } finally {
       setLoading(false);
     }
@@ -166,24 +143,11 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#f4f7ff] px-4">
-      <div ref={topRef} />
       <div className="w-full max-w-md bg-white rounded-2xl shadow-md p-8">
         <h1 className="text-2xl font-bold text-center mb-2">Crear cuenta</h1>
         <p className="text-center text-gray-500 mb-6">
           Validaremos que el RUT sea correcto (incluyendo dígito verificador).
         </p>
-
-        {error && (
-          <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm">
-            {error}
-          </div>
-        )}
-
-        {message && (
-          <div className="bg-green-50 text-green-700 p-3 rounded-lg mb-4 text-sm">
-            {message}
-          </div>
-        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -296,6 +260,19 @@ export default function RegisterPage() {
           >
             {loading ? "Creando..." : "Crear cuenta"}
           </button>
+
+          {/* ✅ Mensajes abajo del botón (UX correcto) */}
+          {error && (
+            <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
+
+          {message && (
+            <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm">
+              {message}
+            </div>
+          )}
         </form>
 
         <p className="text-center text-sm text-gray-500 mt-6">
@@ -308,4 +285,5 @@ export default function RegisterPage() {
     </div>
   );
 }
+
 
