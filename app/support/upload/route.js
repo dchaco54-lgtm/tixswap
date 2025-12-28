@@ -47,6 +47,7 @@ export async function POST(req) {
 
     const { data: u, error: uErr } = await supabaseAdmin.auth.getUser(token);
     if (uErr || !u?.user) return json({ error: "UNAUTHORIZED" }, 401);
+    const user = u.user;
 
     const form = await req.formData();
     const ticketId = String(form.get("ticketId") || "").trim();
@@ -54,6 +55,30 @@ export async function POST(req) {
 
     if (!ticketId) return json({ error: "Missing ticketId" }, 400);
     if (!file || !(file instanceof File)) return json({ error: "Missing file" }, 400);
+
+    // es admin?
+    const { data: prof } = await supabaseAdmin
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const isAdmin = prof?.role === "admin";
+
+    // validar ticket & permisos
+    const { data: ticket, error: tErr } = await supabaseAdmin
+      .from("support_tickets")
+      .select("id, user_id, status")
+      .eq("id", ticketId)
+      .single();
+
+    if (tErr || !ticket) return json({ error: "Ticket no existe" }, 404);
+    if (!isAdmin && ticket.user_id !== user.id) return json({ error: "FORBIDDEN" }, 403);
+
+    // no permitir adjuntar si está cerrado
+    if (ticket.status === "resolved" || ticket.status === "rejected") {
+      return json({ error: "Este ticket está cerrado" }, 403);
+    }
 
     if (!allowMime(file.type)) {
       return json({ error: "Tipo de archivo no permitido (solo PDF/imagen/audio)" }, 400);
@@ -65,7 +90,6 @@ export async function POST(req) {
     const ab = await file.arrayBuffer();
     const buf = Buffer.from(ab);
 
-    // hash para path (evita duplicados simples)
     const sha = crypto.createHash("sha256").update(buf).digest("hex").slice(0, 16);
     const ext = extFromName(file.name) || (file.type === "application/pdf" ? ".pdf" : "");
 
