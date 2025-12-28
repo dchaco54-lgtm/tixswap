@@ -23,17 +23,18 @@ const CATEGORY_LABEL = (c) => {
   return c || "—";
 };
 
-function statusPill(status) {
-  const base =
-    "inline-flex items-center px-2 py-1 rounded-full text-[11px] font-semibold border";
+function pillClass(status) {
+  const base = "px-3 py-1 rounded-full text-xs font-semibold border";
   if (status === "resolved")
     return base + " bg-emerald-50 text-emerald-700 border-emerald-200";
   if (status === "rejected")
-    return base + " bg-red-50 text-red-700 border-red-200";
+    return base + " bg-rose-50 text-rose-700 border-rose-200";
   if (status === "waiting_user")
     return base + " bg-amber-50 text-amber-800 border-amber-200";
   if (status === "in_review")
     return base + " bg-blue-50 text-blue-700 border-blue-200";
+  if (status === "submitted")
+    return base + " bg-slate-50 text-slate-700 border-slate-200";
   return base + " bg-slate-50 text-slate-700 border-slate-200";
 }
 
@@ -45,6 +46,19 @@ function fmtCL(dt) {
   });
 }
 
+function fmtBytes(n) {
+  const x = Number(n || 0);
+  if (!x) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = x;
+  while (v >= 1024 && i < units.length - 1) {
+    v = v / 1024;
+    i++;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 function isOverdue(ticket) {
   if (!ticket?.due_at) return false;
   if (ticket.status === "resolved" || ticket.status === "rejected") return false;
@@ -54,8 +68,7 @@ function isOverdue(ticket) {
 export default function AdminSupportConsole() {
   const router = useRouter();
 
-  const [booting, setBooting] = useState(true);
-  const [me, setMe] = useState(null);
+  const [boot, setBoot] = useState(true);
 
   const [tickets, setTickets] = useState([]);
   const [loadingList, setLoadingList] = useState(true);
@@ -79,43 +92,24 @@ export default function AdminSupportConsole() {
 
   const [err, setErr] = useState("");
 
-  // ---- boot: auth + admin ----
-  useEffect(() => {
-    const init = async () => {
-      setBooting(true);
-      setErr("");
-
-      const { data } = await supabase.auth.getUser();
-      if (!data?.user) {
-        router.push("/login");
-        return;
-      }
-      setMe(data.user);
-
-      // validar admin por profiles.role
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", data.user.id)
-        .single();
-
-      if (profErr || prof?.role !== "admin") {
-        setErr("No tienes permisos para ver este panel.");
-        setBooting(false);
-        return;
-      }
-
-      setBooting(false);
-      await refreshList();
-    };
-
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const getAccessToken = async () => {
     const { data } = await supabase.auth.getSession();
     return data?.session?.access_token || null;
+  };
+
+  const ensureAdmin = async () => {
+    const { data } = await supabase.auth.getUser();
+    const user = data?.user;
+    if (!user) return { ok: false };
+
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (prof?.role !== "admin") return { ok: false };
+    return { ok: true };
   };
 
   const refreshList = async () => {
@@ -136,9 +130,7 @@ export default function AdminSupportConsole() {
       if (!res.ok) throw new Error(json?.error || "No pudimos cargar tickets");
 
       setTickets(json.tickets || []);
-      if (!selectedId && (json.tickets || []).length) {
-        setSelectedId(json.tickets[0].id);
-      }
+      if (!selectedId && (json.tickets || []).length) setSelectedId(json.tickets[0].id);
     } catch (e) {
       setErr(e.message || "Error cargando tickets");
       setTickets([]);
@@ -147,30 +139,11 @@ export default function AdminSupportConsole() {
     }
   };
 
-  // auto refresh list on filters change
-  useEffect(() => {
-    if (booting) return;
-    refreshList();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
-
-  const filtered = useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    if (!qq) return tickets;
-    return tickets.filter((t) => {
-      const n = `ts-${t.ticket_number || ""}`.toLowerCase();
-      const subj = (t.subject || "").toLowerCase();
-      const mail = (t.requester_email || "").toLowerCase();
-      const rut = (t.requester_rut || "").toLowerCase();
-      return n.includes(qq) || subj.includes(qq) || mail.includes(qq) || rut.includes(qq);
-    });
-  }, [q, tickets]);
-
   const loadDetail = async (ticketId) => {
     setLoadingDetail(true);
     setErr("");
-    setPendingUploads([]);
     setDraft("");
+    setPendingUploads([]);
 
     try {
       const token = await getAccessToken();
@@ -193,16 +166,64 @@ export default function AdminSupportConsole() {
       setSelected(null);
       setMessages([]);
       setAttachments([]);
+      setAdminStatus("");
     } finally {
       setLoadingDetail(false);
     }
   };
 
   useEffect(() => {
+    const init = async () => {
+      setBoot(true);
+
+      const admin = await ensureAdmin();
+      if (!admin.ok) {
+        router.push("/dashboard");
+        return;
+      }
+
+      setBoot(false);
+      await refreshList();
+    };
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (boot) return;
+    refreshList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
+
+  useEffect(() => {
     if (!selectedId) return;
     loadDetail(selectedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  const looseAttachments = useMemo(() => {
+    return (attachments || []).filter((a) => !a.message_id);
+  }, [attachments]);
+
+  const filtered = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return tickets;
+    return tickets.filter((t) => {
+      const n = `ts-${t.ticket_number || ""}`.toLowerCase();
+      const subj = (t.subject || "").toLowerCase();
+      const email = (t.requester_email || "").toLowerCase();
+      const rut = (t.requester_rut || "").toLowerCase();
+      return (
+        n.includes(qq) ||
+        subj.includes(qq) ||
+        email.includes(qq) ||
+        rut.includes(qq)
+      );
+    });
+  }, [q, tickets]);
+
+  const canReply =
+    !!selected && ["submitted", "in_review", "waiting_user"].includes(adminStatus);
 
   const handleUpdateStatus = async () => {
     if (!selected?.id) return;
@@ -211,7 +232,7 @@ export default function AdminSupportConsole() {
 
     try {
       const token = await getAccessToken();
-      const res = await fetch("/support/admin/update", {
+      const res = await fetch("/support/admin/status", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -224,13 +245,12 @@ export default function AdminSupportConsole() {
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo actualizar estado");
+      if (!res.ok) throw new Error(json?.error || "No se pudo guardar el estado");
 
-      // refrescar detalle + lista
       await loadDetail(selected.id);
       await refreshList();
     } catch (e) {
-      setErr(e.message || "Error actualizando estado");
+      setErr(e.message || "Error guardando estado");
     } finally {
       setSavingStatus(false);
     }
@@ -265,7 +285,6 @@ export default function AdminSupportConsole() {
       }
 
       setPendingUploads((prev) => [...prev, ...uploaded]);
-      // limpiar input
       e.target.value = "";
     } catch (e2) {
       setErr(e2.message || "Error subiendo archivos");
@@ -302,7 +321,6 @@ export default function AdminSupportConsole() {
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "No se pudo enviar el mensaje");
 
-      // refrescar
       setDraft("");
       setPendingUploads([]);
       await loadDetail(selected.id);
@@ -314,7 +332,7 @@ export default function AdminSupportConsole() {
     }
   };
 
-  if (booting) {
+  if (boot) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-slate-50">
         <p className="text-sm text-slate-500">Cargando…</p>
@@ -322,20 +340,9 @@ export default function AdminSupportConsole() {
     );
   }
 
-  if (err && !me) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
-        <div className="max-w-md w-full bg-white border border-slate-100 rounded-2xl p-6">
-          <h1 className="text-xl font-bold text-slate-900">Soporte · Admin</h1>
-          <p className="text-slate-600 mt-2">{err}</p>
-        </div>
-      </main>
-    );
-  }
-
   return (
     <main className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-8">
+      <div className="max-w-7xl mx-auto px-4 py-10">
         <div className="flex items-start justify-between gap-3 mb-6">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
@@ -373,7 +380,7 @@ export default function AdminSupportConsole() {
               </button>
             </div>
 
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3">
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -420,26 +427,29 @@ export default function AdminSupportConsole() {
                       <div className="text-xs font-semibold text-slate-700">
                         TS-{t.ticket_number}
                       </div>
-                      <span className={statusPill(t.status)}>{STATUS.find(x=>x.v===t.status)?.l || t.status}</span>
+                      <span className={pillClass(t.status)}>
+                        {STATUS.find((x) => x.v === t.status)?.l || t.status}
+                      </span>
                     </div>
 
-                    <div className="mt-1">
-                      <p className="text-sm font-semibold text-slate-900 line-clamp-1">
-                        {t.subject || "Sin asunto"}
-                      </p>
-                      <p className="text-xs text-slate-500 line-clamp-1">
-                        {t.requester_email || "—"} · {CATEGORY_LABEL(t.category)}
-                      </p>
-                    </div>
+                    <p className="text-sm font-semibold text-slate-900 line-clamp-1 mt-1">
+                      {t.subject || "Sin asunto"}
+                    </p>
 
-                    <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
-                      <span>Último: {fmtCL(t.last_message_at || t.created_at)}</span>
+                    <p className="text-xs text-slate-500 line-clamp-1 mt-1">
+                      {CATEGORY_LABEL(t.category)} ·{" "}
+                      {t.requester_email ? t.requester_email : "—"}
+                    </p>
+
+                    <p className="text-xs text-slate-500 line-clamp-1 mt-1">
+                      Último: {fmtCL(t.last_message_at || t.created_at)} · Vence:{" "}
+                      {fmtCL(t.due_at)}
                       {isOverdue(t) ? (
-                        <span className="text-red-700 font-semibold">VENCIDO</span>
-                      ) : (
-                        <span>Vence: {fmtCL(t.due_at)}</span>
-                      )}
-                    </div>
+                        <span className="ml-2 text-rose-600 font-semibold">
+                          (Atrasado)
+                        </span>
+                      ) : null}
+                    </p>
                   </button>
                 ))
               )}
@@ -456,42 +466,62 @@ export default function AdminSupportConsole() {
               <p className="text-sm text-slate-500">Cargando ticket…</p>
             ) : (
               <>
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold text-slate-900">
-                        TS-{selected.ticket_number}
-                      </h2>
-                      <span className={statusPill(selected.status)}>
-                        {STATUS.find((x) => x.v === selected.status)?.l || selected.status}
-                      </span>
-                      {isOverdue(selected) ? (
-                        <span className="text-xs font-semibold text-red-700">
-                          · Vencido (SLA)
-                        </span>
-                      ) : null}
-                    </div>
-
+                    <h2 className="text-xl font-bold text-slate-900">
+                      TS-{selected.ticket_number}
+                    </h2>
                     <p className="text-sm text-slate-700 mt-1 font-semibold">
                       {selected.subject}
                     </p>
 
-                    <p className="text-xs text-slate-500 mt-1">
-                      {CATEGORY_LABEL(selected.category)} · Creado: {fmtCL(selected.created_at)} · Vence:{" "}
-                      {fmtCL(selected.due_at)}
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className={pillClass(selected.status)}>
+                        {STATUS.find((x) => x.v === selected.status)?.l ||
+                          selected.status}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {CATEGORY_LABEL(selected.category)}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-500 mt-2">
+                      {selected.category === "disputa_compra" ||
+                      selected.category === "disputa_venta" ? (
+                        <>
+                          disputa · Creado: {fmtCL(selected.created_at)} · Vence:{" "}
+                          {fmtCL(selected.due_at)}
+                        </>
+                      ) : (
+                        <>
+                          Creado: {fmtCL(selected.created_at)} · Vence:{" "}
+                          {fmtCL(selected.due_at)}
+                        </>
+                      )}
                     </p>
 
                     <p className="text-xs text-slate-500 mt-1">
-                      Usuario: <b>{selected.requester_name || "—"}</b> ·{" "}
-                      {selected.requester_email || "—"} · RUT {selected.requester_rut || "—"}
+                      Usuario:{" "}
+                      <b className="text-slate-700">
+                        {selected.requester_name || "—"}
+                      </b>{" "}
+                      · {selected.requester_email || "—"}{" "}
+                      {selected.requester_rut ? (
+                        <>
+                          · RUT{" "}
+                          <span className="text-slate-700">
+                            {selected.requester_rut}
+                          </span>
+                        </>
+                      ) : null}
                     </p>
                   </div>
 
                   <div className="min-w-[260px]">
-                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">
                       Estado del ticket
                     </label>
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2">
                       <select
                         value={adminStatus}
                         onChange={(e) => setAdminStatus(e.target.value)}
@@ -518,6 +548,34 @@ export default function AdminSupportConsole() {
                   <h3 className="text-sm font-semibold text-slate-900 mb-3">
                     Conversación
                   </h3>
+
+                  {looseAttachments.length ? (
+                    <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2">
+                      <div className="text-xs font-semibold text-amber-800">
+                        Adjuntos del ticket (sin mensaje)
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        {looseAttachments.map((a) => (
+                          <a
+                            key={a.id}
+                            href={a.signed_url || "#"}
+                            target="_blank"
+                            rel="noreferrer"
+                            download={a.file_name || undefined}
+                            className="block text-xs text-blue-700 hover:underline"
+                          >
+                            📎 {a.file_name || "archivo"}{" "}
+                            <span className="text-slate-500">
+                              ({a.mime_type || "—"} · {fmtBytes(a.file_size)})
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                      <div className="mt-1 text-[11px] text-amber-700">
+                        Tip: el link expira en ~30 min. Si expira, recarga el ticket.
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className="space-y-3 max-h-[46vh] overflow-auto pr-1">
                     {messages.map((m) => {
@@ -556,11 +614,12 @@ export default function AdminSupportConsole() {
                                     href={a.signed_url || "#"}
                                     target="_blank"
                                     rel="noreferrer"
+                                    download={a.file_name || undefined}
                                     className="block text-xs text-blue-700 hover:underline"
                                   >
                                     📎 {a.file_name || "archivo"}{" "}
                                     <span className="text-slate-400">
-                                      ({a.mime_type || "—"})
+                                      ({a.mime_type || "—"} · {fmtBytes(a.file_size)})
                                     </span>
                                   </a>
                                 ))}
@@ -578,47 +637,59 @@ export default function AdminSupportConsole() {
                         Responder
                       </label>
 
-                      <label className="text-xs font-semibold text-blue-700 cursor-pointer">
+                      <label
+                        className={`text-xs font-semibold cursor-pointer ${
+                          canReply ? "text-blue-700" : "text-slate-400 cursor-not-allowed"
+                        }`}
+                      >
                         {uploading ? "Subiendo…" : "Adjuntar"}
                         <input
                           type="file"
                           multiple
-                          onChange={onPickFiles}
+                          onChange={canReply ? onPickFiles : undefined}
                           className="hidden"
                           accept="application/pdf,image/*,audio/*"
-                          disabled={uploading}
+                          disabled={!canReply || uploading}
                         />
                       </label>
                     </div>
 
-                    {pendingUploads.length ? (
-                      <div className="mt-2 text-xs text-slate-600 space-y-1">
-                        {pendingUploads.map((a) => (
-                          <div key={a.id}>📎 {a.file_name}</div>
-                        ))}
-                      </div>
-                    ) : null}
+                    {!canReply ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        Este ticket está cerrado. Si necesitas seguir, crea uno nuevo.
+                      </p>
+                    ) : (
+                      <>
+                        {pendingUploads.length ? (
+                          <div className="mt-2 text-xs text-slate-600 space-y-1">
+                            {pendingUploads.map((a) => (
+                              <div key={a.id}>📎 {a.file_name}</div>
+                            ))}
+                          </div>
+                        ) : null}
 
-                    <textarea
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      placeholder="Escribe tu respuesta al usuario…"
-                      className="mt-3 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[90px] bg-white"
-                    />
+                        <textarea
+                          value={draft}
+                          onChange={(e) => setDraft(e.target.value)}
+                          placeholder="Escribe tu respuesta al usuario…"
+                          className="mt-3 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[90px] bg-white"
+                        />
 
-                    <div className="mt-3 flex justify-end">
-                      <button
-                        onClick={sendMessage}
-                        disabled={sending || uploading}
-                        className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
-                      >
-                        {sending ? "Enviando…" : "Enviar mensaje"}
-                      </button>
-                    </div>
+                        <div className="mt-3 flex justify-end">
+                          <button
+                            onClick={sendMessage}
+                            disabled={sending || uploading}
+                            className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                          >
+                            {sending ? "Enviando…" : "Enviar mensaje"}
+                          </button>
+                        </div>
 
-                    <p className="mt-2 text-[11px] text-slate-500">
-                      Al responder, TixSwap envía correo al usuario (si configuraste Resend).
-                    </p>
+                        <p className="mt-2 text-[11px] text-slate-500">
+                          Al responder, TixSwap envía correo al usuario (si configuraste Resend).
+                        </p>
+                      </>
+                    )}
                   </div>
                 </div>
               </>
