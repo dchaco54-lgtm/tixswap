@@ -74,6 +74,9 @@ export async function GET(req) {
 
     return json({ ok: true, ticket, messages: msgs || [], attachments });
   } catch (e) {
-    return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);
+    return json(
+      { error: "Unexpected error", details: e?.message || String(e) },
+      500
+    );
   }
 }
