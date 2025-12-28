@@ -84,6 +84,11 @@ export async function POST(req) {
 
     if (tErr || !ticket) return json({ error: "Ticket no existe" }, 404);
 
+    // Si el ticket está cerrado, no aceptamos más mensajes (ni usuario ni admin)
+    if (ticket.status === "resolved" || ticket.status === "rejected") {
+      return json({ error: "Este ticket está cerrado" }, 403);
+    }
+
     // permiso: si no es admin, solo su ticket
     if (!isAdmin && ticket.user_id !== user.id) {
       return json({ error: "FORBIDDEN" }, 403);
@@ -111,10 +116,7 @@ export async function POST(req) {
         .in("id", attachment_ids)
         .eq("ticket_id", ticket_id);
 
-      if (aErr) {
-        // no matamos el mensaje por esto, pero avisamos
-        console.warn("attach update error", aErr);
-      }
+      if (aErr) console.warn("attach update error", aErr);
     }
 
     // auto-transición de estado
