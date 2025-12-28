@@ -1,4 +1,6 @@
-// app/support/my/ticket/route.js
+// app/support/my/tickets/route.js
+// Lista de tickets del usuario autenticado
+
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -25,6 +27,7 @@ export async function GET(req) {
       auth: { persistSession: false },
     });
 
+    // auth user
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return json({ error: "UNAUTHORIZED" }, 401);
@@ -33,44 +36,26 @@ export async function GET(req) {
     if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
 
     const url = new URL(req.url);
-    const id = url.searchParams.get("id");
-    if (!id) return json({ error: "Missing id" }, 400);
+    const status = (url.searchParams.get("status") || "all").trim();
 
-    const { data: ticket, error: tErr } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("support_tickets")
       .select("*")
-      .eq("id", id)
-      .single();
+      .eq("user_id", u.user.id)
+      .order("created_at", { ascending: false })
+      .limit(200);
 
-    if (tErr || !ticket) return json({ error: "Ticket not found" }, 404);
-    if (ticket.user_id !== u.user.id) return json({ error: "FORBIDDEN" }, 403);
+    if (status && status !== "all") query = query.eq("status", status);
 
-    const { data: msgs } = await supabaseAdmin
-      .from("support_ticket_messages")
-      .select("*")
-      .eq("ticket_id", id)
-      .order("created_at", { ascending: true });
+    const { data: tickets, error } = await query;
+    if (error) return json({ error: error.message }, 500);
 
-    const { data: atts } = await supabaseAdmin
-      .from("support_ticket_attachments")
-      .select("*")
-      .eq("ticket_id", id)
-      .order("created_at", { ascending: true });
-
-    const attachments = [];
-    for (const a of atts || []) {
-      const { data: signed } = await supabaseAdmin.storage
-        .from(a.bucket)
-        .createSignedUrl(a.path, 60 * 30);
-
-      attachments.push({
-        ...a,
-        signed_url: signed?.signedUrl || null,
-      });
-    }
-
-    return json({ ok: true, ticket, messages: msgs || [], attachments });
+    return json({ ok: true, tickets: tickets || [] });
   } catch (e) {
-    return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);
+    return json(
+      { error: "Unexpected error", details: e?.message || String(e) },
+      500
+    );
   }
 }
+
