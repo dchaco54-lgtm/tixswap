@@ -191,9 +191,7 @@ export default function MyTicketsPage() {
   };
 
   const canReply =
-    selected &&
-    selected.status !== "resolved" &&
-    selected.status !== "rejected";
+    !!selected && ["submitted", "in_review", "waiting_user"].includes(selected.status);
 
   const sendMessage = async () => {
     if (!selected?.id) return;
@@ -388,7 +386,7 @@ export default function MyTicketsPage() {
                           >
                             <div className="text-[11px] text-slate-500 flex items-center justify-between gap-3">
                               <span className="font-semibold">
-                                {mine ? "Tú" : "TixSwap"}
+                                {mine ? "Tú" : "TixSwap (Admin)"}
                               </span>
                               <span>{fmtCL(m.created_at)}</span>
                             </div>
@@ -448,7 +446,7 @@ export default function MyTicketsPage() {
 
                     {!canReply ? (
                       <p className="mt-2 text-xs text-slate-500">
-                        Este ticket está cerrado. Si necesitas algo nuevo, crea otro ticket.
+                        Este ticket está cerrado. Si necesitas seguir, crea un ticket nuevo.
                       </p>
                     ) : (
                       <>
@@ -488,3 +486,4 @@ export default function MyTicketsPage() {
     </main>
   );
 }
+
