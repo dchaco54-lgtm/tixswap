@@ -136,6 +136,39 @@ export async function POST(req) {
     }
 
     // INSERT
+    // --- Cargos por servicio (MVP): 2.5% comprador + 2.5% vendedor (Ultra 0%) ---
+let userRole = "basic";
+try {
+  const { data: prof } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  userRole = prof?.role || "basic";
+} catch {
+  // fallback basic
+}
+
+const buyer_fee_rate = 0.025;
+const seller_fee_rate = String(userRole).toLowerCase() === "ultra_premium" ? 0 : 0.025;
+
+const buyer_fee_clp = Math.max(0, Math.round(price * buyer_fee_rate));
+const seller_fee_clp = Math.max(0, Math.round(price * seller_fee_rate));
+const total_paid_clp = Math.max(0, price + buyer_fee_clp);
+const seller_payout_clp = Math.max(0, price - seller_fee_clp);
+const platform_fee_clp = Math.max(0, buyer_fee_clp + seller_fee_clp);
+
+// Guardamos breakdown si existen las columnas (no rompe si la tabla aún no las tiene)
+if (await columnExists(supabase, table, "buyer_fee_rate")) insertPayload.buyer_fee_rate = buyer_fee_rate;
+if (await columnExists(supabase, table, "seller_fee_rate")) insertPayload.seller_fee_rate = seller_fee_rate;
+
+if (await columnExists(supabase, table, "buyer_fee_clp")) insertPayload.buyer_fee_clp = buyer_fee_clp;
+if (await columnExists(supabase, table, "seller_fee_clp")) insertPayload.seller_fee_clp = seller_fee_clp;
+
+if (await columnExists(supabase, table, "total_paid_clp")) insertPayload.total_paid_clp = total_paid_clp;
+if (await columnExists(supabase, table, "seller_payout_clp")) insertPayload.seller_payout_clp = seller_payout_clp;
+
+if (await columnExists(supabase, table, "platform_fee_clp")) insertPayload.platform_fee_clp = platform_fee_clp;
     const { data: inserted, error: insErr } = await supabase
       .from(table)
       .insert(insertPayload)
