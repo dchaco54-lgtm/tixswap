@@ -1,88 +1,143 @@
-import crypto from "crypto";
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-function generateAuth(login, secretKey) {
+function generateAuthHeader({ secretKey, login }) {
+  const nonce = crypto.randomBytes(16).toString("hex");
   const seed = new Date().toISOString();
-  const rawNonce = Math.floor(Math.random() * 1_000_000).toString();
-  const tranKey = crypto.createHash("sha256").update(rawNonce + seed + secretKey).digest("base64");
-  const nonce = Buffer.from(rawNonce).toString("base64");
-  return { login, tranKey, nonce, seed };
+  const raw = `${nonce}${seed}${secretKey}`;
+  const hash = crypto.createHash("sha256").update(raw).digest("base64");
+  const token = Buffer.from(`${login}:${hash}`).toString("base64");
+  return { auth: `Basic ${token}` };
 }
 
-function extractState(data) {
-  const s = data?.status?.status;
-  if (!s) return null;
-  const upper = String(s).toUpperCase();
-  if (upper === "OK") return "PENDING";
-  return upper;
+async function columnExists(admin, table, column) {
+  const { data, error } = await admin
+    .from("information_schema.columns")
+    .select("column_name")
+    .eq("table_schema", "public")
+    .eq("table_name", table)
+    .eq("column_name", column)
+    .maybeSingle();
+
+  if (error) return false;
+  return !!data;
 }
 
 export async function POST(req) {
-  try {
-    const supabaseAuth = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: userErr } = await supabaseAuth.auth.getUser();
-    if (userErr || !user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  const supabase = createRouteHandlerClient({ cookies });
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user;
 
+  if (!user) {
+    return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  }
+
+  const admin = supabaseAdmin();
+
+  try {
     const body = await req.json().catch(() => ({}));
     const orderId = body?.orderId;
-    if (!orderId) return NextResponse.json({ error: "Falta orderId" }, { status: 400 });
 
-    const { data: order } = await supabaseAdmin
+    if (!orderId) {
+      return NextResponse.json({ error: "Falta orderId." }, { status: 400 });
+    }
+
+    const { data: order, error: oErr } = await admin
       .from("orders")
-      .select("id,buyer_id,ticket_id,payment_request_id,status")
+      .select("*")
       .eq("id", orderId)
-      .maybeSingle();
+      .single();
 
-    if (!order) return NextResponse.json({ error: "Orden no existe" }, { status: 404 });
-    if (order.buyer_id !== user.id) return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+    if (oErr || !order) {
+      return NextResponse.json({ error: "Orden no encontrada." }, { status: 404 });
+    }
 
-    const baseUrl = process.env.BANCHILE_BASE_URL || "https://checkout.test.banchilepagos.cl";
+    if (order.buyer_id && order.buyer_id !== user.id) {
+      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
+    }
+
+    const baseUrl =
+      process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
     const login = process.env.BANCHILE_LOGIN;
     const secretKey = process.env.BANCHILE_SECRET_KEY;
-    if (!login || !secretKey) return NextResponse.json({ error: "Faltan env vars BANCHILE_*" }, { status: 500 });
 
-    const auth = generateAuth(login, secretKey);
-    const r = await fetch(`${baseUrl}/api/session/${order.payment_request_id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ auth }),
+    if (!login || !secretKey) {
+      return NextResponse.json(
+        { error: "Faltan variables BANCHILE_LOGIN / BANCHILE_SECRET_KEY." },
+        { status: 500 }
+      );
+    }
+
+    const requestId = order.payment_request_id;
+    if (!requestId) {
+      return NextResponse.json(
+        { error: "Orden sin payment_request_id (no se puede confirmar)." },
+        { status: 400 }
+      );
+    }
+
+    const { auth } = generateAuthHeader({ secretKey, login });
+
+    const resp = await fetch(`${baseUrl}/api/session/${encodeURIComponent(requestId)}`, {
+      method: "GET",
+      headers: { Authorization: auth },
     });
 
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data) return NextResponse.json({ error: "No pudimos consultar estado", details: data }, { status: 502 });
+    const respJson = await resp.json().catch(() => ({}));
 
-    const state = extractState(data) || "PENDING";
+    if (!resp.ok) {
+      console.error("Banchile confirm error:", resp.status, respJson);
+      return NextResponse.json(
+        { error: "No se pudo confirmar con Banchile.", details: respJson },
+        { status: 502 }
+      );
+    }
 
+    const state = respJson?.state; // APPROVED | REJECTED | PENDING (depende Banchile)
+    const ticketId = order.ticket_id;
+
+    // actualiza order + ticket
     if (state === "APPROVED") {
-      await supabaseAdmin.from("orders").update({
-        status: "held",
-        payment_state: "APPROVED",
-        paid_at: new Date().toISOString(),
-        payment_raw: data,
-      }).eq("id", order.id);
+      const upd = { status: "held" };
+      if (await columnExists(admin, "orders", "paid_at")) upd.paid_at = new Date().toISOString();
+      if (await columnExists(admin, "orders", "payment_state")) upd.payment_state = state;
 
-      await supabaseAdmin.from("tickets").update({ status: "sold" }).eq("id", order.ticket_id);
+      await admin.from("orders").update(upd).eq("id", orderId);
+
+      if (ticketId) {
+        await admin.from("tickets").update({ status: "sold" }).eq("id", ticketId);
+      }
+
+      return NextResponse.json({ ok: true, state, orderStatus: "held" });
     }
 
     if (state === "REJECTED") {
-      await supabaseAdmin.from("orders").update({
-        status: "payment_failed",
-        payment_state: "REJECTED",
-        payment_raw: data,
-      }).eq("id", order.id);
+      const upd = { status: "rejected" };
+      if (await columnExists(admin, "orders", "payment_state")) upd.payment_state = state;
 
-      await supabaseAdmin.from("tickets").update({ status: "published" }).eq("id", order.ticket_id);
+      await admin.from("orders").update(upd).eq("id", orderId);
+
+      if (ticketId) {
+        await admin.from("tickets").update({ status: "active" }).eq("id", ticketId);
+      }
+
+      return NextResponse.json({ ok: true, state, orderStatus: "rejected" });
     }
 
-    return NextResponse.json({ orderId: order.id, state });
+    // PENDING u otro estado -> revisión
+    const upd = { status: "pending_review" };
+    if (await columnExists(admin, "orders", "payment_state")) upd.payment_state = state || "PENDING";
+
+    await admin.from("orders").update(upd).eq("id", orderId);
+
+    return NextResponse.json({ ok: true, state: state || "PENDING", orderStatus: "pending_review" });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Error inesperado confirmando pago" }, { status: 500 });
+    console.error("confirm error:", e);
+    return NextResponse.json({ error: "Error interno confirmando pago." }, { status: 500 });
   }
 }
