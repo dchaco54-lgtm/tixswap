@@ -1,35 +1,44 @@
-import crypto from "crypto";
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { calcFees } from "@/lib/fees";
-
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
-function getClientIp(req) {
-  const fwd = req.headers.get("x-forwarded-for");
-  if (!fwd) return null;
-  return fwd.split(",")[0].trim();
+import { NextResponse } from "next/server";
+import { cookies, headers } from "next/headers";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import crypto from "crypto";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { calcFees, getFeeRatesForRole } from "@/lib/fees";
+
+function getIpFromHeaders() {
+  const h = headers();
+  const xff = h.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0].trim();
+  const real = h.get("x-real-ip");
+  if (real) return real.trim();
+  return "127.0.0.1";
 }
 
-function generateAuth(login, secretKey) {
+function getOriginFallback() {
+  const h = headers();
+  const proto = h.get("x-forwarded-proto") || "https";
+  const host = h.get("x-forwarded-host") || h.get("host");
+  if (!host) return "https://tixswap.cl";
+  return `${proto}://${host}`;
+}
+
+function generateAuthHeader({ secretKey, login }) {
+  const nonce = crypto.randomBytes(16).toString("hex");
   const seed = new Date().toISOString();
-  const rawNonce = Math.floor(Math.random() * 1_000_000).toString();
-
-  const tranKey = crypto
-    .createHash("sha256")
-    .update(rawNonce + seed + secretKey)
-    .digest("base64");
-
-  const nonce = Buffer.from(rawNonce).toString("base64");
-  return { login, tranKey, nonce, seed };
+  const raw = `${nonce}${seed}${secretKey}`;
+  const hash = crypto.createHash("sha256").update(raw).digest("base64");
+  const token = Buffer.from(`${login}:${hash}`).toString("base64");
+  return {
+    auth: `Basic ${token}`,
+    nonce,
+    seed,
+  };
 }
 
-async function columnExists(table, column) {
-  const { data, error } = await supabaseAdmin
+async function columnExists(admin, table, column) {
+  const { data, error } = await admin
     .from("information_schema.columns")
     .select("column_name")
     .eq("table_schema", "public")
@@ -41,158 +50,211 @@ async function columnExists(table, column) {
   return !!data;
 }
 
-function pickColumns(payload, allowed) {
-  const out = {};
-  for (const k of Object.keys(payload)) {
-    if (allowed.includes(k) && payload[k] !== undefined) out[k] = payload[k];
-  }
-  return out;
-}
-
 export async function POST(req) {
-  try {
-    const supabaseAuth = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: userErr } = await supabaseAuth.auth.getUser();
-    if (userErr || !user) return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  const supabase = createRouteHandlerClient({ cookies });
+  const { data: userRes } = await supabase.auth.getUser();
+  const user = userRes?.user;
 
+  if (!user) {
+    return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  }
+
+  const admin = supabaseAdmin();
+
+  try {
     const body = await req.json().catch(() => ({}));
     const ticketId = body?.ticketId;
-    if (!ticketId) return NextResponse.json({ error: "Falta ticketId" }, { status: 400 });
 
-    // Ticket
-    const { data: ticket, error: tErr } = await supabaseAdmin
+    if (!ticketId) {
+      return NextResponse.json({ error: "Falta ticketId." }, { status: 400 });
+    }
+
+    // 1) Trae ticket
+    const { data: ticket, error: tErr } = await admin
       .from("tickets")
-      .select("id,event_id,seller_id,status,price_CLP")
+      .select("id, event_id, seller_id, price, status")
       .eq("id", ticketId)
-      .maybeSingle();
+      .single();
 
-    if (tErr || !ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    if (ticket.seller_id === user.id) return NextResponse.json({ error: "No puedes comprar tu propia entrada" }, { status: 400 });
-    if (ticket.status && String(ticket.status).toLowerCase() !== "published") return NextResponse.json({ error: "Ticket no disponible" }, { status: 400 });
+    if (tErr || !ticket) {
+      return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
+    }
 
-    const basePrice = Number(ticket.price_CLP || 0);
-    if (!basePrice || basePrice < 100) return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
+    if (ticket.status !== "active") {
+      return NextResponse.json(
+        { error: `Ticket no disponible (status: ${ticket.status}).` },
+        { status: 400 }
+      );
+    }
 
-    // Event (para release)
-    const { data: event } = await supabaseAdmin
+    // 2) Trae evento (para descripción)
+    const { data: event } = await admin
       .from("events")
-      .select("id,starts_at,title,name")
+      .select("id, title")
       .eq("id", ticket.event_id)
       .maybeSingle();
 
-    // Roles (buyer/seller)
+    // 3) Roles buyer/seller -> comisión por usuario
     const [{ data: buyerProfile }, { data: sellerProfile }] = await Promise.all([
-      supabaseAdmin.from("profiles").select("role").eq("id", user.id).maybeSingle(),
-      supabaseAdmin.from("profiles").select("role").eq("id", ticket.seller_id).maybeSingle(),
+      admin.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+      admin.from("profiles").select("role").eq("id", ticket.seller_id).maybeSingle(),
     ]);
 
+    const buyerRole = buyerProfile?.role || "standard";
+    const sellerRole = sellerProfile?.role || "standard";
+
+    const buyerRates = getFeeRatesForRole(buyerRole);
+    const sellerRates = getFeeRatesForRole(sellerRole);
+
     const fees = calcFees({
-      price_clp: basePrice,
-      buyer_role: buyerProfile?.role ?? "default",
-      seller_role: sellerProfile?.role ?? "default",
+      basePrice: ticket.price,
+      buyerRate: buyerRates.buyerRate,
+      sellerRate: sellerRates.sellerRate,
     });
 
-    // Insert order (safe cols)
-    const candidateCols = [
-      "ticket_id","event_id","buyer_id","seller_id","status",
-      "amount_clp","buyer_fee_rate","seller_fee_rate",
-      "buyer_fee_clp","seller_fee_clp","platform_fee_clp",
-      "total_paid_clp","seller_payout_clp","event_starts_at",
-      "payment_provider","payment_request_id","payment_state",
-      "paid_at","payment_raw"
-    ];
+    // 4) Reserva ticket (bloquea para que no lo compren 2)
+    const { data: reservedRows, error: rErr } = await admin
+      .from("tickets")
+      .update({ status: "pending" })
+      .eq("id", ticketId)
+      .eq("status", "active")
+      .select("id");
 
-    const allowedCols = [];
-    for (const col of candidateCols) {
-      // eslint-disable-next-line no-await-in-loop
-      if (await columnExists("orders", col)) allowedCols.push(col);
+    if (rErr || !reservedRows || reservedRows.length === 0) {
+      return NextResponse.json(
+        { error: "No se pudo reservar el ticket (puede que alguien se te adelantó)." },
+        { status: 409 }
+      );
     }
 
-    const orderPayload = {
-      ticket_id: ticket.id,
-      event_id: ticket.event_id,
+    // 5) Inserta order con columnas existentes (tolerante a tu schema)
+    const orderCols = {
       buyer_id: user.id,
       seller_id: ticket.seller_id,
-      status: "payment_pending",
-      amount_clp: fees.price_clp,
-      buyer_fee_rate: fees.buyer_fee_rate,
-      seller_fee_rate: fees.seller_fee_rate,
-      buyer_fee_clp: fees.buyer_fee_clp,
-      seller_fee_clp: fees.seller_fee_clp,
-      platform_fee_clp: fees.platform_fee_clp,
-      total_paid_clp: fees.total_paid_clp,
-      seller_payout_clp: fees.seller_payout_clp,
-      event_starts_at: event?.starts_at ?? null,
-      payment_provider: "banchile_webcheckout",
-      payment_state: "PENDING",
+      ticket_id: ticket.id,
+      event_id: ticket.event_id,
+      status: "pending_payment",
+      amount_clp: fees.basePrice,
+      buyer_fee_rate: fees.buyerRate,
+      seller_fee_rate: fees.sellerRate,
+      buyer_fee_clp: fees.buyerFee,
+      seller_fee_clp: fees.sellerFee,
+      total_paid_clp: fees.totalToPay,
+      seller_payout_clp: fees.sellerPayout,
+      payment_provider: "banchile",
     };
 
-    const { data: order, error: oErr } = await supabaseAdmin
+    const allowed = {};
+    for (const k of Object.keys(orderCols)) {
+      // si no existe la columna, la omitimos
+      // (esto te permite correr aunque tu tabla tenga menos columnas)
+      // eslint-disable-next-line no-await-in-loop
+      const ok = await columnExists(admin, "orders", k);
+      if (ok) allowed[k] = orderCols[k];
+    }
+
+    const { data: order, error: oErr } = await admin
       .from("orders")
-      .insert(pickColumns(orderPayload, allowedCols))
+      .insert(allowed)
       .select("*")
       .single();
 
-    if (oErr || !order) return NextResponse.json({ error: "No pudimos crear orden", details: oErr?.message }, { status: 500 });
-
-    // Reservar ticket
-    await supabaseAdmin.from("tickets").update({ status: "reserved" }).eq("id", ticket.id);
-
-    // Banchile session
-    const baseUrl = process.env.BANCHILE_BASE_URL || "https://checkout.test.banchilepagos.cl";
-    const login = process.env.BANCHILE_LOGIN;
-    const secretKey = process.env.BANCHILE_SECRET_KEY;
-    if (!login || !secretKey) {
-      await supabaseAdmin.from("tickets").update({ status: "published" }).eq("id", ticket.id);
-      return NextResponse.json({ error: "Faltan env vars BANCHILE_LOGIN / BANCHILE_SECRET_KEY" }, { status: 500 });
+    if (oErr || !order) {
+      // revierte ticket si falla order
+      await admin.from("tickets").update({ status: "active" }).eq("id", ticketId);
+      return NextResponse.json({ error: "No se pudo crear la orden." }, { status: 500 });
     }
 
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || (req.headers.get("origin") ?? "https://tixswap.cl");
-    const returnUrl = `${siteUrl}/payment/return?orderId=${order.id}`;
-    const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    // 6) Llama Banchile para crear sesión
+    const baseUrl =
+      process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
+    const login = process.env.BANCHILE_LOGIN;
+    const secretKey = process.env.BANCHILE_SECRET_KEY;
 
-    const auth = generateAuth(login, secretKey);
+    if (!login || !secretKey) {
+      await admin.from("orders").update({ status: "rejected" }).eq("id", order.id);
+      await admin.from("tickets").update({ status: "active" }).eq("id", ticketId);
+      return NextResponse.json(
+        { error: "Faltan variables BANCHILE_LOGIN / BANCHILE_SECRET_KEY." },
+        { status: 500 }
+      );
+    }
+
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || getOriginFallback();
+    const returnUrl = `${siteUrl}/payment/return?order=${encodeURIComponent(order.id)}`;
+
+    const ipAddress = getIpFromHeaders();
+    const ua = headers().get("user-agent") || "TixSwap";
+
+    const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
+    const { auth } = generateAuthHeader({ secretKey, login });
+
     const payload = {
-      auth,
       locale: "es_CL",
       payment: {
-        reference: String(order.id),
-        description: `Compra TixSwap - Orden ${order.id}`,
-        amount: { currency: "CLP", total: fees.total_paid_clp },
+        reference: order.id,
+        description: `TixSwap - ${event?.title || "Compra de entrada"}`,
+        amount: {
+          currency: "CLP",
+          total: fees.totalToPay,
+        },
       },
       expiration,
       returnUrl,
-      ipAddress: getClientIp(req) || "127.0.0.1",
-      userAgent: req.headers.get("user-agent") || "TixSwap",
+      ipAddress,
+      userAgent: ua,
     };
 
-    const r = await fetch(`${baseUrl}/api/session`, {
+    const resp = await fetch(`${baseUrl}/api/session`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: auth,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(payload),
     });
 
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data?.processUrl || !data?.requestId) {
-      await supabaseAdmin.from("tickets").update({ status: "published" }).eq("id", ticket.id);
-      await supabaseAdmin.from("orders").update({ status: "payment_error", payment_raw: data ?? null }).eq("id", order.id);
-      return NextResponse.json({ error: "No se pudo crear sesión Banchile", details: data }, { status: 502 });
+    const respJson = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      console.error("Banchile create-session error:", resp.status, respJson);
+
+      await admin.from("orders").update({ status: "rejected" }).eq("id", order.id);
+      await admin.from("tickets").update({ status: "active" }).eq("id", ticketId);
+
+      return NextResponse.json(
+        { error: "Banchile rechazó la creación de sesión.", details: respJson },
+        { status: 502 }
+      );
     }
 
-    await supabaseAdmin.from("orders").update({
-      status: "payment_initiated",
-      payment_request_id: data.requestId,
-      payment_raw: data,
-    }).eq("id", order.id);
+    const requestId = respJson?.requestId;
+    const processUrl = respJson?.processUrl;
+
+    // guarda requestId si existe la columna
+    const updates = { status: "payment_initiated" };
+    if (await columnExists(admin, "orders", "payment_request_id")) {
+      updates.payment_request_id = requestId;
+    }
+    if (await columnExists(admin, "orders", "payment_process_url")) {
+      updates.payment_process_url = processUrl;
+    }
+
+    await admin.from("orders").update(updates).eq("id", order.id);
 
     return NextResponse.json({
+      ok: true,
       orderId: order.id,
-      processUrl: data.processUrl,
-      amount: fees.total_paid_clp,
-      breakdown: fees,
+      requestId,
+      processUrl,
+      fees,
     });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Error inesperado creando pago" }, { status: 500 });
+    console.error("create-session error:", e);
+
+    return NextResponse.json(
+      { error: "Error interno creando sesión." },
+      { status: 500 }
+    );
   }
 }
