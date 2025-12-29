@@ -3,7 +3,40 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Calendar, MapPin } from "lucide-react";
+
+function IconCalendar(props) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      {...props}
+    >
+      <path
+        fill="currentColor"
+        d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1.5A2.5 2.5 0 0 1 22 6.5v14A2.5 2.5 0 0 1 19.5 23h-15A2.5 2.5 0 0 1 2 20.5v-14A2.5 2.5 0 0 1 4.5 4H6V3a1 1 0 0 1 1-1Zm12.5 6h-15a.5.5 0 0 0-.5.5v12a.5.5 0 0 0 .5.5h15a.5.5 0 0 0 .5-.5v-12a.5.5 0 0 0-.5-.5ZM6 10h3v3H6v-3Zm5 0h3v3h-3v-3Zm5 0h3v3h-3v-3ZM6 15h3v3H6v-3Zm5 0h3v3h-3v-3Z"
+      />
+    </svg>
+  );
+}
+
+function IconMapPin(props) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      {...props}
+    >
+      <path
+        fill="currentColor"
+        d="M12 2c4.1 0 7.5 3.2 7.5 7.3 0 5.1-5.3 10.7-6.9 12.3a.9.9 0 0 1-1.2 0C9.8 20 4.5 14.4 4.5 9.3 4.5 5.2 7.9 2 12 2Zm0 2c-3 0-5.5 2.3-5.5 5.3 0 3.7 3.7 8.3 5.5 10.3 1.8-2 5.5-6.6 5.5-10.3C17.5 6.3 15 4 12 4Zm0 3a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Z"
+      />
+    </svg>
+  );
+}
 
 export default function EventDetailPage() {
   const params = useParams();
@@ -121,7 +154,7 @@ export default function EventDetailPage() {
 
             <div className="mt-3 flex flex-col gap-2 text-gray-600">
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4" />
+                <IconCalendar className="text-gray-500" />
                 <span>
                   {dateLabel}
                   {timeLabel ? `, ${timeLabel}` : ""}
@@ -130,7 +163,7 @@ export default function EventDetailPage() {
 
               {placeLabel ? (
                 <div className="flex items-center gap-2">
-                  <MapPin className="w-4 h-4" />
+                  <IconMapPin className="text-gray-500" />
                   <span>{placeLabel}</span>
                 </div>
               ) : null}
@@ -262,3 +295,4 @@ export default function EventDetailPage() {
     </div>
   );
 }
+
