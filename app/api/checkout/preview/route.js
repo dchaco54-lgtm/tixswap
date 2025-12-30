@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calcFees, getFeeRatesForRole } from "@/lib/fees";
 
+function getBearerToken(req) {
+  const h = req.headers.get("authorization") || "";
+  if (!h.toLowerCase().startsWith("bearer ")) return null;
+  return h.slice(7).trim();
+}
+
 function isSingleNoRowError(err) {
-  // PostgREST single() cuando hay 0 filas -> PGRST116 (o variantes)
   const msg = (err?.message || "").toLowerCase();
   return (
     err?.code === "PGRST116" ||
@@ -24,18 +27,22 @@ export async function GET(req) {
       return NextResponse.json({ error: "Falta ticketId." }, { status: 400 });
     }
 
-    // Auth usuario por cookies (tu login actual)
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: userRes } = await supabase.auth.getUser();
+    const admin = supabaseAdmin();
+
+    // ✅ Auth por Bearer token (porque tu sesión está en localStorage)
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json({ error: "No autenticado (sin token)." }, { status: 401 });
+    }
+
+    const { data: userRes, error: uErr } = await admin.auth.getUser(token);
     const user = userRes?.user;
 
-    if (!user) {
+    if (uErr || !user) {
       return NextResponse.json({ error: "No autenticado." }, { status: 401 });
     }
 
-    // Lectura con service-role (server)
-    const admin = supabaseAdmin();
-
+    // ✅ Leer ticket con service-role (evita RLS)
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("id, event_id, seller_id, price, sector, row, seat, status")
@@ -45,12 +52,10 @@ export async function GET(req) {
     if (tErr || !ticket) {
       console.error("checkout/preview ticket query failed:", { ticketId, tErr });
 
-      // Si realmente no hay fila, sí es 404
       if (isSingleNoRowError(tErr) || !ticket) {
         return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
       }
 
-      // Si fue otro error (JWT inválido, proyecto distinto, etc.) lo mostramos
       return NextResponse.json(
         {
           error: "No se pudo leer el ticket (service role).",
@@ -60,7 +65,6 @@ export async function GET(req) {
       );
     }
 
-    // Permitimos comprar sólo si está activo
     if (ticket.status && !["active"].includes(ticket.status)) {
       return NextResponse.json(
         { error: `Ticket no disponible (status: ${ticket.status}).` },
@@ -106,4 +110,5 @@ export async function GET(req) {
     return NextResponse.json({ error: "Error interno." }, { status: 500 });
   }
 }
+
 
