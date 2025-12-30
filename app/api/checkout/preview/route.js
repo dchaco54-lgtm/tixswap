@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calcFees, getFeeRatesForRole } from "@/lib/fees";
 
@@ -13,15 +11,24 @@ export async function GET(req) {
       return NextResponse.json({ error: "Falta ticketId." }, { status: 400 });
     }
 
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: userRes } = await supabase.auth.getUser();
-    const user = userRes?.user;
+    const admin = supabaseAdmin();
 
-    if (!user) {
+    // ✅ Auth por Bearer token (viene desde el front)
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : "";
+
+    if (!token) {
       return NextResponse.json({ error: "No autenticado." }, { status: 401 });
     }
 
-    const admin = supabaseAdmin();
+    const { data: userRes, error: uErr } = await admin.auth.getUser(token);
+    const user = userRes?.user;
+
+    if (uErr || !user) {
+      return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    }
 
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
@@ -33,7 +40,6 @@ export async function GET(req) {
       return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
     }
 
-    // Permitimos comprar sólo si está activo
     if (ticket.status && !["active"].includes(ticket.status)) {
       return NextResponse.json(
         { error: `Ticket no disponible (status: ${ticket.status}).` },
