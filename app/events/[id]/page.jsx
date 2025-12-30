@@ -68,8 +68,8 @@ export default function EventPage() {
 
       setEvent(eventData);
 
-      // ✅ FIX: sin join a profiles (evita error por FK inexistente)
-      // ✅ y filtramos solo publicaciones activas
+      // ✅ Importante: sin join a profiles (eso suele romper si no hay FK)
+      // ✅ y solo tickets activos
       const { data: ticketData, error: ticketErr } = await supabase
         .from("tickets")
         .select("*")
@@ -213,11 +213,7 @@ export default function EventPage() {
                         {t.sector || "Sector"} · {t.row || t.fila || "Fila"} ·{" "}
                         {t.seat || t.asiento || "Asiento"}
                       </div>
-                      <div className="text-sm text-gray-600">
-                        {t?.seller_name
-                          ? `Publicado por ${t.seller_name}`
-                          : "Publicado por vendedor"}
-                      </div>
+
                       <div className="mt-1 font-black text-gray-900">
                         {Number(t.price || 0).toLocaleString("es-CL", {
                           style: "currency",
@@ -225,6 +221,7 @@ export default function EventPage() {
                           maximumFractionDigits: 0,
                         })}
                       </div>
+
                       {t.original_price ? (
                         <div className="text-xs text-gray-500">
                           Precio original:{" "}
@@ -280,3 +277,4 @@ export default function EventPage() {
     </div>
   );
 }
+
