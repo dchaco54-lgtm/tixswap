@@ -1,8 +1,7 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { cookies, headers } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { headers } from "next/headers";
 import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calcFees, getFeeRatesForRole } from "@/lib/fees";
@@ -51,15 +50,24 @@ async function columnExists(admin, table, column) {
 }
 
 export async function POST(req) {
-  const supabase = createRouteHandlerClient({ cookies });
-  const { data: userRes } = await supabase.auth.getUser();
-  const user = userRes?.user;
+  const admin = supabaseAdmin();
 
-  if (!user) {
+  // ✅ Auth por Bearer token (viene desde el front)
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : "";
+
+  if (!token) {
     return NextResponse.json({ error: "No autenticado." }, { status: 401 });
   }
 
-  const admin = supabaseAdmin();
+  const { data: userRes, error: uErr } = await admin.auth.getUser(token);
+  const user = userRes?.user;
+
+  if (uErr || !user) {
+    return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  }
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -69,7 +77,6 @@ export async function POST(req) {
       return NextResponse.json({ error: "Falta ticketId." }, { status: 400 });
     }
 
-    // 1) Trae ticket
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("id, event_id, seller_id, price, status")
@@ -87,14 +94,12 @@ export async function POST(req) {
       );
     }
 
-    // 2) Trae evento (para descripción)
     const { data: event } = await admin
       .from("events")
       .select("id, title")
       .eq("id", ticket.event_id)
       .maybeSingle();
 
-    // 3) Roles buyer/seller -> comisión por usuario
     const [{ data: buyerProfile }, { data: sellerProfile }] = await Promise.all([
       admin.from("profiles").select("role").eq("id", user.id).maybeSingle(),
       admin.from("profiles").select("role").eq("id", ticket.seller_id).maybeSingle(),
@@ -112,7 +117,6 @@ export async function POST(req) {
       sellerRate: sellerRates.sellerRate,
     });
 
-    // 4) Reserva ticket (bloquea para que no lo compren 2)
     const { data: reservedRows, error: rErr } = await admin
       .from("tickets")
       .update({ status: "pending" })
@@ -127,7 +131,6 @@ export async function POST(req) {
       );
     }
 
-    // 5) Inserta order con columnas existentes (tolerante a tu schema)
     const orderCols = {
       buyer_id: user.id,
       seller_id: ticket.seller_id,
@@ -146,8 +149,6 @@ export async function POST(req) {
 
     const allowed = {};
     for (const k of Object.keys(orderCols)) {
-      // si no existe la columna, la omitimos
-      // (esto te permite correr aunque tu tabla tenga menos columnas)
       // eslint-disable-next-line no-await-in-loop
       const ok = await columnExists(admin, "orders", k);
       if (ok) allowed[k] = orderCols[k];
@@ -160,14 +161,11 @@ export async function POST(req) {
       .single();
 
     if (oErr || !order) {
-      // revierte ticket si falla order
       await admin.from("tickets").update({ status: "active" }).eq("id", ticketId);
       return NextResponse.json({ error: "No se pudo crear la orden." }, { status: 500 });
     }
 
-    // 6) Llama Banchile para crear sesión
-    const baseUrl =
-      process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
+    const baseUrl = process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
     const login = process.env.BANCHILE_LOGIN;
     const secretKey = process.env.BANCHILE_SECRET_KEY;
 
@@ -186,7 +184,7 @@ export async function POST(req) {
     const ipAddress = getIpFromHeaders();
     const ua = headers().get("user-agent") || "TixSwap";
 
-    const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 min
+    const expiration = new Date(Date.now() + 30 * 60 * 1000).toISOString();
     const { auth } = generateAuthHeader({ secretKey, login });
 
     const payload = {
@@ -194,10 +192,7 @@ export async function POST(req) {
       payment: {
         reference: order.id,
         description: `TixSwap - ${event?.title || "Compra de entrada"}`,
-        amount: {
-          currency: "CLP",
-          total: fees.totalToPay,
-        },
+        amount: { currency: "CLP", total: fees.totalToPay },
       },
       expiration,
       returnUrl,
@@ -218,10 +213,8 @@ export async function POST(req) {
 
     if (!resp.ok) {
       console.error("Banchile create-session error:", resp.status, respJson);
-
       await admin.from("orders").update({ status: "rejected" }).eq("id", order.id);
       await admin.from("tickets").update({ status: "active" }).eq("id", ticketId);
-
       return NextResponse.json(
         { error: "Banchile rechazó la creación de sesión.", details: respJson },
         { status: 502 }
@@ -231,7 +224,6 @@ export async function POST(req) {
     const requestId = respJson?.requestId;
     const processUrl = respJson?.processUrl;
 
-    // guarda requestId si existe la columna
     const updates = { status: "payment_initiated" };
     if (await columnExists(admin, "orders", "payment_request_id")) {
       updates.payment_request_id = requestId;
@@ -251,10 +243,6 @@ export async function POST(req) {
     });
   } catch (e) {
     console.error("create-session error:", e);
-
-    return NextResponse.json(
-      { error: "Error interno creando sesión." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Error interno creando sesión." }, { status: 500 });
   }
 }
