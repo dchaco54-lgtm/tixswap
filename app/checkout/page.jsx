@@ -26,11 +26,11 @@ export default function CheckoutPage() {
         return;
       }
 
-      // Debe estar logueado para pagar
-      const { data: userRes } = await supabase.auth.getUser();
-      const user = userRes?.user;
+      // ✅ Debe estar logueado (y sacamos access_token)
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const session = sessionRes?.session;
 
-      if (!user) {
+      if (!session?.access_token) {
         const redirectTo = `/checkout?ticket=${encodeURIComponent(ticketId)}`;
         router.replace(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
         return;
@@ -39,9 +39,15 @@ export default function CheckoutPage() {
       setLoading(true);
 
       try {
-        const res = await fetch(`/api/checkout/preview?ticketId=${encodeURIComponent(ticketId)}`, {
-          method: "GET",
-        });
+        const res = await fetch(
+          `/api/checkout/preview?ticketId=${encodeURIComponent(ticketId)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
 
         const json = await res.json().catch(() => ({}));
 
@@ -65,9 +71,21 @@ export default function CheckoutPage() {
     setCreating(true);
 
     try {
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const session = sessionRes?.session;
+
+      if (!session?.access_token) {
+        const redirectTo = `/checkout?ticket=${encodeURIComponent(ticketId)}`;
+        router.replace(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+        return;
+      }
+
       const res = await fetch("/api/payments/banchile/create-session", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({ ticketId }),
       });
 
@@ -124,7 +142,9 @@ export default function CheckoutPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
       <div className="rounded-2xl border bg-white p-6">
-        <h1 className="text-2xl font-extrabold text-gray-900">Confirmar compra</h1>
+        <h1 className="text-2xl font-extrabold text-gray-900">
+          Confirmar compra
+        </h1>
 
         <div className="mt-4 space-y-2 text-gray-700">
           <div className="font-bold text-gray-900">{event?.title || "Evento"}</div>
@@ -161,11 +181,14 @@ export default function CheckoutPage() {
 
           <div className="mt-3 border-t pt-3 flex items-center justify-between">
             <span className="font-bold">Total a pagar</span>
-            <span className="font-extrabold text-green-700">{formatCLP(fees?.totalToPay)}</span>
+            <span className="font-extrabold text-green-700">
+              {formatCLP(fees?.totalToPay)}
+            </span>
           </div>
 
           <div className="mt-3 text-xs text-gray-600">
-            * El PDF se libera automáticamente cuando el pago quede <b>aprobado</b>.
+            * El PDF se libera automáticamente cuando el pago quede{" "}
+            <b>aprobado</b>.
           </div>
         </div>
 
