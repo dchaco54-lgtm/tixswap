@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calcFees, getFeeRatesForRole } from "@/lib/fees";
 
-function isUuid(v) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    v || ""
+function isSingleNoRowError(err) {
+  // PostgREST single() cuando hay 0 filas -> PGRST116 (o variantes)
+  const msg = (err?.message || "").toLowerCase();
+  return (
+    err?.code === "PGRST116" ||
+    msg.includes("0 rows") ||
+    msg.includes("no rows") ||
+    (msg.includes("json object requested") && msg.includes("0 rows"))
   );
 }
 
@@ -17,35 +23,40 @@ export async function GET(req) {
     if (!ticketId) {
       return NextResponse.json({ error: "Falta ticketId." }, { status: 400 });
     }
-    if (!isUuid(ticketId)) {
-      return NextResponse.json({ error: "ticketId inválido." }, { status: 400 });
-    }
 
-    // ✅ Cliente con cookies (misma sesión que el front)
+    // Auth usuario por cookies (tu login actual)
     const supabase = createRouteHandlerClient({ cookies });
-    const { data: userRes, error: authErr } = await supabase.auth.getUser();
+    const { data: userRes } = await supabase.auth.getUser();
     const user = userRes?.user;
 
-    if (authErr || !user) {
+    if (!user) {
       return NextResponse.json({ error: "No autenticado." }, { status: 401 });
     }
 
-    // ✅ OJO: aquí NO usamos service role.
-    // Leemos el ticket como lo ve el mismo proyecto / RLS que tu front.
-    const { data: ticket, error: tErr } = await supabase
+    // Lectura con service-role (server)
+    const admin = supabaseAdmin();
+
+    const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("id, event_id, seller_id, price, sector, row, seat, status")
       .eq("id", ticketId)
       .single();
 
     if (tErr || !ticket) {
+      console.error("checkout/preview ticket query failed:", { ticketId, tErr });
+
+      // Si realmente no hay fila, sí es 404
+      if (isSingleNoRowError(tErr) || !ticket) {
+        return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
+      }
+
+      // Si fue otro error (JWT inválido, proyecto distinto, etc.) lo mostramos
       return NextResponse.json(
         {
-          error: "Ticket no encontrado.",
-          // Esto te ayuda a cachar si fue RLS / env / lo que sea
-          details: tErr?.message || null,
+          error: "No se pudo leer el ticket (service role).",
+          details: tErr?.message || String(tErr),
         },
-        { status: 404 }
+        { status: 500 }
       );
     }
 
@@ -57,22 +68,19 @@ export async function GET(req) {
       );
     }
 
-    const { data: event, error: eErr } = await supabase
+    const { data: event, error: eErr } = await admin
       .from("events")
       .select("id, title, starts_at, venue, city")
       .eq("id", ticket.event_id)
       .single();
 
     if (eErr || !event) {
-      return NextResponse.json(
-        { error: "Evento no encontrado.", details: eErr?.message || null },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Evento no encontrado." }, { status: 404 });
     }
 
     const [{ data: buyerProfile }, { data: sellerProfile }] = await Promise.all([
-      supabase.from("profiles").select("role").eq("id", user.id).maybeSingle(),
-      supabase.from("profiles").select("role").eq("id", ticket.seller_id).maybeSingle(),
+      admin.from("profiles").select("role").eq("id", user.id).maybeSingle(),
+      admin.from("profiles").select("role").eq("id", ticket.seller_id).maybeSingle(),
     ]);
 
     const buyerRole = buyerProfile?.role || "standard";
@@ -95,9 +103,7 @@ export async function GET(req) {
     });
   } catch (e) {
     console.error("checkout/preview error:", e);
-    return NextResponse.json(
-      { error: "Error interno.", details: e?.message || null },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Error interno." }, { status: 500 });
   }
 }
+
