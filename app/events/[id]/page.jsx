@@ -1,196 +1,95 @@
-"use client";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { supabase } from "../../../lib/supabaseClient";
+export default async function EventDetailPage({ params }) {
+  const eventId = params?.id;
 
-function formatCLP(n) {
-  const num = Number(n || 0);
-  return num.toLocaleString("es-CL", { style: "currency", currency: "CLP" });
-}
+  if (!eventId) notFound();
 
-function isoToNice(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("es-CL", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
+  const admin = supabaseAdmin();
 
-export default function EventDetailPage() {
-  const { id } = useParams();
-  const router = useRouter();
+  const { data: event, error: eventError } = await admin
+    .from("events")
+    .select("*")
+    .eq("id", eventId)
+    .single();
 
-  const [loading, setLoading] = useState(true);
-  const [event, setEvent] = useState(null);
-  const [tickets, setTickets] = useState([]);
-  const [error, setError] = useState("");
+  if (eventError || !event) notFound();
 
-  const eventId = useMemo(() => String(id || ""), [id]);
+  const { data: tickets } = await admin
+    .from("tickets")
+    .select("id, price, status, title, sector, row, seat, sale_type, created_at")
+    .eq("event_id", eventId)
+    .order("created_at", { ascending: false });
 
-  useEffect(() => {
-    if (!eventId) return;
-
-    const run = async () => {
-      setLoading(true);
-      setError("");
-
-      try {
-        const [evRes, tRes] = await Promise.all([
-          fetch(`/api/events/${eventId}`, { cache: "no-store" }),
-          fetch(`/api/events/${eventId}/tickets`, { cache: "no-store" }),
-        ]);
-
-        const evJson = await evRes.json().catch(() => ({}));
-        const tJson = await tRes.json().catch(() => ({}));
-
-        if (!evRes.ok) {
-          setEvent(null);
-          setTickets([]);
-          setError(evJson?.error || "Evento no encontrado");
-          setLoading(false);
-          return;
-        }
-
-        setEvent(evJson?.event || null);
-        setTickets(Array.isArray(tJson?.tickets) ? tJson.tickets : []);
-        setLoading(false);
-      } catch (e) {
-        setEvent(null);
-        setTickets([]);
-        setError("Error cargando evento");
-        setLoading(false);
-      }
-    };
-
-    run();
-  }, [eventId]);
-
-  const onBuy = async (ticketId) => {
-    const { data } = await supabase.auth.getSession();
-    const session = data?.session;
-
-    if (!session) {
-      const redirectTo = `/checkout?ticket=${encodeURIComponent(ticketId)}`;
-      router.push(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
-      return;
-    }
-
-    router.push(`/checkout?ticket=${encodeURIComponent(ticketId)}`);
+  const fmt = (n) => {
+    const num = Number(n ?? 0);
+    return `CLP ${new Intl.NumberFormat("es-CL").format(Number.isFinite(num) ? num : 0)}`;
   };
 
-  if (loading) {
-    return (
-      <div className="max-w-5xl mx-auto p-6">
-        <div className="bg-white rounded-xl border p-6">Cargando...</div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="max-w-5xl mx-auto p-6">
-        <div className="bg-white rounded-xl border p-6">
-          <h1 className="text-2xl font-bold">Evento</h1>
-          <p className="text-red-600 mt-2">{error}</p>
-          <button
-            className="mt-4 px-4 py-2 rounded-lg border"
-            onClick={() => router.push("/events")}
-          >
-            Volver
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const title = event?.title || "Evento";
-  const venue = event?.venue || "";
-  const city = event?.city ? `, ${event.city}` : "";
-  const date = isoToNice(event?.starts_at);
-
   return (
-    <div className="max-w-5xl mx-auto p-6">
-      <div className="bg-white rounded-xl border p-6">
-        <div className="flex flex-col md:flex-row gap-6">
-          <div className="w-full md:w-72">
-            {event?.image_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={event.image_url}
-                alt={title}
-                className="w-full h-44 md:h-56 object-cover rounded-xl border"
-              />
-            ) : (
-              <div className="w-full h-44 md:h-56 rounded-xl border bg-gray-50 flex items-center justify-center text-gray-500">
-                Sin imagen
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1">
-            <h1 className="text-3xl font-bold">{title}</h1>
-            <p className="text-gray-700 mt-2">
-              {date ? <span className="font-medium">{date}</span> : null}
-              {date && (venue || city) ? " · " : null}
-              {venue}
-              {city}
-            </p>
-
-            <div className="mt-4 flex gap-2">
-              <button
-                className="px-4 py-2 rounded-lg border"
-                onClick={() => router.push("/events")}
-              >
-                Volver
-              </button>
-              <button
-                className="px-4 py-2 rounded-lg bg-blue-600 text-white"
-                onClick={() => router.push("/sell")}
-              >
-                Vender una entrada
-              </button>
+    <div className="min-h-[70vh] px-4 py-10">
+      <div className="mx-auto w-full max-w-5xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">
+              {event.name || event.title || "Evento"}
+            </h1>
+            <div className="mt-2 text-slate-600">
+              {event.venue || event.location || ""} {event.date ? `• ${event.date}` : ""}
             </div>
           </div>
+
+          <Link
+            href="/events"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-slate-700 hover:bg-slate-50"
+          >
+            Volver
+          </Link>
         </div>
 
-        <hr className="my-6" />
-
-        <h2 className="text-xl font-semibold">Entradas disponibles</h2>
-
-        {tickets.length === 0 ? (
-          <p className="text-gray-600 mt-2">No hay entradas disponibles por ahora.</p>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {tickets.map((t) => (
-              <div
-                key={t.id}
-                className="flex items-center justify-between border rounded-xl p-4"
-              >
-                <div>
-                  <p className="font-medium">Entrada</p>
-                  <p className="text-gray-700">{formatCLP(t.price)}</p>
-                </div>
-
-                <button
-                  className="px-4 py-2 rounded-lg bg-green-600 text-white"
-                  onClick={() => onBuy(t.id)}
-                >
-                  Comprar
-                </button>
-              </div>
-            ))}
+        <div className="mt-8 rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-6 py-4">
+            <h2 className="text-lg font-semibold text-slate-900">Entradas disponibles</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Si aquí sale vacío, no hay tickets publicados para este evento.
+            </p>
           </div>
-        )}
+
+          <div className="divide-y divide-slate-200">
+            {(tickets || []).length === 0 ? (
+              <div className="px-6 py-8 text-slate-600">Aún no hay entradas publicadas.</div>
+            ) : (
+              tickets.map((t) => (
+                <div key={t.id} className="px-6 py-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="font-semibold text-slate-900">{t.title || "Entrada"}</div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      {t.sector ? `Sector ${t.sector}` : ""}
+                      {t.row ? ` • Fila ${t.row}` : ""}
+                      {t.seat ? ` • Asiento ${t.seat}` : ""}
+                      {t.sale_type ? ` • ${t.sale_type}` : ""}
+                      {t.status ? ` • ${t.status}` : ""}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="font-bold text-slate-900">{fmt(t.price)}</div>
+                    <Link
+                      href={`/checkout?ticket=${encodeURIComponent(t.id)}`}
+                      className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+                    >
+                      Comprar
+                    </Link>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
