@@ -3,84 +3,109 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { formatCLP } from "@/lib/fees";
+import { formatCLP } from "@/lib/format";
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const sp = useSearchParams();
+  const searchParams = useSearchParams();
 
-  const ticketId = useMemo(() => sp.get("ticket") || "", [sp]);
+  const ticketId = useMemo(() => searchParams.get("ticket"), [searchParams]);
 
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [preview, setPreview] = useState(null);
-  const [err, setErr] = useState("");
+  const [error, setError] = useState("");
+
+  const [ticket, setTicket] = useState(null);
+  const [event, setEvent] = useState(null);
+  const [fees, setFees] = useState(null);
 
   useEffect(() => {
-    async function boot() {
-      setErr("");
+    let alive = true;
 
-      if (!ticketId) {
-        setErr("Falta ticket.");
-        setLoading(false);
-        return;
-      }
-
-      // ✅ Debe estar logueado (y sacamos access_token)
-      const { data: sessionRes } = await supabase.auth.getSession();
-      const session = sessionRes?.session;
-
-      if (!session?.access_token) {
-        const redirectTo = `/checkout?ticket=${encodeURIComponent(ticketId)}`;
-        router.replace(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
-        return;
-      }
-
-      setLoading(true);
-
+    async function load() {
       try {
-        const res = await fetch(
-          `/api/checkout/preview?ticketId=${encodeURIComponent(ticketId)}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-            },
-          }
-        );
+        setLoading(true);
+        setError("");
+
+        if (!ticketId) {
+          if (!alive) return;
+          setError("Falta ticket en la URL.");
+          setLoading(false);
+          return;
+        }
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData?.session;
+
+        if (!session) {
+          if (!alive) return;
+          setError("No autenticado.");
+          setLoading(false);
+          return;
+        }
+
+        const res = await fetch(`/api/checkout/preview?ticket=${encodeURIComponent(ticketId)}`, {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
 
         const json = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          throw new Error(json?.error || "No se pudo cargar el resumen.");
+          if (!alive) return;
+          setError(json.error || "No se pudo cargar el checkout.");
+          setLoading(false);
+          return;
         }
 
-        setPreview(json);
+        if (!alive) return;
+
+        setTicket(json.ticket || null);
+        setEvent(json.event || json.ticket?.event || null);
+        setFees(json.fees || null);
+        setLoading(false);
       } catch (e) {
-        setErr(e?.message || "Error cargando checkout.");
-      } finally {
+        if (!alive) return;
+        setError("Error inesperado.");
         setLoading(false);
       }
     }
 
-    boot();
-  }, [ticketId, router]);
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [ticketId]);
 
-  async function handlePay() {
-    setErr("");
-    setCreating(true);
+  const total = useMemo(() => {
+    if (!ticket || !fees) return null;
+    return fees.totalToPay;
+  }, [ticket, fees]);
 
+  const handleGoLogin = () => {
+    const redirect = encodeURIComponent(`/checkout?ticket=${ticketId}`);
+    router.push(`/login?redirectTo=${redirect}`);
+  };
+
+  const handleBack = () => {
+    router.back();
+  };
+
+  const handlePay = async () => {
     try {
-      const { data: sessionRes } = await supabase.auth.getSession();
-      const session = sessionRes?.session;
+      setError("");
 
-      if (!session?.access_token) {
-        const redirectTo = `/checkout?ticket=${encodeURIComponent(ticketId)}`;
-        router.replace(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData?.session;
+
+      if (!session) {
+        setError("No autenticado.");
         return;
       }
 
-      const res = await fetch("/api/payments/banchile/create-session", {
+      // Aquí va tu integración real (Webpay). Por ahora lo dejamos como placeholder.
+      // Si ya tienes endpoint, deja la llamada tal cual y pásale ticketId.
+      const res = await fetch("/api/checkout/pay", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -92,41 +117,71 @@ export default function CheckoutPage() {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(json?.error || "No se pudo iniciar el pago.");
+        setError(json.error || "No se pudo iniciar el pago.");
+        return;
       }
 
-      if (!json?.processUrl) {
-        throw new Error("Banchile no devolvió processUrl.");
+      if (json?.redirectUrl) {
+        window.location.href = json.redirectUrl;
+        return;
       }
 
-      window.location.href = json.processUrl;
+      // fallback
+      router.push("/dashboard");
     } catch (e) {
-      setErr(e?.message || "Error iniciando pago.");
-      setCreating(false);
+      setError("Error iniciando el pago.");
     }
-  }
+  };
 
   if (loading) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-10">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-200 rounded w-1/2" />
-          <div className="h-24 bg-gray-200 rounded" />
-          <div className="h-12 bg-gray-200 rounded" />
+        <div className="bg-white rounded-2xl shadow p-6">
+          <h1 className="text-2xl font-bold">Checkout</h1>
+          <p className="mt-2 text-gray-600">Cargando...</p>
         </div>
       </div>
     );
   }
 
-  if (err) {
+  if (error) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-10">
-        <div className="rounded-2xl border bg-white p-6">
-          <h1 className="text-2xl font-extrabold text-gray-900">Checkout</h1>
-          <p className="mt-3 text-red-600">{err}</p>
+        <div className="bg-white rounded-2xl shadow p-6">
+          <h1 className="text-2xl font-bold">Checkout</h1>
+          <p className="mt-2 text-red-600">{error}</p>
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={handleBack}
+              className="px-4 py-2 rounded-xl border border-gray-200"
+            >
+              Volver
+            </button>
+
+            {error === "No autenticado." && (
+              <button
+                onClick={handleGoLogin}
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white"
+              >
+                Iniciar sesión
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!ticket || !event) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-10">
+        <div className="bg-white rounded-2xl shadow p-6">
+          <h1 className="text-2xl font-bold">Checkout</h1>
+          <p className="mt-2 text-red-600">Ticket no encontrado.</p>
           <button
-            onClick={() => router.back()}
-            className="mt-6 rounded-xl border px-4 py-2 font-semibold hover:bg-gray-50"
+            onClick={handleBack}
+            className="mt-6 px-4 py-2 rounded-xl border border-gray-200"
           >
             Volver
           </button>
@@ -134,84 +189,54 @@ export default function CheckoutPage() {
       </div>
     );
   }
-
-  const ticket = preview?.ticket;
-  const event = preview?.event;
-  const fees = preview?.fees;
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-10">
-      <div className="rounded-2xl border bg-white p-6">
-        <h1 className="text-2xl font-extrabold text-gray-900">
-          Confirmar compra
-        </h1>
+      <div className="bg-white rounded-2xl shadow p-6">
+        <h1 className="text-2xl font-bold">Checkout</h1>
 
-        <div className="mt-4 space-y-2 text-gray-700">
-          <div className="font-bold text-gray-900">{event?.title || "Evento"}</div>
-          <div className="text-sm">
-            {event?.starts_at
-              ? new Date(event.starts_at).toLocaleString("es-CL", {
-                  weekday: "short",
-                  day: "2-digit",
-                  month: "long",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "Fecha por confirmar"}
+        <div className="mt-6 space-y-2">
+          <div className="text-lg font-semibold">{event.name || event.title}</div>
+          <div className="text-gray-600">
+            {event.venue || event.location || "—"}
           </div>
 
-          <div className="text-sm">
-            {ticket?.sector ? `Sector: ${ticket.sector}` : ""}
-            {ticket?.row ? ` · Fila: ${ticket.row}` : ""}
-            {ticket?.seat ? ` · Asiento: ${ticket.seat}` : ""}
-          </div>
-        </div>
+          <div className="mt-4 border-t pt-4 space-y-2">
+            <div className="flex justify-between">
+              <span>Precio ticket</span>
+              <span className="font-medium">{formatCLP(ticket.price)}</span>
+            </div>
 
-        <div className="mt-6 rounded-2xl bg-gray-50 p-4">
-          <div className="flex items-center justify-between">
-            <span>Precio entrada</span>
-            <span className="font-bold">{formatCLP(fees?.basePrice)}</span>
-          </div>
+            {fees && (
+              <>
+                <div className="flex justify-between text-gray-700">
+                  <span>Fee comprador</span>
+                  <span className="font-medium">{formatCLP(fees.buyerFee)}</span>
+                </div>
 
-          <div className="mt-2 flex items-center justify-between text-sm text-gray-700">
-            <span>Comisión comprador</span>
-            <span>{formatCLP(fees?.buyerFee)}</span>
-          </div>
-
-          <div className="mt-3 border-t pt-3 flex items-center justify-between">
-            <span className="font-bold">Total a pagar</span>
-            <span className="font-extrabold text-green-700">
-              {formatCLP(fees?.totalToPay)}
-            </span>
+                <div className="flex justify-between text-gray-700">
+                  <span>Total</span>
+                  <span className="font-bold">{formatCLP(total)}</span>
+                </div>
+              </>
+            )}
           </div>
 
-          <div className="mt-3 text-xs text-gray-600">
-            * El PDF se libera automáticamente cuando el pago quede{" "}
-            <b>aprobado</b>.
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={handleBack}
+              className="px-4 py-2 rounded-xl border border-gray-200"
+            >
+              Volver
+            </button>
+
+            <button
+              onClick={handlePay}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white"
+            >
+              Pagar
+            </button>
           </div>
-        </div>
-
-        <div className="mt-6 flex gap-3">
-          <button
-            onClick={() => router.back()}
-            className="rounded-xl border px-4 py-2 font-semibold hover:bg-gray-50"
-            disabled={creating}
-          >
-            Volver
-          </button>
-
-          <button
-            onClick={handlePay}
-            className="rounded-xl bg-blue-600 text-white px-5 py-2 font-bold hover:bg-blue-700 disabled:opacity-60"
-            disabled={creating}
-          >
-            {creating ? "Abriendo pago..." : "Pagar con Banchile"}
-          </button>
-        </div>
-
-        <div className="mt-4 text-xs text-gray-500">
-          Ticket: <span className="font-mono">{ticketId}</span>
         </div>
       </div>
     </div>
