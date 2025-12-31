@@ -1,152 +1,125 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
-
-function formatCLP(n) {
-  const num = Number(n || 0);
-  return num.toLocaleString("es-CL", { style: "currency", currency: "CLP" });
-}
-
-function isoToNice(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("es-CL", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
+import { supabase } from "../lib/supabaseClient";
+import { formatCLP } from "../lib/format";
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const ticketId = searchParams.get("ticket");
+  const sp = useSearchParams();
+  const ticketId = sp.get("ticket");
 
   const [loading, setLoading] = useState(true);
   const [ticket, setTicket] = useState(null);
+  const [event, setEvent] = useState(null);
   const [error, setError] = useState("");
 
-  const redirectTo = useMemo(() => {
-    const url = `/checkout?ticket=${encodeURIComponent(ticketId || "")}`;
-    return url;
-  }, [ticketId]);
+  const total = useMemo(() => {
+    const price = Number(ticket?.price ?? 0);
+    return Number.isFinite(price) ? price : 0;
+  }, [ticket]);
 
   useEffect(() => {
     const run = async () => {
       setLoading(true);
       setError("");
-      setTicket(null);
 
-      if (!ticketId) {
-        setError("Ticket no encontrado.");
-        setLoading(false);
-        return;
-      }
-
-      // 1) Exigir login
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData?.session;
-
-      if (!session) {
-        router.replace(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
-        return;
-      }
-
-      // 2) Traer ticket desde API (service role) => no se rompe por RLS
       try {
-        const res = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}`, {
-          cache: "no-store",
-        });
-
-        const json = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-          setError(json?.error || "Ticket no encontrado.");
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData?.session) {
+          setError("No autenticado.");
           setLoading(false);
           return;
         }
 
-        setTicket(json?.ticket || null);
+        if (!ticketId) {
+          setError("Falta el ticket en la URL.");
+          setLoading(false);
+          return;
+        }
+
+        const res = await fetch(`/api/checkout/preview?ticket=${encodeURIComponent(ticketId)}`);
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          setError(json?.error || "Error al cargar el checkout.");
+          setLoading(false);
+          return;
+        }
+
+        setTicket(json.ticket || null);
+        setEvent(json.event || null);
         setLoading(false);
       } catch (e) {
-        setError("Error cargando ticket.");
+        setError("Error inesperado al cargar el checkout.");
         setLoading(false);
       }
     };
 
     run();
-  }, [ticketId, redirectTo, router]);
+  }, [ticketId]);
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto p-6">
-        <div className="bg-white rounded-xl border p-6">Cargando...</div>
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-slate-600">Cargando checkout...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-3xl mx-auto p-6">
-        <div className="bg-white rounded-xl border p-6">
-          <h1 className="text-3xl font-bold">Checkout</h1>
-          <p className="text-red-600 mt-2">{error}</p>
-          <button
-            className="mt-4 px-4 py-2 rounded-lg border"
-            onClick={() => router.back()}
-          >
-            Volver
-          </button>
+      <div className="min-h-[60vh] flex items-center justify-center px-4">
+        <div className="w-full max-w-xl bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+          <h1 className="text-2xl font-bold text-slate-900">Checkout</h1>
+          <p className="mt-2 text-red-600">{error}</p>
+          <div className="mt-6">
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-slate-700 hover:bg-slate-50"
+            >
+              Volver
+            </Link>
+          </div>
         </div>
       </div>
     );
   }
 
-  const ev = ticket?.events || null;
-
   return (
-    <div className="max-w-3xl mx-auto p-6">
-      <div className="bg-white rounded-xl border p-6">
-        <h1 className="text-3xl font-bold">Checkout</h1>
+    <div className="min-h-[60vh] flex items-center justify-center px-4">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+        <h1 className="text-2xl font-bold text-slate-900">Checkout</h1>
 
-        <div className="mt-4 border rounded-xl p-4">
-          <p className="text-sm text-gray-600">Evento</p>
-          <p className="text-lg font-semibold">{ev?.title || "—"}</p>
-          <p className="text-gray-700">
-            {ev?.starts_at ? isoToNice(ev.starts_at) : ""}
-            {ev?.venue ? ` · ${ev.venue}` : ""}
-            {ev?.city ? `, ${ev.city}` : ""}
-          </p>
-
-          <hr className="my-4" />
-
-          <div className="flex items-center justify-between">
-            <p className="font-medium">Total</p>
-            <p className="text-xl font-bold">{formatCLP(ticket?.price)}</p>
+        <div className="mt-6 space-y-2">
+          <div className="text-slate-700">
+            <span className="font-semibold">Evento:</span> {event?.name || event?.title || "—"}
           </div>
+          <div className="text-slate-700">
+            <span className="font-semibold">Ticket:</span> {ticket?.id || "—"}
+          </div>
+          <div className="text-slate-700">
+            <span className="font-semibold">Total:</span> {formatCLP(total)}
+          </div>
+        </div>
+
+        <div className="mt-8 flex gap-3">
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-slate-700 hover:bg-slate-50"
+          >
+            Volver
+          </Link>
 
           <button
-            className="mt-4 w-full px-4 py-3 rounded-lg bg-blue-600 text-white font-semibold"
-            onClick={() => alert("Siguiente paso: Webpay / pago")}
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+            onClick={() => alert("Aquí va Webpay después 😉")}
           >
             Pagar
           </button>
         </div>
-
-        <button
-          className="mt-4 px-4 py-2 rounded-lg border"
-          onClick={() => router.back()}
-        >
-          Volver
-        </button>
       </div>
     </div>
   );
