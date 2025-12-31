@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calcFees, getFeeRatesForRole } from "@/lib/fees";
 
@@ -8,34 +9,46 @@ function getBearerToken(req) {
   return h.slice(7).trim();
 }
 
-function isSingleNoRowError(err) {
-  const msg = (err?.message || "").toLowerCase();
-  return (
-    err?.code === "PGRST116" ||
-    msg.includes("0 rows") ||
-    msg.includes("no rows") ||
-    (msg.includes("json object requested") && msg.includes("0 rows"))
-  );
-}
-
 export async function GET(req) {
   try {
     const url = new URL(req.url);
-    const ticketId = url.searchParams.get("ticketId");
+
+    // aceptamos ticket o ticketId (por si cambia el front)
+    const ticketId =
+      url.searchParams.get("ticket") || url.searchParams.get("ticketId");
 
     if (!ticketId) {
-      return NextResponse.json({ error: "Falta ticketId." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Falta ticket (o ticketId)." },
+        { status: 400 }
+      );
     }
 
-    const admin = supabaseAdmin();
-
-    // ✅ Auth por Bearer token (porque tu sesión está en localStorage)
+    // ✅ Auth por Bearer token (tu sesión está en localStorage)
     const token = getBearerToken(req);
     if (!token) {
-      return NextResponse.json({ error: "No autenticado (sin token)." }, { status: 401 });
+      return NextResponse.json({ error: "No autenticado." }, { status: 401 });
     }
 
-    const { data: userRes, error: uErr } = await admin.auth.getUser(token);
+    // Validamos el token con ANON (no dependemos del service role para auth)
+    const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!sbUrl || !anonKey) {
+      return NextResponse.json(
+        {
+          error:
+            "Faltan variables NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+        },
+        { status: 500 }
+      );
+    }
+
+    const authClient = createClient(sbUrl, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const { data: userRes, error: uErr } = await authClient.auth.getUser(token);
     const user = userRes?.user;
 
     if (uErr || !user) {
@@ -43,42 +56,51 @@ export async function GET(req) {
     }
 
     // ✅ Leer ticket con service-role (evita RLS)
+    const admin = supabaseAdmin();
+
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
-      .select("id, event_id, seller_id, price, sector, row, seat, status")
+      .select("*, event:events(*)")
       .eq("id", ticketId)
-      .single();
+      .maybeSingle();
 
-    if (tErr || !ticket) {
-      console.error("checkout/preview ticket query failed:", { ticketId, tErr });
-
-      if (isSingleNoRowError(tErr) || !ticket) {
-        return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
-      }
-
+    if (tErr) {
       return NextResponse.json(
-        {
-          error: "No se pudo leer el ticket (service role).",
-          details: tErr?.message || String(tErr),
-        },
+        { error: tErr.message || "No se pudo leer el ticket (service role)." },
         { status: 500 }
       );
     }
 
-    if (ticket.status && !["active"].includes(ticket.status)) {
+    if (!ticket) {
+      return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
+    }
+
+    if (ticket.status && ticket.status !== "active") {
       return NextResponse.json(
         { error: `Ticket no disponible (status: ${ticket.status}).` },
         { status: 400 }
       );
     }
 
-    const { data: event, error: eErr } = await admin
-      .from("events")
-      .select("id, title, starts_at, venue, city")
-      .eq("id", ticket.event_id)
-      .single();
+    // Si viene embed del evento por el join, lo usamos. Si no, lo buscamos.
+    let event = ticket.event || null;
+    if (!event && ticket.event_id) {
+      const { data: eData, error: eErr } = await admin
+        .from("events")
+        .select("*")
+        .eq("id", ticket.event_id)
+        .maybeSingle();
 
-    if (eErr || !event) {
+      if (eErr) {
+        return NextResponse.json(
+          { error: eErr.message || "Error leyendo evento." },
+          { status: 500 }
+        );
+      }
+      event = eData || null;
+    }
+
+    if (!event) {
       return NextResponse.json({ error: "Evento no encontrado." }, { status: 404 });
     }
 
@@ -107,8 +129,9 @@ export async function GET(req) {
     });
   } catch (e) {
     console.error("checkout/preview error:", e);
-    return NextResponse.json({ error: "Error interno." }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Error interno." },
+      { status: 500 }
+    );
   }
 }
-
-
