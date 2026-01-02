@@ -1,193 +1,163 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { formatCLP } from "@/lib/fees";
-
-function statusLabel(s) {
-  const v = (s || "").toLowerCase();
-  if (v === "held") return { text: "Aprobado", cls: "bg-green-100 text-green-800" };
-  if (v === "pending_review") return { text: "Pendiente / revisión", cls: "bg-yellow-100 text-yellow-800" };
-  if (v === "rejected") return { text: "Rechazado", cls: "bg-red-100 text-red-800" };
-  if (v === "payment_initiated") return { text: "Pago iniciado", cls: "bg-blue-100 text-blue-800" };
-  if (v === "pending_payment") return { text: "Pendiente", cls: "bg-gray-100 text-gray-800" };
-  return { text: s || "—", cls: "bg-gray-100 text-gray-800" };
-}
+// app/dashboard/purchases/page.jsx
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+import { formatCLP } from "@/lib/format";
 
 export default function PurchasesPage() {
   const router = useRouter();
-  const sp = useSearchParams();
-  const highlightOrder = useMemo(() => sp.get("order") || "", [sp]);
-
   const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [err, setErr] = useState("");
-  const [downloading, setDownloading] = useState("");
 
-  async function load() {
+  const load = async () => {
     setErr("");
     setLoading(true);
+
+    const { data: sessionRes } = await supabase.auth.getSession();
+    const token = sessionRes?.session?.access_token;
+
+    if (!token) {
+      router.replace(`/login?redirectTo=${encodeURIComponent("/dashboard/purchases")}`);
+      return;
+    }
+
     try {
-      const res = await fetch("/api/orders/my", { method: "GET" });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || "No se pudieron cargar tus compras.");
-      setItems(json?.items || []);
+      const r = await fetch("/api/orders/my", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setErr(j?.error || "No se pudieron cargar tus compras.");
+        setOrders([]);
+      } else {
+        setOrders(j?.orders || []);
+      }
     } catch (e) {
-      setErr(e?.message || "Error cargando compras.");
+      setErr("Error de red cargando tus compras.");
+      setOrders([]);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function download(orderId) {
-    setDownloading(orderId);
+  const download = async (orderId) => {
     setErr("");
-    try {
-      const res = await fetch(`/api/orders/download?orderId=${encodeURIComponent(orderId)}`, {
-        method: "GET",
-      });
-      const json = await res.json().catch(() => ({}));
 
-      if (!res.ok) throw new Error(json?.error || "No se pudo descargar.");
+    const { data: sessionRes } = await supabase.auth.getSession();
+    const token = sessionRes?.session?.access_token;
 
-      if (!json?.downloadUrl) throw new Error("No vino downloadUrl.");
-
-      window.location.href = json.downloadUrl;
-    } catch (e) {
-      setErr(e?.message || "Error descargando.");
-    } finally {
-      setDownloading("");
+    if (!token) {
+      router.replace(`/login?redirectTo=${encodeURIComponent("/dashboard/purchases")}`);
+      return;
     }
-  }
+
+    try {
+      const r = await fetch("/api/orders/download", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderId }),
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setErr(j?.error || "No se pudo descargar.");
+        return;
+      }
+
+      if (!j?.url) {
+        setErr("No se encontró la URL de descarga.");
+        return;
+      }
+
+      window.open(j.url, "_blank");
+    } catch (e) {
+      setErr("Error de red descargando.");
+    }
+  };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-3xl font-extrabold text-gray-900">Mis compras</h1>
+    <div className="max-w-5xl mx-auto px-4 py-12">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Link href="/events" className="text-sm text-slate-600 hover:text-blue-600">
+            ← Volver a eventos
+          </Link>
+          <h1 className="mt-3 text-3xl font-bold text-slate-900">Mis compras</h1>
+          <p className="mt-2 text-slate-600">Aquí verás tus compras y podrás descargar tus entradas.</p>
+        </div>
+
         <button
-          onClick={() => router.push("/dashboard")}
-          className="rounded-xl border px-4 py-2 font-semibold hover:bg-gray-50"
+          onClick={load}
+          className="border px-5 py-2.5 rounded-full font-semibold hover:bg-slate-50"
         >
-          Volver al dashboard
+          Recargar
         </button>
       </div>
 
-      {err ? (
-        <div className="mt-4 rounded-2xl border bg-white p-4 text-red-600">{err}</div>
-      ) : null}
+      {err && (
+        <div className="mt-6 border border-red-200 bg-red-50 text-red-700 rounded-xl p-4">
+          {err}
+        </div>
+      )}
 
-      <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-4">
-          {loading ? (
-            <div className="rounded-2xl border bg-white p-6 animate-pulse">
-              <div className="h-6 bg-gray-200 rounded w-1/2" />
-              <div className="mt-4 h-4 bg-gray-200 rounded w-2/3" />
-              <div className="mt-2 h-4 bg-gray-200 rounded w-1/3" />
-            </div>
-          ) : items.length === 0 ? (
-            <div className="rounded-2xl border bg-white p-6">
-              <p className="text-gray-700">Aún no tienes compras.</p>
-            </div>
-          ) : (
-            items.map((it) => {
-              const st = statusLabel(it.status);
-              const isHL = highlightOrder && it.id === highlightOrder;
+      <div className="mt-8">
+        {loading ? (
+          <p className="text-slate-600">Cargando…</p>
+        ) : orders.length === 0 ? (
+          <p className="text-slate-600">Aún no tienes compras.</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            {orders.map((o) => {
+              const ev = o?.ticket?.event;
+              const status = o?.status || "pending";
+              const total = o?.total_paid_clp ?? o?.amount;
 
               return (
-                <div
-                  key={it.id}
-                  className={`rounded-2xl border bg-white p-5 ${
-                    isHL ? "ring-2 ring-blue-400" : ""
-                  }`}
-                >
+                <div key={o.id} className="bg-white border rounded-xl p-5 shadow-sm">
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <div className="font-extrabold text-gray-900">
-                        {it.event?.title || "Evento"}
-                      </div>
-                      <div className="text-sm text-gray-600 mt-1">
-                        {it.event?.starts_at
-                          ? new Date(it.event.starts_at).toLocaleString("es-CL", {
-                              weekday: "short",
-                              day: "2-digit",
-                              month: "long",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
-                          : "Fecha por confirmar"}
-                      </div>
-
-                      <div className="text-sm text-gray-600 mt-1">
-                        {it.ticket?.sector ? `Sector: ${it.ticket.sector}` : ""}
-                        {it.ticket?.row ? ` · Fila: ${it.ticket.row}` : ""}
-                        {it.ticket?.seat ? ` · Asiento: ${it.ticket.seat}` : ""}
-                      </div>
-
-                      <div className="text-xs text-gray-500 mt-2">
-                        Orden: <span className="font-mono">{it.id}</span>
-                      </div>
+                    <div className="min-w-0">
+                      <p className="text-lg font-bold text-slate-900">
+                        {ev?.title || "Compra"}
+                      </p>
+                      <p className="text-sm text-slate-600">
+                        Orden: <b>{o.id}</b> · Estado: <b>{status}</b>
+                      </p>
+                      <p className="mt-2 font-bold text-slate-900">{formatCLP(total)}</p>
                     </div>
 
-                    <div className="text-right">
-                      <span className={`inline-flex px-3 py-1 rounded-full text-xs font-bold ${st.cls}`}>
-                        {st.text}
-                      </span>
-
-                      <div className="mt-3 font-extrabold text-gray-900">
-                        {formatCLP(it.total_paid_clp ?? it.amount_clp)}
-                      </div>
-
-                      <div className="mt-3">
+                    <div className="shrink-0 flex gap-2 items-center">
+                      {status === "paid" ? (
                         <button
-                          onClick={() => download(it.id)}
-                          disabled={downloading === it.id || it.status !== "held"}
-                          className="rounded-xl bg-green-600 text-white px-4 py-2 font-bold hover:bg-green-700 disabled:opacity-50"
-                          title={it.status !== "held" ? "Disponible sólo cuando el pago está aprobado" : ""}
+                          onClick={() => download(o.id)}
+                          className="bg-blue-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
                         >
-                          {downloading === it.id ? "Descargando..." : "Descargar PDF"}
+                          Descargar
                         </button>
-                      </div>
+                      ) : (
+                        <span className="px-4 py-2 rounded-full bg-slate-100 text-slate-700 font-semibold">
+                          {status}
+                        </span>
+                      )}
                     </div>
                   </div>
-
-                  {it.status !== "held" ? (
-                    <div className="mt-4 text-sm text-gray-700 rounded-xl bg-gray-50 p-3">
-                      El PDF se libera automáticamente cuando el pago quede <b>aprobado</b>.
-                    </div>
-                  ) : null}
                 </div>
               );
-            })
-          )}
-        </div>
-
-        <div className="lg:col-span-1 space-y-4">
-          <div className="rounded-2xl border bg-white p-5">
-            <h3 className="font-bold text-gray-900">Tip rápido</h3>
-            <p className="mt-2 text-sm text-gray-700">
-              Si tu pago quedó “Pendiente / revisión”, espera la confirmación del proveedor.
-              Si queda “Rechazado”, el ticket vuelve a estar disponible automáticamente.
-            </p>
+            })}
           </div>
-
-          <div className="rounded-2xl border bg-white p-5">
-            <h3 className="font-bold text-gray-900">Soporte</h3>
-            <p className="mt-2 text-sm text-gray-700">
-              ¿Problemas con tu compra? Abre un ticket en Centro de ayuda para que lo resolvamos.
-            </p>
-            <button
-              onClick={() => router.push("/support")}
-              className="mt-4 rounded-xl border px-4 py-2 font-semibold hover:bg-gray-50"
-            >
-              Ir a soporte
-            </button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
