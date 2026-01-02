@@ -1,18 +1,16 @@
-"use client";
+import { redirect } from "next/navigation";
 
-// app/checkout/page.jsx
-import { useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+/**
+ * Ruta legacy.
+ * Antes usábamos /checkout?ticket=... o /checkout?ticketId=...
+ * Ahora la UX buena es /checkout/[ticketId].
+ */
+export default function CheckoutLegacyPage({ searchParams }) {
+  const ticketId = searchParams?.ticketId || searchParams?.ticket;
 
-export default function CheckoutLegacyPage() {
-  const router = useRouter();
-  const sp = useSearchParams();
-  const ticketId = sp.get("ticketId");
+  if (!ticketId) {
+    redirect("/events");
+  }
 
-  useEffect(() => {
-    if (ticketId) router.replace(`/checkout/${ticketId}`);
-    else router.replace("/events");
-  }, [ticketId, router]);
-
-  return null;
+  redirect(`/checkout/${ticketId}`);
 }
