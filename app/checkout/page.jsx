@@ -40,7 +40,11 @@ export default function CheckoutPage() {
           return;
         }
 
-        const res = await fetch(`/api/checkout/preview?ticket=${encodeURIComponent(ticketId)}`);
+        const res = await fetch(`/api/checkout/preview?ticket=${ticketId}`, {
+  headers: {
+    Authorization: `Bearer ${session.access_token}`,
+  },
+});
         const json = await res.json().catch(() => ({}));
 
         if (!res.ok) {
