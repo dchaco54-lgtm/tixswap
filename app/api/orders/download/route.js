@@ -33,4 +33,19 @@ export async function POST(req) {
     if (order.buyer_id !== user.id) return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     if (order.status !== "paid") return NextResponse.json({ error: "La orden no está pagada aún" }, { status: 400 });
 
-    const { data: ticket, error: t
+    // Tu tabla tickets debe tener file_url (o ajusta esto si usas otro campo)
+    const { data: ticket, error: tErr } = await admin
+      .from("tickets")
+      .select("id, file_url")
+      .eq("id", order.ticket_id)
+      .single();
+
+    if (tErr || !ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    if (!ticket.file_url) return NextResponse.json({ error: "Archivo de entrada no disponible" }, { status: 404 });
+
+    return NextResponse.json({ url: ticket.file_url });
+  } catch (e) {
+    console.error("orders/download error:", e);
+    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+  }
+}
