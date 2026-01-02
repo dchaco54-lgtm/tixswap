@@ -1,4 +1,3 @@
-
 "use client";
 
 // app/checkout/[ticketId]/page.jsx
@@ -7,6 +6,16 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { formatCLP } from "@/lib/format";
+
+function stringifyDetails(details) {
+  if (!details) return "";
+  if (typeof details === "string") return details;
+  try {
+    return JSON.stringify(details);
+  } catch {
+    return String(details);
+  }
+}
 
 export default function CheckoutTicketPage() {
   const router = useRouter();
@@ -43,7 +52,8 @@ export default function CheckoutTicketPage() {
 
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
-          setErr(j?.error || "No se pudo cargar el checkout.");
+          const details = stringifyDetails(j?.details);
+          setErr(`${j?.error || "No se pudo cargar el checkout."}${details ? ` — ${details}` : ""}`);
           setPreview(null);
         } else {
           setErr("");
@@ -83,8 +93,10 @@ export default function CheckoutTicketPage() {
       });
 
       const j = await r.json().catch(() => ({}));
+
       if (!r.ok) {
-        setErr(j?.error || "No se pudo iniciar el pago.");
+        const details = stringifyDetails(j?.details);
+        setErr(`${j?.error || "No se pudo iniciar el pago."}${details ? ` — ${details}` : ""}`);
         setPaying(false);
         return;
       }
@@ -139,25 +151,6 @@ export default function CheckoutTicketPage() {
 
       <div className="mt-8 bg-white border rounded-2xl p-6 shadow-sm">
         <h2 className="text-xl font-bold text-slate-900">Detalle de la entrada</h2>
-
-        <div className="mt-4 text-slate-700 space-y-1">
-          {t.section && (
-            <p>
-              Sección: <b>{t.section}</b>
-            </p>
-          )}
-          {t.row && (
-            <p>
-              Fila: <b>{t.row}</b>
-            </p>
-          )}
-          {t.seat && (
-            <p>
-              Asiento: <b>{t.seat}</b>
-            </p>
-          )}
-          {t.notes && <p className="text-sm text-slate-600">{t.notes}</p>}
-        </div>
 
         <div className="mt-6 border-t pt-5">
           <div className="flex items-center justify-between text-slate-700">
