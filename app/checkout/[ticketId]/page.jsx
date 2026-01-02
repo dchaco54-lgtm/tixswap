@@ -1,3 +1,4 @@
+
 "use client";
 
 // app/checkout/[ticketId]/page.jsx
@@ -45,6 +46,7 @@ export default function CheckoutTicketPage() {
           setErr(j?.error || "No se pudo cargar el checkout.");
           setPreview(null);
         } else {
+          setErr("");
           setPreview(j);
         }
       } catch (e) {
@@ -118,10 +120,10 @@ export default function CheckoutTicketPage() {
   }
 
   const t = preview.ticket;
-  const fees = preview.feeBreakdown;
+  const fees = preview.feeBreakdown || preview.fees || null;
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-12">
+    <div className="max-w-3xl mx-auto px-4 py-16">
       <Link href={`/events/${t.event_id}`} className="text-sm text-slate-600 hover:text-blue-600">
         ← Volver al evento
       </Link>
@@ -139,9 +141,21 @@ export default function CheckoutTicketPage() {
         <h2 className="text-xl font-bold text-slate-900">Detalle de la entrada</h2>
 
         <div className="mt-4 text-slate-700 space-y-1">
-          {t.section && <p>Sección: <b>{t.section}</b></p>}
-          {t.row && <p>Fila: <b>{t.row}</b></p>}
-          {t.seat && <p>Asiento: <b>{t.seat}</b></p>}
+          {t.section && (
+            <p>
+              Sección: <b>{t.section}</b>
+            </p>
+          )}
+          {t.row && (
+            <p>
+              Fila: <b>{t.row}</b>
+            </p>
+          )}
+          {t.seat && (
+            <p>
+              Asiento: <b>{t.seat}</b>
+            </p>
+          )}
           {t.notes && <p className="text-sm text-slate-600">{t.notes}</p>}
         </div>
 
@@ -162,10 +176,11 @@ export default function CheckoutTicketPage() {
         </div>
       </div>
 
-      {/* Selector “comercio” */}
       <div className="mt-8 bg-white border rounded-2xl p-6 shadow-sm">
         <h2 className="text-xl font-bold text-slate-900">Elige tu método de pago</h2>
-        <p className="mt-2 text-slate-600">Hoy probamos Banco de Chile. Los demás quedan listos “pronto”.</p>
+        <p className="mt-2 text-slate-600">
+          Hoy probamos Banco de Chile. Los demás quedan listos “pronto”.
+        </p>
 
         <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
           <button
