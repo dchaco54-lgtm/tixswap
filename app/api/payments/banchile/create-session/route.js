@@ -17,7 +17,6 @@ function buildAuth(login, secretKey) {
   const nonceBytes = crypto.randomBytes(16);
   const nonce = nonceBytes.toString("base64");
 
-  // tranKey = base64( sha256( nonceBytes + seed + secretKey ) )
   const sha = crypto.createHash("sha256");
   sha.update(Buffer.concat([nonceBytes, Buffer.from(seed), Buffer.from(secretKey)]));
   const tranKey = sha.digest("base64");
@@ -31,10 +30,20 @@ function getIp(req) {
   return xf.split(",")[0].trim();
 }
 
-export async function POST(req) {
-  try {
-    const admin = supabaseAdmin();
+function asString(v) {
+  if (v === null || v === undefined) return "";
+  return typeof v === "string" ? v : JSON.stringify(v);
+}
 
+function isPendingLike(status) {
+  const s = (status ?? "").toString().toLowerCase().trim();
+  return ["pending", "created", "initiated", "processing"].includes(s);
+}
+
+export async function POST(req) {
+  const admin = supabaseAdmin();
+
+  try {
     // Auth (Bearer)
     const token = getBearerToken(req);
     if (!token) {
@@ -53,7 +62,7 @@ export async function POST(req) {
     if (!ticketId) return NextResponse.json({ error: "Falta ticketId" }, { status: 400 });
     if (!returnUrl) return NextResponse.json({ error: "Falta returnUrl" }, { status: 400 });
 
-    // Leer ticket (NO pidas columnas fijas; si no existen, Supabase revienta y te devuelve “not found” falso)
+    // Leer ticket
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("*")
@@ -71,42 +80,122 @@ export async function POST(req) {
       return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
     }
 
-    const status = (ticket.status ?? "active").toString().toLowerCase().trim();
-    if (status !== "active") {
-      return NextResponse.json({ error: "Ticket no disponible" }, { status: 400 });
-    }
-
+    // No comprar tu propio ticket
     if (ticket.seller_id && ticket.seller_id === user.id) {
       return NextResponse.json({ error: "No puedes comprar tu propio ticket" }, { status: 400 });
+    }
+
+    const ticketStatus = (ticket.status ?? "active").toString().toLowerCase().trim();
+
+    // Si está SOLD/CANCELLED => no
+    if (["sold", "cancelled"].includes(ticketStatus)) {
+      return NextResponse.json({ error: "Ticket no disponible" }, { status: 400 });
     }
 
     // Fee + total
     const fees = getFees(ticket.price);
     const total = fees.total;
 
-    // Crear orden
-    const { data: order, error: oErr } = await admin
+    // ✅ Si ya hay una orden pendiente para este ticket, la reusamos (evita constraint/duplicados)
+    const { data: existing, error: exErr } = await admin
       .from("orders")
-      .insert({
-        ticket_id: ticket.id,
-        buyer_id: user.id,
-        seller_id: ticket.seller_id,
-        amount: ticket.price,
-        status: "pending",
-      })
-      .select("*")
-      .single();
+      .select("id, status, buyer_id, created_at, payment_request_id, payment_provider")
+      .eq("ticket_id", ticket.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
 
-    if (oErr || !order) {
+    if (exErr) {
       return NextResponse.json(
-        { error: "No se pudo crear la orden", details: oErr?.message || String(oErr) },
+        { error: "Error buscando orden existente", details: exErr.message },
         { status: 500 }
       );
+    }
+
+    const lastOrder = (existing && existing.length ? existing[0] : null);
+
+    // Si ticket está held y hay orden pendiente de OTRO => reservado
+    if (ticketStatus === "held" && lastOrder && lastOrder.buyer_id !== user.id && isPendingLike(lastOrder.status)) {
+      return NextResponse.json(
+        { error: "Este ticket está reservado por otro comprador (intenta de nuevo más tarde)." },
+        { status: 409 }
+      );
+    }
+
+    // Si hay orden pendiente del MISMO comprador => reusar (crear nueva es mala idea)
+    let order = null;
+
+    if (lastOrder && lastOrder.buyer_id === user.id && isPendingLike(lastOrder.status)) {
+      // Reusar orden existente
+      const { data: full, error: oReadErr } = await admin
+        .from("orders")
+        .select("*")
+        .eq("id", lastOrder.id)
+        .maybeSingle();
+
+      if (oReadErr) {
+        return NextResponse.json(
+          { error: "Error leyendo orden existente", details: oReadErr.message },
+          { status: 500 }
+        );
+      }
+
+      order = full;
+    }
+
+    // Si no hay orden pendiente reusable, crear una nueva
+    if (!order) {
+      const { data: created, error: oErr } = await admin
+        .from("orders")
+        .insert({
+          ticket_id: ticket.id,
+          buyer_id: user.id,
+          seller_id: ticket.seller_id ?? null,
+
+          // Campos “clásicos”
+          amount: ticket.price,
+          status: "pending",
+
+          // ✅ Campos extra (por si tu tabla los tiene NOT NULL)
+          payment_state: "created",
+          payment_provider: "banchile",
+          total_paid_clp: total,
+        })
+        .select("*")
+        .single();
+
+      if (oErr || !created) {
+        return NextResponse.json(
+          {
+            error: "No se pudo crear la orden",
+            details: oErr?.message || asString(oErr),
+          },
+          { status: 500 }
+        );
+      }
+
+      order = created;
     }
 
     // Construir returnUrl con orderId SIEMPRE
     const u = new URL(returnUrl);
     u.searchParams.set("orderId", order.id);
+
+    // ✅ “Reservar” ticket si aún no está held (evita compras simultáneas)
+    if (ticketStatus === "active") {
+      const { error: holdErr } = await admin
+        .from("tickets")
+        .update({ status: "held" })
+        .eq("id", ticket.id)
+        .eq("status", "active");
+
+      // Si no pudo poner held, igual puede ser porque ya alguien lo agarró
+      if (holdErr) {
+        return NextResponse.json(
+          { error: "No se pudo reservar el ticket", details: holdErr.message },
+          { status: 409 }
+        );
+      }
+    }
 
     // Credenciales banco
     const baseUrl = process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
@@ -141,6 +230,7 @@ export async function POST(req) {
       returnUrl: u.toString(),
     };
 
+    // Crear sesión
     const resp = await fetch(`${baseUrl}/api/session/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -149,7 +239,13 @@ export async function POST(req) {
 
     const j = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      console.error("Banchile create-session error:", resp.status, j);
+      // rollback suave: liberar ticket y marcar orden
+      await admin.from("tickets").update({ status: "active" }).eq("id", ticket.id);
+      await admin
+        .from("orders")
+        .update({ status: "failed", payment_state: "failed" })
+        .eq("id", order.id);
+
       return NextResponse.json(
         { error: "No se pudo crear sesión de pago en Banchile.", details: j },
         { status: 502 }
@@ -160,24 +256,28 @@ export async function POST(req) {
     const processUrl = j?.processUrl || j?.process_url;
 
     if (!requestId || !processUrl) {
-      console.error("Banchile create-session response raro:", j);
+      await admin.from("tickets").update({ status: "active" }).eq("id", ticket.id);
+      await admin
+        .from("orders")
+        .update({ status: "failed", payment_state: "failed" })
+        .eq("id", order.id);
+
       return NextResponse.json(
         { error: "Respuesta inválida del banco (sin requestId/processUrl).", details: j },
         { status: 502 }
       );
     }
 
-    // Guardar requestId y “reservar” ticket (held)
+    // Guardar requestId
     await admin
       .from("orders")
       .update({
         payment_request_id: requestId,
         payment_provider: "banchile",
+        payment_state: "processing",
         total_paid_clp: total,
       })
       .eq("id", order.id);
-
-    await admin.from("tickets").update({ status: "held" }).eq("id", ticket.id);
 
     return NextResponse.json({
       ok: true,
@@ -187,6 +287,10 @@ export async function POST(req) {
     });
   } catch (e) {
     console.error("banchile/create-session error:", e);
-    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Error interno", details: e?.message || String(e) },
+      { status: 500 }
+    );
   }
 }
+
