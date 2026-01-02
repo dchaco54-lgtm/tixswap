@@ -1,87 +1,91 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+// app/payment/return/page.jsx
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function PaymentReturnPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const orderId = searchParams.get("orderId");
+  const sp = useSearchParams();
+  const orderId = sp.get("orderId");
 
-  const [status, setStatus] = useState("Procesando tu pago...");
-  const [isError, setIsError] = useState(false);
-  const canContinue = useMemo(() => !!orderId, [orderId]);
+  const [msg, setMsg] = useState("Confirmando tu pago…");
+  const [err, setErr] = useState("");
 
   useEffect(() => {
-    if (!canContinue) return;
-
     const run = async () => {
+      if (!orderId) {
+        setErr("Falta orderId en el retorno del pago.");
+        setMsg("");
+        return;
+      }
+
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const token = sessionRes?.session?.access_token;
+
+      if (!token) {
+        router.replace(`/login?redirectTo=${encodeURIComponent(`/payment/return?orderId=${orderId}`)}`);
+        return;
+      }
+
       try {
-        setStatus("Confirmando pago con la pasarela...");
-        const res = await fetch("/api/payments/banchile/confirm", {
+        const r = await fetch("/api/payments/banchile/confirm", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({ orderId }),
         });
 
-        const data = await res.json().catch(() => null);
-
-        if (!res.ok) {
-          setIsError(true);
-          setStatus(data?.error || "No pudimos confirmar el pago.");
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setErr(j?.error || "No se pudo confirmar el pago.");
+          setMsg("");
           return;
         }
 
-        if (data?.state === "APPROVED") {
-          setIsError(false);
-          setStatus("Pago aprobado ✅ Redirigiendo a tus compras...");
-          setTimeout(() => router.replace(`/dashboard?section=purchases&orderId=${orderId}`), 800);
+        if (j?.state === "APPROVED") {
+          router.replace(`/checkout/success?orderId=${encodeURIComponent(orderId)}`);
           return;
         }
 
-        if (data?.state === "REJECTED") {
-          setIsError(true);
-          setStatus("Pago rechazado ❌ Puedes intentar nuevamente.");
+        if (j?.state === "REJECTED") {
+          setMsg("Pago rechazado 😕");
+          setErr("Intenta nuevamente o usa otro método cuando esté disponible.");
           return;
         }
 
-        setIsError(false);
-        setStatus("Tu pago está pendiente. Te redirigiremos a Mis compras.");
-        setTimeout(() => router.replace(`/dashboard?section=purchases&orderId=${orderId}`), 1500);
+        setMsg("Pago pendiente…");
+        setErr("El banco aún no confirma. Revisa en “Mis compras” en unos minutos.");
       } catch (e) {
-        console.error(e);
-        setIsError(true);
-        setStatus("Error inesperado confirmando el pago.");
+        setErr("Error de red confirmando el pago.");
+        setMsg("");
       }
     };
 
     run();
-  }, [canContinue, orderId, router]);
+  }, [orderId, router]);
 
   return (
-    <div className="min-h-[60vh] flex items-center justify-center px-4">
-      <div className="w-full max-w-lg rounded-2xl border bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold">Pago en TixSwap</h1>
-        <p className="mt-2 text-sm text-gray-600">Estamos validando tu transacción.</p>
+    <div className="max-w-xl mx-auto px-4 py-16">
+      <h1 className="text-2xl font-bold text-slate-900">Estado de tu pago</h1>
 
-        <div className={`mt-6 rounded-xl border p-4 ${isError ? "border-red-200 bg-red-50" : "border-blue-200 bg-blue-50"}`}>
-          <p className="text-sm">{status}</p>
-        </div>
+      {msg && <p className="mt-3 text-slate-700">{msg}</p>}
+      {err && <p className="mt-3 text-red-600">{err}</p>}
 
-        <div className="mt-6 flex gap-3">
-          <button className="rounded-xl border px-4 py-2 text-sm" onClick={() => router.replace("/")}>
-            Volver al inicio
-          </button>
-          <button className="rounded-xl bg-blue-600 px-4 py-2 text-sm text-white" onClick={() => router.replace("/dashboard?section=purchases")}>
-            Ir a Mis compras
-          </button>
-        </div>
-
-        {!orderId && (
-          <p className="mt-4 text-xs text-gray-500">
-            * No llegó orderId. Revisa tu returnUrl configurada en create-session.
-          </p>
-        )}
+      <div className="mt-8 flex gap-3">
+        <Link
+          href="/dashboard/purchases"
+          className="bg-blue-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
+        >
+          Ir a mis compras
+        </Link>
+        <Link href="/events" className="px-5 py-2.5 rounded-full border font-semibold">
+          Volver a eventos
+        </Link>
       </div>
     </div>
   );
