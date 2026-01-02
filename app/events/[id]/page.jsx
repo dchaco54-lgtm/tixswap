@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { formatCLP } from "@/lib/format";
-import SellerReputation from "./SellerReputation";
+import SellerReputation from "./sellerReputation";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function displaySellerName(raw) {
   if (!raw) return "—";
@@ -14,6 +17,12 @@ function safe(v) {
   if (v === null || v === undefined) return "—";
   const s = String(v).trim();
   return s.length ? s : "—";
+}
+
+function isAvailableStatus(status) {
+  const s = (status ?? "").toString().toLowerCase().trim();
+  if (!s) return true; // si no hay columna status, no filtramos
+  return ["active", "published", "available", "for_sale"].includes(s);
 }
 
 export default async function EventDetailPage({ params }) {
@@ -39,14 +48,22 @@ export default async function EventDetailPage({ params }) {
 
   // Tickets disponibles (publicados) del evento
   let tickets = [];
+  let ticketsError = null;
   try {
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_SITE_URL || ""}/api/events/${id}/tickets`,
-      { cache: "no-store" }
-    );
-    if (res.ok) tickets = await res.json();
+    const { data, error } = await admin
+      .from("tickets")
+      .select("*")
+      .eq("event_id", id);
+
+    if (error) {
+      ticketsError = error.message;
+    } else {
+      tickets = (data ?? [])
+        .filter((t) => isAvailableStatus(t?.status))
+        .sort((a, b) => (Number(a?.price) || 0) - (Number(b?.price) || 0));
+    }
   } catch (e) {
-    // silent
+    ticketsError = e?.message || "Error cargando entradas";
   }
 
   return (
@@ -74,7 +91,11 @@ export default async function EventDetailPage({ params }) {
       <div className="mt-10">
         <h2 className="text-xl font-semibold">Entradas disponibles</h2>
 
-        {tickets.length === 0 ? (
+        {ticketsError ? (
+          <p className="text-red-600 mt-3">
+            No pude cargar las entradas ahora. {ticketsError}
+          </p>
+        ) : tickets.length === 0 ? (
           <p className="text-gray-600 mt-3">
             No hay entradas disponibles por ahora.
           </p>
@@ -90,8 +111,8 @@ export default async function EventDetailPage({ params }) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
-                        <h3 className="text-base sm:text-lg font-semibold leading-tight">
-                          Entrada
+                        <h3 className="text-lg font-semibold truncate">
+                          {safe(t.title) === "—" ? event.title : safe(t.title)}
                         </h3>
                         {t.notes ? (
                           <p className="text-sm text-slate-600 mt-1 line-clamp-2">
