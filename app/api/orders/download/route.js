@@ -1,51 +1,83 @@
-// app/api/orders/download/route.js
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  if (!h.toLowerCase().startsWith("bearer ")) return null;
-  return h.slice(7).trim();
-}
-
 export async function POST(req) {
   try {
+    const auth = req.headers.get("authorization") || "";
+    const token = auth.replace("Bearer ", "").trim();
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { orderId } = await req.json();
+    if (!orderId) {
+      return NextResponse.json({ error: "Missing orderId" }, { status: 400 });
+    }
+
     const admin = supabaseAdmin();
 
-    const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    // 1) Validar usuario (token supabase)
+    const { data: userData, error: uErr } = await admin.auth.getUser(token);
+    const user = userData?.user;
+    if (uErr || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const { data: userRes } = await admin.auth.getUser(token);
-    const user = userRes?.user;
-    if (!user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
-
-    const body = await req.json().catch(() => ({}));
-    const orderId = body?.orderId;
-    if (!orderId) return NextResponse.json({ error: "Falta orderId" }, { status: 400 });
-
+    // 2) Traer orden del usuario
     const { data: order, error: oErr } = await admin
       .from("orders")
-      .select("id, buyer_id, status, ticket_id")
+      .select("id, user_id, ticket_id, status")
       .eq("id", orderId)
       .single();
 
-    if (oErr || !order) return NextResponse.json({ error: "Orden no encontrada" }, { status: 404 });
-    if (order.buyer_id !== user.id) return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-    if (order.status !== "paid") return NextResponse.json({ error: "La orden no está pagada aún" }, { status: 400 });
+    if (oErr || !order) {
+      return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    }
+    if (order.user_id !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (order.status !== "paid") {
+      return NextResponse.json(
+        { error: "Order not paid" },
+        { status: 400 }
+      );
+    }
 
-    // Tu tabla tickets debe tener file_url (o ajusta esto si usas otro campo)
+    // 3) Ticket (select * para no depender del nombre exacto del campo)
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
-      .select("id, file_url")
+      .select("*")
       .eq("id", order.ticket_id)
       .single();
 
-    if (tErr || !ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    if (!ticket.file_url) return NextResponse.json({ error: "Archivo de entrada no disponible" }, { status: 404 });
+    if (tErr || !ticket) {
+      return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
+    }
 
-    return NextResponse.json({ url: ticket.file_url });
+    const fileUrl =
+      ticket.file_url ||
+      ticket.download_url ||
+      ticket.pdf_url ||
+      ticket.storage_path ||
+      ticket.file_path ||
+      ticket.filepath ||
+      "";
+
+    if (!fileUrl) {
+      return NextResponse.json(
+        { error: "Ticket file not available (missing file url)" },
+        { status: 400 }
+      );
+    }
+
+    // Si guardas una URL directa, devolvemos esa.
+    // Si guardas un path de storage, también lo devolvemos tal cual (tu frontend puede abrirlo).
+    return NextResponse.json({ url: fileUrl });
   } catch (e) {
-    console.error("orders/download error:", e);
-    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+    console.error(e);
+    return NextResponse.json(
+      { error: e?.message || "Unknown error" },
+      { status: 500 }
+    );
   }
 }
