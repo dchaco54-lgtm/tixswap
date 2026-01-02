@@ -37,11 +37,15 @@ export async function POST(req) {
 
     // Auth (Bearer)
     const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "No autenticado (sin token)." }, { status: 401 });
+    if (!token) {
+      return NextResponse.json({ error: "No autenticado (sin token)." }, { status: 401 });
+    }
 
-    const { data: userRes } = await admin.auth.getUser(token);
+    const { data: userRes, error: uErr } = await admin.auth.getUser(token);
     const user = userRes?.user;
-    if (!user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    if (uErr || !user) {
+      return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const { ticketId, returnUrl } = body;
@@ -49,19 +53,32 @@ export async function POST(req) {
     if (!ticketId) return NextResponse.json({ error: "Falta ticketId" }, { status: 400 });
     if (!returnUrl) return NextResponse.json({ error: "Falta returnUrl" }, { status: 400 });
 
-    // Leer ticket
+    // Leer ticket (NO pidas columnas fijas; si no existen, Supabase revienta y te devuelve “not found” falso)
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
-      .select("id, event_id, seller_id, price, status, section, row, seat, notes")
+      .select("*")
       .eq("id", ticketId)
-      .single();
+      .maybeSingle();
 
-    if (tErr || !ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    if ((ticket.status || "active") !== "active")
+    if (tErr) {
+      return NextResponse.json(
+        { error: "Error leyendo ticket", details: tErr.message },
+        { status: 500 }
+      );
+    }
+
+    if (!ticket) {
+      return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    }
+
+    const status = (ticket.status ?? "active").toString().toLowerCase().trim();
+    if (status !== "active") {
       return NextResponse.json({ error: "Ticket no disponible" }, { status: 400 });
+    }
 
-    if (ticket.seller_id === user.id)
+    if (ticket.seller_id && ticket.seller_id === user.id) {
       return NextResponse.json({ error: "No puedes comprar tu propio ticket" }, { status: 400 });
+    }
 
     // Fee + total
     const fees = getFees(ticket.price);
@@ -151,11 +168,14 @@ export async function POST(req) {
     }
 
     // Guardar requestId y “reservar” ticket (held)
-    await admin.from("orders").update({
-      payment_request_id: requestId,
-      payment_provider: "banchile",
-      total_paid_clp: total,
-    }).eq("id", order.id);
+    await admin
+      .from("orders")
+      .update({
+        payment_request_id: requestId,
+        payment_provider: "banchile",
+        total_paid_clp: total,
+      })
+      .eq("id", order.id);
 
     await admin.from("tickets").update({ status: "held" }).eq("id", ticket.id);
 
