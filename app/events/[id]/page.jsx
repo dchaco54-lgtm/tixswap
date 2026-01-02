@@ -1,13 +1,19 @@
-// app/events/[id]/page.jsx
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
 import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { formatCLP } from "@/lib/format";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function safe(v) {
   return (v ?? "").toString();
+}
+
+function isAvailableStatus(status) {
+  // Si la tabla no tiene columna `status`, status será undefined → lo tratamos como disponible
+  const s = (status ?? "").toString().toLowerCase().trim();
+  if (!s) return true;
+  return ["active", "published", "available", "for_sale"].includes(s);
 }
 
 export default async function EventDetailPage({ params }) {
@@ -22,41 +28,53 @@ export default async function EventDetailPage({ params }) {
 
   if (eErr || !event) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-16">
-        <Link href="/events" className="text-sm text-slate-600 hover:text-blue-600">
-          ← Volver
+      <div className="max-w-4xl mx-auto px-4 py-10">
+        <h1 className="text-2xl font-bold">Evento no encontrado</h1>
+        <p className="text-gray-600 mt-2">
+          No pudimos cargar el evento. Vuelve a intentarlo.
+        </p>
+        <Link
+          href="/events"
+          className="inline-block mt-4 text-blue-600 hover:underline"
+        >
+          Volver a eventos
         </Link>
-        <h1 className="mt-4 text-2xl font-bold text-slate-900">Evento no encontrado</h1>
-        <p className="mt-2 text-slate-600">Revisa que el evento exista.</p>
       </div>
     );
   }
 
+  // IMPORTANTE: select("*") para no romper si faltan columnas (status/created_at/etc).
+  // Orden y filtros los hacemos en JS (más robusto).
   const { data: ticketsRaw, error: tErr } = await admin
     .from("tickets")
-    .select("id, price, section, row, seat, notes, status, seller_id, created_at")
-    .eq("event_id", eventId)
-    .order("created_at", { ascending: false });
+    .select("*")
+    .eq("event_id", eventId);
 
-  const tickets = (ticketsRaw || []).filter((t) => (t?.status || "active") === "active");
+  if (tErr) {
+    console.error(`[events/${eventId}] Error leyendo tickets`, tErr);
+  }
+
+  const tickets = (ticketsRaw ?? [])
+    .filter((t) => isAvailableStatus(t?.status))
+    .sort((a, b) => (Number(a?.price) || 0) - (Number(b?.price) || 0));
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-12">
+    <div className="max-w-5xl mx-auto px-4 py-10">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Link href="/events" className="text-sm text-slate-600 hover:text-blue-600">
+          <Link href="/events" className="text-sm text-blue-600 hover:underline">
             ← Volver a eventos
           </Link>
-          <h1 className="mt-3 text-3xl font-bold text-slate-900">
-            {event?.title || event?.name || "Evento"}
-          </h1>
-          <p className="mt-2 text-slate-600">
-            {event?.venue || event?.location || ""} {event?.city ? `· ${event.city}` : ""}
-          </p>
+
+          <h1 className="text-4xl font-extrabold mt-2">{safe(event.title)}</h1>
+          <div className="text-gray-600 mt-2">
+            {safe(event.city)}{" "}
+            {event.venue ? <span>· {safe(event.venue)}</span> : null}
+          </div>
         </div>
 
         <Link
-          href="/sell"
+          href={`/sell?eventId=${eventId}`}
           className="bg-green-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
         >
           Publicar entrada
@@ -64,42 +82,43 @@ export default async function EventDetailPage({ params }) {
       </div>
 
       <div className="mt-10">
-        <h2 className="text-xl font-bold text-slate-900">Entradas disponibles</h2>
+        <h2 className="text-2xl font-bold">Entradas disponibles</h2>
 
         {tErr ? (
-          <p className="mt-4 text-red-600">Error cargando entradas.</p>
+          <p className="text-red-600 mt-3">Error cargando entradas.</p>
         ) : tickets.length === 0 ? (
-          <p className="mt-4 text-slate-600">
+          <p className="text-gray-600 mt-3">
             Aún no hay entradas publicadas para este evento.
           </p>
         ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4">
+          <div className="mt-4 grid gap-4">
             {tickets.map((t) => (
               <div
                 key={t.id}
-                className="bg-white border rounded-xl p-5 shadow-sm flex items-center justify-between gap-4"
+                className="border rounded-2xl p-5 flex items-center justify-between gap-4"
               >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-700">
-                    {t.section && <span>Sección: <b>{safe(t.section)}</b></span>}
-                    {t.row && <span>Fila: <b>{safe(t.row)}</b></span>}
-                    {t.seat && <span>Asiento: <b>{safe(t.seat)}</b></span>}
+                <div>
+                  <div className="font-semibold text-lg">
+                    {t.section ? `Sección ${safe(t.section)}` : "Entrada"}
+                    {t.row ? ` · Fila ${safe(t.row)}` : ""}
+                    {t.seat ? ` · Asiento ${safe(t.seat)}` : ""}
                   </div>
-
-                  {t.notes && (
-                    <p className="mt-2 text-sm text-slate-600">
-                      {safe(t.notes)}
-                    </p>
-                  )}
-
-                  <p className="mt-3 text-lg font-bold text-slate-900">
-                    {formatCLP(t.price)}
-                  </p>
+                  <div className="text-gray-600 mt-1">
+                    Precio:{" "}
+                    <span className="font-semibold">
+                      {formatCLP(Number(t.price) || 0)}
+                    </span>
+                    {t.notes ? (
+                      <span className="block mt-1 text-sm">
+                        {safe(t.notes)}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
                 <Link
                   href={`/checkout/${t.id}`}
-                  className="shrink-0 bg-blue-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
+                  className="bg-blue-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
                 >
                   Comprar
                 </Link>
@@ -111,3 +130,4 @@ export default async function EventDetailPage({ params }) {
     </div>
   );
 }
+
