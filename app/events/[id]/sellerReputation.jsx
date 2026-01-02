@@ -40,25 +40,16 @@ export default function SellerReputation({ sellerId }) {
     };
   }, [sellerId]);
 
-  if (loading) return <span className="text-slate-400">Cargando…</span>;
-  if (!data) return <span className="text-slate-500">—</span>;
-
-  // < 5 ventas
-  if (data.label === "Vendedor nuevo") {
-    const n = typeof data.sales_count === "number" ? data.sales_count : null;
-    return (
-      <span className="inline-flex items-center gap-2">
-        <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-medium">
-          Vendedor nuevo
-        </span>
-        {n !== null ? (
-          <span className="text-xs text-slate-500">{n} ventas</span>
-        ) : null}
-      </span>
-    );
+  if (loading) {
+    return <span className="text-xs text-slate-400">Cargando…</span>;
   }
 
-  const sales = typeof data.sales_count === "number" ? data.sales_count : null;
+  if (!data) {
+    return <span className="text-xs text-slate-400">—</span>;
+  }
+
+  const sales =
+    typeof data.sales_count === "number" ? data.sales_count : null;
 
   return (
     <span className="inline-flex items-center gap-2">
