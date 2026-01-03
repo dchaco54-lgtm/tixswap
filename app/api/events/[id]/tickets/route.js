@@ -1,44 +1,49 @@
+// app/api/events/[id]/tickets/route.js
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
 function isAvailableStatus(status) {
-  const s = (status ?? "").toString().toLowerCase().trim();
-  if (!s) return true; // si no hay columna status, no filtramos
-  return ["active", "published", "available", "for_sale"].includes(s);
+  const s = String(status || "").toLowerCase();
+  return s === "" || s === "active" || s === "available" || s === "published";
 }
 
-export async function GET(_req, { params }) {
+async function fetchTickets(admin, eventId) {
+  let res = await admin
+    .from("tickets")
+    .select("id,event_id,price,status,notes,sector,row,seat,created_at")
+    .eq("event_id", eventId);
+
+  if (!res.error) return res;
+
+  res = await admin
+    .from("tickets")
+    .select("id,event_id,price,status,created_at")
+    .eq("event_id", eventId);
+
+  return res;
+}
+
+export async function GET(req, { params }) {
   try {
-    const eventId = params?.id;
-    if (!eventId) {
-      return NextResponse.json({ error: "Missing event id" }, { status: 400 });
-    }
-
     const admin = supabaseAdmin();
+    const { id } = params;
 
-    // select("*") para no romper si el schema cambió
-    const { data, error } = await admin
-      .from("tickets")
-      .select("*")
-      .eq("event_id", eventId);
-
+    const { data, error } = await fetchTickets(admin, id);
     if (error) {
-      console.error(`[api/events/${eventId}/tickets] Supabase error`, error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json(
+        { error: `No pude cargar tickets: ${error.message}` },
+        { status: 500 }
+      );
     }
 
-    const tickets = (data ?? [])
-      .filter((t) => isAvailableStatus(t?.status))
-      .sort((a, b) => (Number(a?.price) || 0) - (Number(b?.price) || 0));
-
+    const tickets = (data || []).filter((t) => isAvailableStatus(t.status));
     return NextResponse.json({ tickets });
   } catch (e) {
-    return NextResponse.json(
-      { error: e?.message || "Unknown error" },
-      { status: 500 }
-    );
+    console.error("api/events/[id]/tickets error:", e);
+    return NextResponse.json({ error: "Error interno" }, { status: 500 });
   }
 }
+
 
