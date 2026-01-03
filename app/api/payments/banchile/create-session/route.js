@@ -1,341 +1,276 @@
-export const runtime = "nodejs";
-
 // app/api/payments/banchile/create-session/route.js
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getFees } from "@/lib/fees";
 
-function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  if (!h.toLowerCase().startsWith("bearer ")) return null;
-  return h.slice(7).trim();
+export const runtime = "nodejs";
+
+const DEFAULT_TEST_BASE = "https://checkout.test.banchilepagos.cl";
+const DEFAULT_PROD_BASE = "https://checkout.banchilepagos.cl";
+
+function normalizeBaseUrl(raw) {
+  // Si viene vacío, usamos modo (por defecto test)
+  const mode = (process.env.BANCHILE_MODE || "test").toLowerCase();
+  const fallback = mode === "prod" ? DEFAULT_PROD_BASE : DEFAULT_TEST_BASE;
+
+  if (!raw) return fallback;
+
+  let v = String(raw).trim();
+
+  // Caso típico: lo dejaron literal por accidente
+  if (v === "BANCHILE_BASE_URL") return fallback;
+
+  // Si pega con /api/session, lo limpiamos (porque nosotros lo agregamos)
+  v = v.replace(/\/api\/session\/?$/i, "");
+
+  // Sacar trailing slash
+  v = v.replace(/\/+$/, "");
+
+  // Si no tiene protocolo, asumimos https
+  if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
+
+  return v;
 }
 
-function buildAuth(login, secretKey) {
+function generateAuth(login, secretKey) {
   const seed = new Date().toISOString();
   const nonceBytes = crypto.randomBytes(16);
-  const nonce = nonceBytes.toString("base64");
 
-  const sha = crypto.createHash("sha256");
-  sha.update(Buffer.concat([nonceBytes, Buffer.from(seed), Buffer.from(secretKey)]));
-  const tranKey = sha.digest("base64");
+  const tranKey = crypto
+    .createHash("sha256")
+    .update(Buffer.concat([nonceBytes, Buffer.from(seed), Buffer.from(secretKey)]))
+    .digest("base64");
+
+  const nonce = nonceBytes.toString("base64");
 
   return { login, tranKey, nonce, seed };
 }
 
-function getIp(req) {
-  const xf = req.headers.get("x-forwarded-for");
-  if (!xf) return "127.0.0.1";
-  return xf.split(",")[0].trim();
+function expirationISO(minutes = 15) {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
 }
 
-function isPendingLike(status) {
-  const s = (status ?? "").toString().toLowerCase().trim();
-  return ["pending", "created", "initiated", "processing"].includes(s);
-}
-
-function extractMissingColumn(msg = "") {
-  // Supabase/PostgREST styles
-  let m =
-    msg.match(/Could not find the '([^']+)' column/i) ||
-    msg.match(/column "([^"]+)" does not exist/i);
-  return m ? m[1] : null;
-}
-
-function extractNotNullColumn(msg = "") {
-  const m = msg.match(/null value in column "([^"]+)"/i);
-  return m ? m[1] : null;
-}
-
-function guessValueForColumn(col, ctx) {
-  const c = col.toLowerCase();
-
-  // ids
-  if (c.includes("ticket")) return ctx.ticketId;
-  if (c.includes("buyer")) return ctx.buyerId;
-  if (c.includes("seller")) return ctx.sellerId;
-
-  // money
-  if (c.includes("total") && c.includes("amount")) return ctx.total;
-  if (c.includes("total") && c.includes("paid")) return ctx.total;
-  if (c.includes("amount")) return ctx.amount;
-  if (c.includes("fee")) return ctx.fee;
-
-  // payment
-  if (c.includes("provider")) return "banchile";
-  if (c.includes("state")) return "created";
-  if (c === "status") return "pending";
-
-  // timestamps
-  if (c.includes("created_at") || c.includes("updated_at")) return new Date().toISOString();
-
-  // fallback
-  return 0;
-}
-
-async function insertOrderHealing(admin, payload, ctx) {
-  let current = { ...payload };
-
-  for (let i = 0; i < 12; i++) {
-    const { data, error } = await admin.from("orders").insert(current).select("*").single();
-    if (!error) return { data };
-
-    const msg = error.message || "";
-
-    // 1) columna no existe -> la saco y reintento
-    const missing = extractMissingColumn(msg);
-    if (missing && Object.prototype.hasOwnProperty.call(current, missing)) {
-      delete current[missing];
-      continue;
-    }
-
-    // 2) NOT NULL -> intento setear algo razonable y reintento
-    const notNullCol = extractNotNullColumn(msg);
-    if (notNullCol) {
-      if (current[notNullCol] === undefined || current[notNullCol] === null) {
-        current[notNullCol] = guessValueForColumn(notNullCol, ctx);
-        continue;
-      }
-    }
-
-    // si no puedo “sanar”, devuelvo el error
-    return { error };
-  }
-
-  return { error: new Error("No se pudo insertar orden (healing agotado).") };
-}
-
-async function safeUpdateHealing(admin, orderId, patch) {
-  let current = { ...patch };
-
-  for (let i = 0; i < 12; i++) {
-    const { error } = await admin.from("orders").update(current).eq("id", orderId);
-    if (!error) return { ok: true };
-
-    const msg = error.message || "";
-    const missing = extractMissingColumn(msg);
-    if (missing && Object.prototype.hasOwnProperty.call(current, missing)) {
-      delete current[missing];
-      continue;
-    }
-
-    return { ok: false, error };
-  }
-
-  return { ok: false, error: new Error("No se pudo actualizar orden (healing agotado).") };
+// Acepta "20.000", "20000", 20000
+function parseCLP(val) {
+  if (typeof val === "number") return Number.isFinite(val) ? Math.round(val) : 0;
+  if (!val) return 0;
+  const cleaned = String(val).replace(/[^\d]/g, ""); // deja solo dígitos
+  const n = parseInt(cleaned || "0", 10);
+  return Number.isFinite(n) ? n : 0;
 }
 
 export async function POST(req) {
-  const admin = supabaseAdmin();
-
   try {
-    const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "No autenticado (sin token)." }, { status: 401 });
-
-    const { data: userRes, error: uErr } = await admin.auth.getUser(token);
-    const user = userRes?.user;
-    if (uErr || !user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
-
     const body = await req.json().catch(() => ({}));
     const { ticketId, returnUrl } = body;
 
-    if (!ticketId) return NextResponse.json({ error: "Falta ticketId" }, { status: 400 });
-    if (!returnUrl) return NextResponse.json({ error: "Falta returnUrl" }, { status: 400 });
-
-    // Ticket
-    const { data: ticket, error: tErr } = await admin
-      .from("tickets")
-      .select("*")
-      .eq("id", ticketId)
-      .maybeSingle();
-
-    if (tErr) return NextResponse.json({ error: "Error leyendo ticket", details: tErr.message }, { status: 500 });
-    if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-
-    if (ticket.seller_id && ticket.seller_id === user.id) {
-      return NextResponse.json({ error: "No puedes comprar tu propio ticket" }, { status: 400 });
+    if (!ticketId) {
+      return NextResponse.json({ error: "Falta ticketId." }, { status: 400 });
+    }
+    if (!returnUrl) {
+      return NextResponse.json({ error: "Falta returnUrl." }, { status: 400 });
     }
 
-    const ticketStatus = (ticket.status ?? "active").toString().toLowerCase().trim();
-    if (["sold", "cancelled"].includes(ticketStatus)) {
-      return NextResponse.json({ error: "Ticket no disponible" }, { status: 400 });
+    // Token del usuario (para amarrar orden al user)
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) {
+      return NextResponse.json({ error: "No autorizado (sin token)." }, { status: 401 });
     }
 
-    // Fees
-    const fees = getFees(ticket.price);
-    const total = fees.total;
-    const fee = (fees.total ?? 0) - (fees.price ?? ticket.price ?? 0);
-
-    // Buscar última orden (si existe la columna ticket_id; si no, no cortamos el flujo)
-    let lastOrder = null;
-    {
-      const { data: existing, error: exErr } = await admin
-        .from("orders")
-        .select("id, status, buyer_id, created_at")
-        .eq("ticket_id", ticket.id)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (!exErr && existing?.length) lastOrder = existing[0];
-      // si exErr es por columna inexistente, igual seguimos (healing insert se encarga)
+    const { data: userRes, error: userErr } = await supabaseAdmin.auth.getUser(token);
+    if (userErr || !userRes?.user?.id) {
+      return NextResponse.json({ error: "No se pudo validar usuario." }, { status: 401 });
     }
+    const userId = userRes.user.id;
 
-    if (
-      ticketStatus === "held" &&
-      lastOrder &&
-      lastOrder.buyer_id !== user.id &&
-      isPendingLike(lastOrder.status)
-    ) {
+    // Credenciales Banchile (SERVER ONLY)
+    const BANCHILE_LOGIN = process.env.BANCHILE_LOGIN;
+    const BANCHILE_SECRET_KEY = process.env.BANCHILE_SECRET_KEY;
+    const baseUrl = normalizeBaseUrl(process.env.BANCHILE_BASE_URL);
+
+    if (!BANCHILE_LOGIN || !BANCHILE_SECRET_KEY) {
       return NextResponse.json(
-        { error: "Este ticket está reservado por otro comprador (intenta más tarde)." },
-        { status: 409 }
-      );
-    }
-
-    // Reusar orden pendiente del mismo comprador
-    let order = null;
-    if (lastOrder && lastOrder.buyer_id === user.id && isPendingLike(lastOrder.status)) {
-      const { data: full } = await admin.from("orders").select("*").eq("id", lastOrder.id).maybeSingle();
-      order = full;
-    }
-
-    // Crear orden nueva (🔥 ahora incluye total_amount, que es tu NOT NULL)
-    if (!order) {
-      const ctx = {
-        ticketId: ticket.id,
-        buyerId: user.id,
-        sellerId: ticket.seller_id ?? null,
-        amount: ticket.price,
-        total,
-        fee,
-      };
-
-      // payload “superset” (si alguna columna no existe, healing la quita sola)
-      const payload = {
-        ticket_id: ticket.id,
-        buyer_id: user.id,
-        seller_id: ticket.seller_id ?? null,
-
-        amount: ticket.price,
-        total_amount: total,      // ✅ esta era la que faltaba (NOT NULL)
-        fee_amount: fee,          // por si tu esquema la pide
-        total_paid_clp: total,    // tu código viejo lo usa igual
-
-        status: "pending",
-        payment_provider: "banchile",
-        payment_state: "created",
-      };
-
-      const ins = await insertOrderHealing(admin, payload, ctx);
-      if (ins.error || !ins.data) {
-        return NextResponse.json(
-          { error: "No se pudo crear la orden", details: ins.error?.message || "insert failed" },
-          { status: 500 }
-        );
-      }
-      order = ins.data;
-    }
-
-    // Reservar ticket si estaba active
-    if (ticketStatus === "active") {
-      const { error: holdErr } = await admin
-        .from("tickets")
-        .update({ status: "held" })
-        .eq("id", ticket.id)
-        .eq("status", "active");
-
-      if (holdErr) {
-        return NextResponse.json({ error: "No se pudo reservar el ticket", details: holdErr.message }, { status: 409 });
-      }
-    }
-
-    // Return URL con orderId
-    const u = new URL(returnUrl);
-    u.searchParams.set("orderId", order.id);
-
-    // Credenciales banco
-    const baseUrl = process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
-    const login = process.env.BANCHILE_LOGIN;
-    const secretKey = process.env.BANCHILE_SECRET_KEY;
-
-    if (!login || !secretKey) {
-      return NextResponse.json(
-        { error: "Faltan variables BANCHILE_LOGIN / BANCHILE_SECRET_KEY en Vercel." },
+        {
+          error:
+            "Faltan credenciales Banchile en el servidor (BANCHILE_LOGIN / BANCHILE_SECRET_KEY). Revisa Vercel → Env Vars.",
+        },
         { status: 500 }
       );
     }
 
-    const auth = buildAuth(login, secretKey);
+    // 1) Buscar ticket
+    const { data: ticket, error: ticketErr } = await supabaseAdmin
+      .from("tickets")
+      .select("id, event_id, price, amount, status, title")
+      .eq("id", ticketId)
+      .single();
 
-    const payloadBank = {
+    if (ticketErr || !ticket) {
+      return NextResponse.json({ error: "Ticket no encontrado." }, { status: 404 });
+    }
+
+    // 2) Validar estado ticket
+    if (ticket.status !== "active") {
+      return NextResponse.json(
+        { error: `Ticket no disponible (status: ${ticket.status}).` },
+        { status: 409 }
+      );
+    }
+
+    // 3) Reservar ticket (hold)
+    // Si tu constraint NO acepta "held", cambia a "reserved" o ajusta el constraint.
+    const { error: holdErr } = await supabaseAdmin
+      .from("tickets")
+      .update({ status: "held" })
+      .eq("id", ticketId)
+      .eq("status", "active");
+
+    if (holdErr) {
+      return NextResponse.json(
+        { error: `No se pudo reservar el ticket — ${holdErr.message}` },
+        { status: 500 }
+      );
+    }
+
+    // 4) Reusar orden pendiente si existe
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("orders")
+      .select("id, payment_request_id, status, payment_state")
+      .eq("ticket_id", ticketId)
+      .eq("user_id", userId)
+      .eq("payment_state", "pending")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingErr) {
+      return NextResponse.json(
+        { error: `Error buscando orden existente — ${existingErr.message}` },
+        { status: 500 }
+      );
+    }
+
+    const amount = parseCLP(ticket.price ?? ticket.amount);
+    if (!amount || amount <= 0) {
+      return NextResponse.json(
+        { error: "Monto inválido del ticket (price/amount)." },
+        { status: 400 }
+      );
+    }
+
+    const fee = Math.round(amount * 0.06);
+    const total = amount + fee;
+
+    let orderId = existing?.id;
+
+    if (!orderId) {
+      const { data: order, error: orderErr } = await supabaseAdmin
+        .from("orders")
+        .insert([
+          {
+            status: "created",
+            payment_state: "pending",
+            user_id: userId,
+            ticket_id: ticketId,
+            event_id: ticket.event_id,
+            amount_clp: amount,
+            fee_clp: fee,
+            total_amount: total,
+            currency: "CLP",
+            payment_provider: "banchile",
+          },
+        ])
+        .select("id")
+        .single();
+
+      if (orderErr || !order?.id) {
+        return NextResponse.json(
+          { error: `No se pudo crear la orden — ${orderErr?.message || "unknown"}` },
+          { status: 500 }
+        );
+      }
+      orderId = order.id;
+    }
+
+    // 5) Crear sesión en Banchile
+    const auth = generateAuth(BANCHILE_LOGIN, BANCHILE_SECRET_KEY);
+
+    const ipAddress =
+      (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "127.0.0.1";
+    const userAgent = req.headers.get("user-agent") || "TixSwap Web";
+
+    const sessionUrl = new URL("/api/session", baseUrl).toString();
+
+    const payload = {
       auth,
       locale: "es_CL",
-      buyer: {
-        name: "Cliente",
-        surname: "TixSwap",
-        email: user.email || "no-email@tixswap.cl",
-      },
       payment: {
-        reference: order.id,
-        description: "Compra de entrada en TixSwap",
-        amount: { currency: "CLP", total },
+        reference: String(orderId),
+        description: ticket.title ? `Compra ticket: ${ticket.title}` : `Compra ticket ${ticketId}`,
+        amount: {
+          currency: "CLP",
+          total,
+        },
       },
-      expiration: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      ipAddress: getIp(req),
-      userAgent: req.headers.get("user-agent") || "unknown",
-      returnUrl: u.toString(),
+      expiration: expirationISO(15),
+      returnUrl,
+      ipAddress,
+      userAgent,
     };
 
-    const resp = await fetch(`${baseUrl}/api/session/`, {
+    const r = await fetch(sessionUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payloadBank),
+      body: JSON.stringify(payload),
+      cache: "no-store",
     });
 
-    const j = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      await admin.from("tickets").update({ status: "active" }).eq("id", ticket.id);
-      await safeUpdateHealing(admin, order.id, { status: "failed", payment_state: "failed" });
+    const j = await r.json().catch(() => ({}));
 
-      return NextResponse.json(
-        { error: "No se pudo crear sesión de pago en Banchile.", details: j },
-        { status: 502 }
-      );
+    if (!r.ok) {
+      // Dejamos ticket en active otra vez (rollback best-effort)
+      await supabaseAdmin.from("tickets").update({ status: "active" }).eq("id", ticketId);
+
+      const msg =
+        j?.status?.message ||
+        j?.message ||
+        `Banchile error HTTP ${r.status}`;
+      return NextResponse.json({ error: msg, details: j }, { status: 502 });
     }
 
-    const requestId = j?.requestId || j?.request_id;
-    const processUrl = j?.processUrl || j?.process_url;
+    const requestId = j?.requestId;
+    const processUrl = j?.processUrl;
 
     if (!requestId || !processUrl) {
-      await admin.from("tickets").update({ status: "active" }).eq("id", ticket.id);
-      await safeUpdateHealing(admin, order.id, { status: "failed", payment_state: "failed" });
-
+      // rollback
+      await supabaseAdmin.from("tickets").update({ status: "active" }).eq("id", ticketId);
       return NextResponse.json(
-        { error: "Respuesta inválida del banco (sin requestId/processUrl).", details: j },
+        { error: "Respuesta Banchile incompleta (sin requestId/processUrl).", details: j },
         { status: 502 }
       );
     }
 
-    // Guardar requestId (healing por si tu schema no tiene alguna de estas columnas)
-    await safeUpdateHealing(admin, order.id, {
-      payment_request_id: requestId,
-      payment_provider: "banchile",
-      payment_state: "processing",
-      total_paid_clp: total,
-      total_amount: total,
-    });
+    // 6) Guardar requestId + processUrl en la orden
+    const { error: updErr } = await supabaseAdmin
+      .from("orders")
+      .update({
+        payment_request_id: requestId,
+        payment_process_url: processUrl,
+      })
+      .eq("id", orderId);
 
-    return NextResponse.json({
-      ok: true,
-      orderId: order.id,
-      requestId,
-      redirectUrl: processUrl,
-    });
+    if (updErr) {
+      return NextResponse.json(
+        { error: `No se pudo actualizar la orden — ${updErr.message}` },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ orderId, requestId, processUrl }, { status: 200 });
   } catch (e) {
-    console.error("banchile/create-session error:", e);
     return NextResponse.json(
-      { error: "Error interno", details: e?.message || String(e) },
+      { error: `Error interno — ${e?.message || "unknown"}` },
       { status: 500 }
     );
   }
