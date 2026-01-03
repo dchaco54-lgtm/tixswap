@@ -19,10 +19,31 @@ function safe(v) {
   return s.length ? s : "—";
 }
 
+function normStatus(status) {
+  return (status ?? "").toString().trim().toLowerCase();
+}
+
+function isSoldStatus(status) {
+  const s = normStatus(status);
+  return ["sold", "vendida", "vendido", "consumed", "used"].includes(s);
+}
+
+function isHeldStatus(status) {
+  const s = normStatus(status);
+  return ["held", "hold", "reserved", "reservado", "locked", "pending_hold"].includes(s);
+}
+
 function isAvailableStatus(status) {
-  const s = (status ?? "").toString().toLowerCase().trim();
-  if (!s) return true; // si no hay columna status, no filtramos
-  return ["active", "published", "available", "for_sale"].includes(s);
+  const s = normStatus(status);
+  if (!s) return true; // si no hay status, asumimos disponible
+  return ["active", "available", "published", "for_sale", "listed", "on_sale"].includes(s);
+}
+
+function statusPill(status) {
+  if (isSoldStatus(status)) return { label: "Vendida", cls: "bg-gray-200 text-gray-800" };
+  if (isHeldStatus(status)) return { label: "Reservada", cls: "bg-yellow-100 text-yellow-900" };
+  if (isAvailableStatus(status)) return { label: "Disponible", cls: "bg-green-100 text-green-900" };
+  return { label: safe(status), cls: "bg-blue-100 text-blue-900" };
 }
 
 export default async function EventDetailPage({ params }) {
@@ -38,150 +59,112 @@ export default async function EventDetailPage({ params }) {
   if (eventError || !event) {
     return (
       <div className="max-w-3xl mx-auto p-6">
-        <h1 className="text-2xl font-semibold">Evento no encontrado</h1>
+        <p className="text-red-600">Evento no encontrado.</p>
         <Link className="text-blue-600 underline" href="/events">
-          Volver a eventos
+          Volver
         </Link>
       </div>
     );
   }
 
-  // Tickets disponibles (publicados) del evento
-  let tickets = [];
-  let ticketsError = null;
-  try {
-    const { data, error } = await admin
-      .from("tickets")
-      .select("*")
-      .eq("event_id", id);
+  const { data: ticketsData, error: ticketsError } = await admin
+    .from("tickets")
+    .select(
+      "id,event_id,price,section,row,seat,notes,status,created_at,seller_id,seller_email"
+    )
+    .eq("event_id", id)
+    .order("created_at", { ascending: false });
 
-    if (error) {
-      ticketsError = error.message;
-    } else {
-      tickets = (data ?? [])
-        .filter((t) => isAvailableStatus(t?.status))
-        .sort((a, b) => (Number(a?.price) || 0) - (Number(b?.price) || 0));
-    }
-  } catch (e) {
-    ticketsError = e?.message || "Error cargando entradas";
-  }
+  const tickets = ticketsData ?? [];
+
+  // Solo escondemos realmente vendidas; el resto se muestra (disponible o reservada o lo que sea)
+  const visibleTickets = tickets.filter((t) => !isSoldStatus(t.status));
 
   return (
     <div className="max-w-5xl mx-auto p-6">
-      <Link href="/events" className="text-blue-600 underline">
-        ← Volver a eventos
-      </Link>
-
-      <div className="mt-4 flex items-start justify-between gap-6">
-        <div className="min-w-0">
-          <h1 className="text-3xl font-bold">{event.title}</h1>
-          <p className="text-gray-600 mt-1">
-            {event.city} · {event.venue}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <Link className="text-blue-600 underline" href="/events">
+            ← Volver a eventos
+          </Link>
+          <h1 className="text-3xl font-bold mt-3">{safe(event.title)}</h1>
+          <p className="text-gray-600">
+            {safe(event.city)} · {safe(event.venue)}
           </p>
         </div>
 
         <Link
-          href={`/dashboard/sell?eventId=${event.id}`}
-          className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-full font-medium whitespace-nowrap"
+          href={`/sell?eventId=${id}`}
+          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md"
         >
           Publicar entrada
         </Link>
       </div>
 
-      <div className="mt-10">
-        <h2 className="text-xl font-semibold">Entradas disponibles</h2>
+      <h2 className="text-xl font-semibold mb-3">Entradas disponibles</h2>
 
-        {ticketsError ? (
-          <p className="text-red-600 mt-3">
-            No pude cargar las entradas ahora. {ticketsError}
-          </p>
-        ) : tickets.length === 0 ? (
-          <p className="text-gray-600 mt-3">
-            No hay entradas disponibles por ahora.
-          </p>
-        ) : (
-          <div className="mt-6 grid grid-cols-1 gap-4">
-            {tickets.map((t) => (
+      {ticketsError ? (
+        <p className="text-red-600">No pude cargar las entradas: {ticketsError.message}</p>
+      ) : visibleTickets.length === 0 ? (
+        <p className="text-gray-600">No hay entradas disponibles por ahora.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {visibleTickets.map((t) => {
+            const pill = statusPill(t.status);
+            const available = isAvailableStatus(t.status) && !isHeldStatus(t.status);
+
+            return (
               <div
                 key={t.id}
-                className="bg-white border rounded-2xl p-6 shadow-sm"
+                className="border rounded-lg p-4 bg-white flex items-start justify-between gap-4"
               >
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
-                  {/* Info */}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <h3 className="text-lg font-semibold truncate">
-                          {safe(t.title) === "—" ? event.title : safe(t.title)}
-                        </h3>
-                        {t.notes ? (
-                          <p className="text-sm text-slate-600 mt-1 line-clamp-2">
-                            {t.notes}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <dl className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-x-8 gap-y-4 text-sm">
-                      <div>
-                        <dt className="text-slate-500">Valor</dt>
-                        <dd className="font-semibold">{formatCLP(t.price)}</dd>
-                      </div>
-
-                      <div>
-                        <dt className="text-slate-500">Sector</dt>
-                        <dd className="font-medium">
-                          {safe(t.sector || t.section)}
-                        </dd>
-                      </div>
-
-                      <div>
-                        <dt className="text-slate-500">Fila</dt>
-                        <dd className="font-medium">{safe(t.fila || t.row)}</dd>
-                      </div>
-
-                      <div>
-                        <dt className="text-slate-500">Asiento</dt>
-                        <dd className="font-medium">
-                          {safe(t.asiento || t.seat)}
-                        </dd>
-                      </div>
-
-                      <div>
-                        <dt className="text-slate-500">Vendedor</dt>
-                        <dd className="font-medium">
-                          {displaySellerName(t.seller_name) || "—"}
-                        </dd>
-                      </div>
-
-                      <div>
-                        <dt className="text-slate-500">Reputación</dt>
-                        <dd className="font-medium">
-                          {t.seller_id ? (
-                            <SellerReputation sellerId={t.seller_id} />
-                          ) : (
-                            "—"
-                          )}
-                        </dd>
-                      </div>
-                    </dl>
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`text-xs px-2 py-1 rounded-full ${pill.cls}`}>
+                      {pill.label}
+                    </span>
                   </div>
 
-                  {/* CTA */}
-                  <div className="shrink-0 flex items-center justify-end">
+                  <p className="font-semibold text-lg">{formatCLP(t.price)}</p>
+
+                  <p className="text-gray-700">
+                    Sección: <b>{safe(t.section)}</b> · Fila: <b>{safe(t.row)}</b> · Asiento:{" "}
+                    <b>{safe(t.seat)}</b>
+                  </p>
+
+                  {t.notes ? <p className="text-gray-600 mt-2">{t.notes}</p> : null}
+
+                  <div className="mt-3">
+                    <p className="text-sm text-gray-600">
+                      Vende: <b>{displaySellerName(t.seller_email)}</b>
+                    </p>
+                    <SellerReputation sellerId={t.seller_id} />
+                  </div>
+                </div>
+
+                <div className="min-w-[140px] flex flex-col items-end gap-2">
+                  {available ? (
                     <Link
                       href={`/checkout/${t.id}`}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-full font-semibold"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md"
                     >
                       Comprar
                     </Link>
-                  </div>
+                  ) : (
+                    <button
+                      disabled
+                      className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md cursor-not-allowed"
+                      title="Esta entrada está reservada o no está disponible ahora"
+                    >
+                      No disponible
+                    </button>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
