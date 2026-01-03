@@ -41,11 +41,15 @@ export async function POST(req) {
   try {
     // Auth
     const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    if (!token) {
+      return NextResponse.json({ error: "No autenticado (sin token)." }, { status: 401 });
+    }
 
     const { data: userRes, error: uErr } = await admin.auth.getUser(token);
     const user = userRes?.user;
-    if (uErr || !user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    if (uErr || !user) {
+      return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const { ticketId, returnUrl } = body;
@@ -81,7 +85,7 @@ export async function POST(req) {
     const fees = getFees(ticket.price);
     const total = fees.total;
 
-    // Buscar última orden (SIN pedir columnas que no existen)
+    // Buscar última orden (SELECT mínimo para no depender de columnas extra)
     const { data: existing, error: exErr } = await admin
       .from("orders")
       .select("id, status, buyer_id, created_at")
@@ -90,7 +94,10 @@ export async function POST(req) {
       .limit(1);
 
     if (exErr) {
-      return NextResponse.json({ error: "Error buscando orden existente", details: exErr.message }, { status: 500 });
+      return NextResponse.json(
+        { error: "Error buscando orden existente", details: exErr.message },
+        { status: 500 }
+      );
     }
 
     const lastOrder = existing?.length ? existing[0] : null;
@@ -118,12 +125,15 @@ export async function POST(req) {
         .maybeSingle();
 
       if (readErr) {
-        return NextResponse.json({ error: "Error leyendo orden existente", details: readErr.message }, { status: 500 });
+        return NextResponse.json(
+          { error: "Error leyendo orden existente", details: readErr.message },
+          { status: 500 }
+        );
       }
       order = full;
     }
 
-    // Crear orden nueva (MÍNIMA, sin columnas inventadas)
+    // Crear orden nueva
     if (!order) {
       const { data: created, error: oErr } = await admin
         .from("orders")
@@ -133,6 +143,9 @@ export async function POST(req) {
           seller_id: ticket.seller_id ?? null,
           amount: ticket.price,
           status: "pending",
+          payment_state: "created",
+          payment_provider: "banchile",
+          total_paid_clp: total,
         })
         .select("*")
         .single();
@@ -156,7 +169,10 @@ export async function POST(req) {
         .eq("status", "active");
 
       if (holdErr) {
-        return NextResponse.json({ error: "No se pudo reservar el ticket", details: holdErr.message }, { status: 409 });
+        return NextResponse.json(
+          { error: "No se pudo reservar el ticket", details: holdErr.message },
+          { status: 409 }
+        );
       }
     }
 
@@ -205,9 +221,8 @@ export async function POST(req) {
 
     const j = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      // liberar ticket y marcar orden failed
       await admin.from("tickets").update({ status: "active" }).eq("id", ticket.id);
-      await admin.from("orders").update({ status: "failed" }).eq("id", order.id);
+      await admin.from("orders").update({ status: "failed", payment_state: "failed" }).eq("id", order.id);
 
       return NextResponse.json(
         { error: "No se pudo crear sesión de pago en Banchile.", details: j },
@@ -220,7 +235,7 @@ export async function POST(req) {
 
     if (!requestId || !processUrl) {
       await admin.from("tickets").update({ status: "active" }).eq("id", ticket.id);
-      await admin.from("orders").update({ status: "failed" }).eq("id", order.id);
+      await admin.from("orders").update({ status: "failed", payment_state: "failed" }).eq("id", order.id);
 
       return NextResponse.json(
         { error: "Respuesta inválida del banco (sin requestId/processUrl).", details: j },
@@ -228,30 +243,16 @@ export async function POST(req) {
       );
     }
 
-    // ✅ Guardar requestId (AQUÍ es donde hoy te falla si no existe la columna)
-    const { error: updErr } = await admin
+    // Guardar requestId (requiere payment_request_id)
+    await admin
       .from("orders")
       .update({
-        payment_request_id: requestId, // <-- NECESITA EXISTIR EN TU DB
+        payment_request_id: requestId,
+        payment_provider: "banchile",
+        payment_state: "processing",
+        total_paid_clp: total,
       })
       .eq("id", order.id);
-
-    if (updErr) {
-      // rollback suave
-      await admin.from("tickets").update({ status: "active" }).eq("id", ticket.id);
-      await admin.from("orders").update({ status: "failed" }).eq("id", order.id);
-
-      return NextResponse.json(
-        {
-          error:
-            "Tu tabla orders NO tiene la columna payment_request_id. Agrégala en Supabase (SQL Editor).",
-          details: updErr.message,
-          sql_fix:
-            "alter table public.orders add column if not exists payment_request_id text;",
-        },
-        { status: 500 }
-      );
-    }
 
     return NextResponse.json({
       ok: true,
@@ -261,7 +262,9 @@ export async function POST(req) {
     });
   } catch (e) {
     console.error("banchile/create-session error:", e);
-    return NextResponse.json({ error: "Error interno", details: e?.message || String(e) }, { status: 500 });
+    return NextResponse.json(
+      { error: "Error interno", details: e?.message || String(e) },
+      { status: 500 }
+    );
   }
 }
-
