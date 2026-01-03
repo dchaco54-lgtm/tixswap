@@ -23,21 +23,33 @@ function buildAuth(login, secretKey) {
   return { login, tranKey, nonce, seed };
 }
 
+async function safeUpdateOrder(admin, orderId, patch, fallbackPatch) {
+  const { error } = await admin.from("orders").update(patch).eq("id", orderId);
+  if (!error) return null;
+
+  if (fallbackPatch) {
+    const { error: e2 } = await admin.from("orders").update(fallbackPatch).eq("id", orderId);
+    if (!e2) return null;
+    return e2;
+  }
+
+  return error;
+}
+
 export async function POST(req) {
   try {
     const admin = supabaseAdmin();
 
-    // Bearer auth
     const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "No autenticado (sin token)." }, { status: 401 });
+    if (!token) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
 
-    const { data: userRes } = await admin.auth.getUser(token);
+    const { data: userRes, error: uErr } = await admin.auth.getUser(token);
     const user = userRes?.user;
-    if (!user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    if (uErr || !user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const orderId = body?.orderId;
-    if (!orderId) return NextResponse.json({ error: "Falta orderId." }, { status: 400 });
+    const { orderId } = body;
+    if (!orderId) return NextResponse.json({ error: "Falta orderId" }, { status: 400 });
 
     const { data: order, error: oErr } = await admin
       .from("orders")
@@ -49,26 +61,30 @@ export async function POST(req) {
     if (order.buyer_id && order.buyer_id !== user.id)
       return NextResponse.json({ error: "No autorizado." }, { status: 403 });
 
+    const requestId = order.payment_request_id;
+    if (!requestId) {
+      return NextResponse.json(
+        {
+          error:
+            "Orden sin payment_request_id. Tu tabla orders necesita esa columna para confirmar el pago.",
+          sql_fix:
+            "alter table public.orders add column if not exists payment_request_id text;",
+        },
+        { status: 400 }
+      );
+    }
+
     const baseUrl = process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
     const login = process.env.BANCHILE_LOGIN;
     const secretKey = process.env.BANCHILE_SECRET_KEY;
 
     if (!login || !secretKey) {
       return NextResponse.json(
-        { error: "Faltan variables BANCHILE_LOGIN / BANCHILE_SECRET_KEY." },
+        { error: "Faltan variables BANCHILE_LOGIN / BANCHILE_SECRET_KEY en Vercel." },
         { status: 500 }
       );
     }
 
-    const requestId = order.payment_request_id;
-    if (!requestId) {
-      return NextResponse.json(
-        { error: "Orden sin payment_request_id (no se puede confirmar)." },
-        { status: 400 }
-      );
-    }
-
-    // OJO: En esta API la confirmación es POST /api/session/{requestId} con body {auth}
     const auth = buildAuth(login, secretKey);
 
     const resp = await fetch(`${baseUrl}/api/session/${encodeURIComponent(requestId)}`, {
@@ -79,49 +95,71 @@ export async function POST(req) {
 
     const j = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      console.error("Banchile confirm error:", resp.status, j);
       return NextResponse.json(
-        { error: "No se pudo confirmar con Banchile.", details: j },
+        { error: "No se pudo consultar el estado del pago.", details: j },
         { status: 502 }
       );
     }
 
-    // PlaceToPay-style: status.status suele ser APPROVED / REJECTED / PENDING
     const state = j?.status?.status || j?.state || "PENDING";
-    const ticketId = order.ticket_id;
 
+    // APPROVED
     if (state === "APPROVED") {
-      await admin.from("orders").update({
-        status: "paid",
-        paid_at: new Date().toISOString(),
-        payment_state: state,
-      }).eq("id", orderId);
+      // Orden -> paid (con fallback si no existe paid_at/payment_state)
+      const updErr = await safeUpdateOrder(
+        admin,
+        orderId,
+        {
+          status: "paid",
+          paid_at: new Date().toISOString(),
+          payment_state: state,
+        },
+        { status: "paid" }
+      );
 
-      if (ticketId) await admin.from("tickets").update({ status: "sold" }).eq("id", ticketId);
+      if (updErr) {
+        return NextResponse.json(
+          { error: "No se pudo actualizar la orden como pagada.", details: updErr.message },
+          { status: 500 }
+        );
+      }
 
-      return NextResponse.json({ ok: true, state, orderStatus: "paid" });
+      // Ticket -> sold
+      if (order.ticket_id) {
+        await admin.from("tickets").update({ status: "sold" }).eq("id", order.ticket_id);
+      }
+
+      return NextResponse.json({ ok: true, state: "APPROVED" });
     }
 
+    // REJECTED
     if (state === "REJECTED") {
-      await admin.from("orders").update({
-        status: "rejected",
-        payment_state: state,
-      }).eq("id", orderId);
+      const updErr = await safeUpdateOrder(
+        admin,
+        orderId,
+        { status: "rejected", payment_state: state },
+        { status: "rejected" }
+      );
 
-      if (ticketId) await admin.from("tickets").update({ status: "active" }).eq("id", ticketId);
+      // liberar ticket si estaba held
+      if (order.ticket_id) {
+        await admin.from("tickets").update({ status: "active" }).eq("id", order.ticket_id);
+      }
 
-      return NextResponse.json({ ok: true, state, orderStatus: "rejected" });
+      if (updErr) {
+        return NextResponse.json(
+          { error: "Pago rechazado, pero falló actualizar la orden.", details: updErr.message },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({ ok: true, state: "REJECTED" });
     }
 
-    // PENDING u otro
-    await admin.from("orders").update({
-      status: "pending",
-      payment_state: state,
-    }).eq("id", orderId);
-
-    return NextResponse.json({ ok: true, state, orderStatus: "pending" });
+    // PENDING
+    return NextResponse.json({ ok: true, state: "PENDING" });
   } catch (e) {
-    console.error("confirm error:", e);
-    return NextResponse.json({ error: "Error interno confirmando pago." }, { status: 500 });
+    console.error("banchile/confirm error:", e);
+    return NextResponse.json({ error: "Error interno", details: e?.message || String(e) }, { status: 500 });
   }
 }
