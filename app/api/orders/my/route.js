@@ -22,9 +22,9 @@ export async function GET(req) {
     const { data, error } = await admin
       .from("orders")
       .select(`
-        id, status, amount, total_paid_clp, created_at, paid_at, payment_state,
+        id, status, total_amount, total_paid_clp, created_at, paid_at, payment_state,
         ticket:ticket_id (
-          id, price, section, row, seat, notes, status,
+          id, price, sector, row, seat, notes, status,
           event:events ( id, title, starts_at, venue, city )
         )
       `)
@@ -41,4 +41,3 @@ export async function GET(req) {
     return NextResponse.json({ error: "Error interno" }, { status: 500 });
   }
 }
-
