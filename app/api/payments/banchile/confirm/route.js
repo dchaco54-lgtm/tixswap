@@ -1,165 +1,137 @@
-export const runtime = "nodejs";
-
 // app/api/payments/banchile/confirm/route.js
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  if (!h.toLowerCase().startsWith("bearer ")) return null;
-  return h.slice(7).trim();
+export const runtime = "nodejs";
+
+const DEFAULT_TEST_BASE = "https://checkout.test.banchilepagos.cl";
+const DEFAULT_PROD_BASE = "https://checkout.banchilepagos.cl";
+
+function normalizeBaseUrl(raw) {
+  const mode = (process.env.BANCHILE_MODE || "test").toLowerCase();
+  const fallback = mode === "prod" ? DEFAULT_PROD_BASE : DEFAULT_TEST_BASE;
+
+  if (!raw) return fallback;
+
+  let v = String(raw).trim();
+  if (v === "BANCHILE_BASE_URL") return fallback;
+
+  v = v.replace(/\/api\/session\/?$/i, "");
+  v = v.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
+
+  return v;
 }
 
-function buildAuth(login, secretKey) {
+function generateAuth(login, secretKey) {
   const seed = new Date().toISOString();
   const nonceBytes = crypto.randomBytes(16);
-  const nonce = nonceBytes.toString("base64");
 
-  const sha = crypto.createHash("sha256");
-  sha.update(Buffer.concat([nonceBytes, Buffer.from(seed), Buffer.from(secretKey)]));
-  const tranKey = sha.digest("base64");
+  const tranKey = crypto
+    .createHash("sha256")
+    .update(Buffer.concat([nonceBytes, Buffer.from(seed), Buffer.from(secretKey)]))
+    .digest("base64");
+
+  const nonce = nonceBytes.toString("base64");
 
   return { login, tranKey, nonce, seed };
 }
 
-async function safeUpdateOrder(admin, orderId, patch, fallbackPatch) {
-  const { error } = await admin.from("orders").update(patch).eq("id", orderId);
-  if (!error) return null;
-
-  if (fallbackPatch) {
-    const { error: e2 } = await admin.from("orders").update(fallbackPatch).eq("id", orderId);
-    if (!e2) return null;
-    return e2;
-  }
-
-  return error;
+function mapPaymentState(state) {
+  if (state === "APPROVED") return { payment_state: "paid", status: "paid" };
+  if (state === "REJECTED") return { payment_state: "rejected", status: "rejected" };
+  return { payment_state: "pending", status: "created" };
 }
 
 export async function POST(req) {
   try {
-    const admin = supabaseAdmin();
+    const { orderId } = await req.json().catch(() => ({}));
+    if (!orderId) return NextResponse.json({ error: "Falta orderId." }, { status: 400 });
 
-    const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-    const { data: userRes, error: uErr } = await admin.auth.getUser(token);
-    const user = userRes?.user;
-    if (uErr || !user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    const { data: userRes } = await supabaseAdmin.auth.getUser(token);
+    const userId = userRes?.user?.id;
+    if (!userId) return NextResponse.json({ error: "No se pudo validar usuario." }, { status: 401 });
 
-    const body = await req.json().catch(() => ({}));
-    const { orderId } = body;
-    if (!orderId) return NextResponse.json({ error: "Falta orderId" }, { status: 400 });
+    const BANCHILE_LOGIN = process.env.BANCHILE_LOGIN;
+    const BANCHILE_SECRET_KEY = process.env.BANCHILE_SECRET_KEY;
+    const baseUrl = normalizeBaseUrl(process.env.BANCHILE_BASE_URL);
 
-    const { data: order, error: oErr } = await admin
-      .from("orders")
-      .select("*")
-      .eq("id", orderId)
-      .single();
-
-    if (oErr || !order) return NextResponse.json({ error: "Orden no encontrada." }, { status: 404 });
-    if (order.buyer_id && order.buyer_id !== user.id)
-      return NextResponse.json({ error: "No autorizado." }, { status: 403 });
-
-    const requestId = order.payment_request_id;
-    if (!requestId) {
+    if (!BANCHILE_LOGIN || !BANCHILE_SECRET_KEY) {
       return NextResponse.json(
-        {
-          error:
-            "Orden sin payment_request_id. Tu tabla orders necesita esa columna para confirmar el pago.",
-          sql_fix:
-            "alter table public.orders add column if not exists payment_request_id text;",
-        },
-        { status: 400 }
-      );
-    }
-
-    const baseUrl = process.env.BANCHILE_BASE_URL || "https://checkout.banchilepagos.cl";
-    const login = process.env.BANCHILE_LOGIN;
-    const secretKey = process.env.BANCHILE_SECRET_KEY;
-
-    if (!login || !secretKey) {
-      return NextResponse.json(
-        { error: "Faltan variables BANCHILE_LOGIN / BANCHILE_SECRET_KEY en Vercel." },
+        { error: "Faltan credenciales Banchile en el servidor." },
         { status: 500 }
       );
     }
 
-    const auth = buildAuth(login, secretKey);
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from("orders")
+      .select("id, user_id, ticket_id, payment_request_id")
+      .eq("id", orderId)
+      .single();
 
-    const resp = await fetch(`${baseUrl}/api/session/${encodeURIComponent(requestId)}`, {
+    if (orderErr || !order) return NextResponse.json({ error: "Orden no encontrada." }, { status: 404 });
+    if (order.user_id !== userId) return NextResponse.json({ error: "No autorizado para esta orden." }, { status: 403 });
+
+    const requestId = order.payment_request_id;
+    if (!requestId) return NextResponse.json({ error: "Orden sin requestId (payment_request_id)." }, { status: 400 });
+
+    const auth = generateAuth(BANCHILE_LOGIN, BANCHILE_SECRET_KEY);
+
+    const url = new URL(`/api/session/${requestId}`, baseUrl).toString();
+
+    const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ auth }),
+      cache: "no-store",
     });
 
-    const j = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
       return NextResponse.json(
-        { error: "No se pudo consultar el estado del pago.", details: j },
+        { error: j?.status?.message || j?.message || `Banchile error HTTP ${r.status}`, details: j },
         { status: 502 }
       );
     }
 
-    const state = j?.status?.status || j?.state || "PENDING";
+    // Dependiendo del formato exacto, tomamos el estado más “real”
+    const candidateA = j?.status?.status;
+    const candidateB = j?.request?.status?.status;
 
-    // APPROVED
-    if (state === "APPROVED") {
-      // Orden -> paid (con fallback si no existe paid_at/payment_state)
-      const updErr = await safeUpdateOrder(
-        admin,
-        orderId,
-        {
-          status: "paid",
-          paid_at: new Date().toISOString(),
-          payment_state: state,
-        },
-        { status: "paid" }
-      );
+    const known = new Set(["APPROVED", "REJECTED", "PENDING", "APPROVED_PARTIAL", "PARTIAL_EXPIRED"]);
+    const state = known.has(candidateA) ? candidateA : known.has(candidateB) ? candidateB : candidateA || candidateB || "PENDING";
 
-      if (updErr) {
-        return NextResponse.json(
-          { error: "No se pudo actualizar la orden como pagada.", details: updErr.message },
-          { status: 500 }
-        );
-      }
+    const upd = mapPaymentState(state);
 
-      // Ticket -> sold
-      if (order.ticket_id) {
-        await admin.from("tickets").update({ status: "sold" }).eq("id", order.ticket_id);
-      }
+    // actualizar orden
+    await supabaseAdmin
+      .from("orders")
+      .update({
+        payment_state: upd.payment_state,
+        status: upd.status,
+        payment_payload: j, // si existe columna JSONB, bkn; si no existe, bórrala de aquí
+      })
+      .eq("id", orderId);
 
-      return NextResponse.json({ ok: true, state: "APPROVED" });
+    // si aprobado -> marcar ticket sold
+    if (state === "APPROVED" && order.ticket_id) {
+      await supabaseAdmin
+        .from("tickets")
+        .update({ status: "sold" })
+        .eq("id", order.ticket_id);
     }
 
-    // REJECTED
-    if (state === "REJECTED") {
-      const updErr = await safeUpdateOrder(
-        admin,
-        orderId,
-        { status: "rejected", payment_state: state },
-        { status: "rejected" }
-      );
-
-      // liberar ticket si estaba held
-      if (order.ticket_id) {
-        await admin.from("tickets").update({ status: "active" }).eq("id", order.ticket_id);
-      }
-
-      if (updErr) {
-        return NextResponse.json(
-          { error: "Pago rechazado, pero falló actualizar la orden.", details: updErr.message },
-          { status: 500 }
-        );
-      }
-
-      return NextResponse.json({ ok: true, state: "REJECTED" });
-    }
-
-    // PENDING
-    return NextResponse.json({ ok: true, state: "PENDING" });
+    return NextResponse.json({ state, details: j }, { status: 200 });
   } catch (e) {
-    console.error("banchile/confirm error:", e);
-    return NextResponse.json({ error: "Error interno", details: e?.message || String(e) }, { status: 500 });
+    return NextResponse.json(
+      { error: `Error interno — ${e?.message || "unknown"}` },
+      { status: 500 }
+    );
   }
 }
+
