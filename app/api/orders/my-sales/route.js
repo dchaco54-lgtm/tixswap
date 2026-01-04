@@ -1,8 +1,23 @@
 // app/api/orders/my-sales/route.js
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { ROLE_DEFS, ROLE_ORDER, normalizeRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
+
+function roleRank(roleKey) {
+  const i = ROLE_ORDER.indexOf(roleKey);
+  return i === -1 ? 0 : i;
+}
+
+function computeRoleFromSales(soldCount) {
+  let best = "basic";
+  for (const key of ROLE_ORDER) {
+    const need = ROLE_DEFS[key]?.opsRequired ?? 0;
+    if (soldCount >= need) best = key;
+  }
+  return best;
+}
 
 function getBearerToken(req) {
   const h = req.headers.get("authorization") || "";
@@ -61,6 +76,19 @@ export async function GET(req) {
 
     const userId = userRes.user.id;
 
+    // Perfil actual (para upgrade automático)
+    const { data: prof, error: profErr } = await admin
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profErr) throw profErr;
+
+    const roleRaw = String(prof?.role || "").trim().toLowerCase();
+    const isPrivileged = roleRaw === "admin" || roleRaw === "seller";
+    const currentRoleKey = isPrivileged ? roleRaw : normalizeRole(roleRaw);
+
     const url = new URL(req.url);
     const months = Math.min(Math.max(parseInt(url.searchParams.get("months") || "6", 10), 1), 24);
     const listMonths = Math.min(Math.max(parseInt(url.searchParams.get("listMonths") || "3", 10), 1), 12);
@@ -76,21 +104,47 @@ export async function GET(req) {
     const ticketIds = (tickets || []).map((t) => t.id).filter(Boolean);
     const soldCount = (tickets || []).filter((t) => String(t.status || "").toLowerCase() === "sold").length;
 
+    // 🔥 CATEGORÍA AUTOMÁTICA
+    const computedKey = computeRoleFromSales(soldCount);
+
+    let upgraded = false;
+    let effectiveRoleKey = currentRoleKey || "basic";
+
+    // Solo sube nivel (no baja) y no pisa admin/seller
+    if (!isPrivileged && roleRank(computedKey) > roleRank(currentRoleKey || "basic")) {
+      const { error: upErr } = await admin
+        .from("profiles")
+        .update({ role: computedKey })
+        .eq("id", userId);
+
+      if (!upErr) {
+        upgraded = true;
+        effectiveRoleKey = computedKey;
+      }
+    }
+
     const lastMonths = buildLastMonths(months);
     const monthly = lastMonths.map((m) => ({ key: m.key, label: m.label, count: 0, total_clp: 0 }));
 
     if (ticketIds.length === 0) {
-      return NextResponse.json({ soldCount, paid90dCount: 0, paid90dTotal: 0, monthly, recentSales: [] });
+      return NextResponse.json({
+        soldCount,
+        paid90dCount: 0,
+        paid90dTotal: 0,
+        monthly,
+        recentSales: [],
+        computedRole: isPrivileged ? (roleRaw || "basic") : effectiveRoleKey,
+        upgraded,
+      });
     }
 
-    const now = new Date();
     const firstMonth = new Date(lastMonths[0].year, lastMonths[0].month, 1);
     const startISO = firstMonth.toISOString();
 
     const listStartMonth = buildLastMonths(listMonths)[0];
     const listStartISO = new Date(listStartMonth.year, listStartMonth.month, 1).toISOString();
 
-    // 2) Órdenes asociadas a esos tickets (ventas reales)
+    // 2) Orders de esos tickets
     const { data: orders, error: oErr } = await admin
       .from("orders")
       .select(
@@ -146,7 +200,7 @@ export async function GET(req) {
     const paid90dCount = paid90.length;
     const paid90dTotal = paid90.reduce((sum, o) => sum + (Number(o.total_paid_clp ?? o.total_amount ?? o.amount_clp ?? 0) || 0), 0);
 
-    // recent list (3 months)
+    // recent list
     const recentSales = paidOrders
       .filter((o) => new Date(o.paid_at || o.created_at) >= new Date(listStartISO))
       .slice(0, 200)
@@ -154,19 +208,36 @@ export async function GET(req) {
         const buyerId = normalizeBuyerId(o);
         const buyer = buyerId ? buyerMap[buyerId] : null;
 
+        const total = Number(o.total_paid_clp ?? o.total_amount ?? o.amount_clp ?? 0) || 0;
+
         return {
           id: o.id,
+          status: o.status,
+          payment_state: o.payment_state,
           created_at: o.created_at,
           paid_at: o.paid_at,
-          total_clp: Number(o.total_paid_clp ?? o.total_amount ?? o.amount_clp ?? 0) || 0,
+          total_paid_clp: total,
+          total_clp: total,
           buyer: buyer
-            ? { id: buyer.id, name: buyer.full_name || buyer.name || buyer.email || "Comprador", email: buyer.email || null }
-            : null,
-          event: o.ticket?.event
-            ? { id: o.ticket.event.id, title: o.ticket.event.title, starts_at: o.ticket.event.starts_at, venue: o.ticket.event.venue, city: o.ticket.event.city }
+            ? { id: buyer.id, full_name: buyer.full_name || buyer.name || buyer.email || "Comprador", email: buyer.email || null }
             : null,
           ticket: o.ticket
-            ? { id: o.ticket.id, sector: o.ticket.sector, row: o.ticket.row, seat: o.ticket.seat, notes: o.ticket.notes }
+            ? {
+                id: o.ticket.id,
+                sector: o.ticket.sector,
+                row: o.ticket.row,
+                seat: o.ticket.seat,
+                notes: o.ticket.notes,
+                event: o.ticket?.event
+                  ? {
+                      id: o.ticket.event.id,
+                      title: o.ticket.event.title,
+                      starts_at: o.ticket.event.starts_at,
+                      venue: o.ticket.event.venue,
+                      city: o.ticket.event.city,
+                    }
+                  : null,
+              }
             : null,
         };
       });
@@ -177,6 +248,8 @@ export async function GET(req) {
       paid90dTotal: Math.round(paid90dTotal),
       monthly: monthlyOut,
       recentSales,
+      computedRole: isPrivileged ? (roleRaw || "basic") : effectiveRoleKey,
+      upgraded,
     });
   } catch (err) {
     console.error("my-sales error", err);
