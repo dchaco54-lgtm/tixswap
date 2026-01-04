@@ -40,17 +40,29 @@ export async function POST(req) {
       );
     }
 
-    // 🔒 Anti-estafa: nombre + rut SIEMPRE desde la cuenta (metadata)
-    const holder_name =
+    // ✅ Fuente real: profiles (fallback a metadata)
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("full_name, rut")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const meta_name =
       user.user_metadata?.name ||
       user.user_metadata?.full_name ||
       user.user_metadata?.fullName ||
       "";
-    const holder_rut = (user.user_metadata?.rut || "").trim();
+    const meta_rut = (user.user_metadata?.rut || "").trim();
+
+    const holder_name = String(prof?.full_name || meta_name || "").trim();
+    const holder_rut = String(prof?.rut || meta_rut || "").trim();
 
     if (!holder_name || !holder_rut) {
       return NextResponse.json(
-        { error: "Tu cuenta no tiene Nombre/RUT. Completa tu RUT en el perfil antes de configurar Wallet." },
+        {
+          error:
+            "Tu cuenta no tiene Nombre/RUT. Completa tu RUT en 'Mis datos' o solicita cambio por ticket antes de configurar Wallet.",
+        },
         { status: 400 }
       );
     }
@@ -84,3 +96,4 @@ export async function POST(req) {
     );
   }
 }
+
