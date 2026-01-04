@@ -62,6 +62,7 @@ export default function DashboardPage() {
   const searchParams = useSearchParams();
 
   const [currentSection, setCurrentSection] = useState("overview");
+
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
@@ -87,7 +88,7 @@ export default function DashboardPage() {
   // Wallet
   const [walletLoading, setWalletLoading] = useState(true);
 
-  // Resumen: contadores
+  // Resumen: contadores (por ahora solo tickets)
   const [counts, setCounts] = useState({
     sales: 0,
     purchases: 0,
@@ -95,20 +96,39 @@ export default function DashboardPage() {
     tickets: 0,
   });
 
+  // ====== PERFIL EDITABLE (solo correo + teléfono) ======
+  const [profileEditing, setProfileEditing] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileForm, setProfileForm] = useState({ email: "", phone: "" });
+  const [profileMsgOk, setProfileMsgOk] = useState("");
+  const [profileMsgErr, setProfileMsgErr] = useState("");
+
+  const headerName = useMemo(() => {
+    const n =
+      profileRow?.full_name ||
+      profileRow?.name ||
+      user?.user_metadata?.full_name ||
+      user?.user_metadata?.name ||
+      user?.email;
+    return n || "Usuario";
+  }, [profileRow, user]);
+
+  const displayEmail = useMemo(() => {
+    // Preferimos profiles.email si existe, si no el auth email
+    return (profileRow?.email || user?.email || "—").toString();
+  }, [profileRow, user]);
+
+  const displayPhone = useMemo(() => {
+    return (profileRow?.phone || user?.user_metadata?.phone || "—").toString();
+  }, [profileRow, user]);
+
   useEffect(() => {
     const section = searchParams?.get("section");
     if (!section) return;
 
-    // Si alguien llega con ?section=tickets, igual lo mandamos a la página real de tickets
-    if (section === "tickets") {
-      router.push("/dashboard/tickets");
-      return;
-    }
-    // Si alguien llega con ?section=support, lo mandamos a soporte dedicado
-    if (section === "support") {
-      router.push("/dashboard/soporte");
-      return;
-    }
+    if (section === "tickets") return router.push("/dashboard/tickets");
+    if (section === "support") return router.push("/dashboard/soporte");
+    if (section === "purchases") return router.push("/dashboard/purchases");
 
     if (sidebarSections.some((s) => s.id === section)) setCurrentSection(section);
   }, [searchParams, router]);
@@ -128,7 +148,6 @@ export default function DashboardPage() {
 
       setUser(u);
 
-      // Perfil (DB)
       const { data: prof } = await supabase
         .from("profiles")
         .select("*")
@@ -144,6 +163,14 @@ export default function DashboardPage() {
 
     load();
   }, [router]);
+
+  // Inicializa el form cuando ya cargó user/profile
+  useEffect(() => {
+    if (!user) return;
+    const email = (profileRow?.email || user?.email || "").toString().trim().toLowerCase();
+    const phone = (profileRow?.phone || user?.user_metadata?.phone || "").toString().trim();
+    setProfileForm({ email, phone });
+  }, [user, profileRow]);
 
   const loadCounts = async () => {
     try {
@@ -192,21 +219,6 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  const headerName = useMemo(() => {
-    const n =
-      profileRow?.full_name ||
-      profileRow?.name ||
-      user?.user_metadata?.full_name ||
-      user?.user_metadata?.name ||
-      user?.email;
-    return n || "Usuario";
-  }, [profileRow, user]);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
-
   const submitSupportTicket = async () => {
     setSupportError("");
     setSupportOk("");
@@ -246,6 +258,73 @@ export default function DashboardPage() {
       setSupportError(e.message || "Error enviando ticket");
     } finally {
       setSupportSending(false);
+    }
+  };
+
+  const validateEmail = (email) => {
+    if (!email) return false;
+    return /^\S+@\S+\.\S+$/.test(email);
+  };
+
+  const saveProfile = async () => {
+    if (!user) return;
+
+    setProfileMsgOk("");
+    setProfileMsgErr("");
+
+    const nextEmail = (profileForm.email || "").trim().toLowerCase();
+    const nextPhone = (profileForm.phone || "").trim();
+
+    if (!validateEmail(nextEmail)) {
+      setProfileMsgErr("Correo inválido. Ej: nombre@dominio.com");
+      return;
+    }
+
+    try {
+      setProfileSaving(true);
+
+      const currentAuthEmail = (user?.email || "").toString().trim().toLowerCase();
+      const emailChanged = currentAuthEmail && nextEmail !== currentAuthEmail;
+
+      // 1) Si cambió el correo: actualiza Auth (manda confirmación)
+      if (emailChanged) {
+        const { error: authErr } = await supabase.auth.updateUser({ email: nextEmail });
+        if (authErr) {
+          setProfileMsgErr(authErr.message || "No se pudo actualizar el correo.");
+          return;
+        }
+      }
+
+      // 2) Actualiza perfil (solo phone + email)
+      const payload = {
+        phone: nextPhone || null,
+        email: nextEmail || null,
+      };
+
+      const { data: updated, error: profErr } = await supabase
+        .from("profiles")
+        .update(payload)
+        .eq("id", user.id)
+        .select("*")
+        .single();
+
+      if (profErr) {
+        setProfileMsgErr(profErr.message || "No se pudieron guardar tus datos.");
+        return;
+      }
+
+      setProfileRow(updated || profileRow);
+      setProfileEditing(false);
+
+      if (emailChanged) {
+        setProfileMsgOk(
+          `Listo ✅ Te mandamos un correo para confirmar el cambio. Mientras no confirmes, sigues entrando con: ${currentAuthEmail}`
+        );
+      } else {
+        setProfileMsgOk("Datos actualizados ✅");
+      }
+    } finally {
+      setProfileSaving(false);
     }
   };
 
@@ -330,218 +409,5 @@ export default function DashboardPage() {
                   placeholder="Ej: Problema con mi compra"
                 />
               </div>
-            </div>
+            </
 
-            <div className="mt-3">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Mensaje
-              </label>
-              <textarea
-                value={supportMessage}
-                onChange={(e) => setSupportMessage(e.target.value)}
-                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[90px]"
-                placeholder="Cuéntanos qué pasó…"
-              />
-            </div>
-
-            {supportError ? (
-              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {supportError}
-              </div>
-            ) : null}
-            {supportOk ? (
-              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                {supportOk}
-              </div>
-            ) : null}
-
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <button
-                onClick={() => router.push("/dashboard/tickets")}
-                className="text-xs font-medium text-blue-600 hover:text-blue-700"
-              >
-                Ver todos mis tickets →
-              </button>
-
-              <button
-                onClick={submitSupportTicket}
-                disabled={supportSending}
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
-              >
-                {supportSending ? "Enviando…" : "Enviar ticket"}
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (currentSection === "profile") {
-      return (
-        <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-          <h2 className="text-lg font-semibold text-slate-900">Mis datos</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Información de tu cuenta.
-          </p>
-
-          <div className="mt-5 grid md:grid-cols-2 gap-4">
-            <div className="border border-slate-100 rounded-2xl p-4">
-              <p className="text-xs text-slate-500">Nombre</p>
-              <p className="text-sm font-semibold text-slate-900 mt-1">
-                {profileRow?.full_name || profileRow?.name || headerName}
-              </p>
-            </div>
-            <div className="border border-slate-100 rounded-2xl p-4">
-              <p className="text-xs text-slate-500">Correo</p>
-              <p className="text-sm font-semibold text-slate-900 mt-1">
-                {user?.email || "—"}
-              </p>
-            </div>
-            <div className="border border-slate-100 rounded-2xl p-4">
-              <p className="text-xs text-slate-500">RUT</p>
-              <p className="text-sm font-semibold text-slate-900 mt-1">
-                {profileRow?.rut || "—"}
-              </p>
-            </div>
-            <div className="border border-slate-100 rounded-2xl p-4">
-              <p className="text-xs text-slate-500">Rol</p>
-              <p className="text-sm font-semibold text-slate-900 mt-1">
-                {profileRow?.role || "user"}
-              </p>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (currentSection === "wallet") {
-      return (
-        <WalletSection
-          walletLoading={walletLoading}
-          setWalletLoading={setWalletLoading}
-        />
-      );
-    }
-
-    if (currentSection === "support") {
-      // En vez de “sección” interna, soporte dedicado (más limpio)
-      router.push("/dashboard/soporte");
-      return null;
-    }
-
-    if (currentSection === "tickets") {
-      // Si alguien cae aquí, igual lo mandamos a la página real
-      router.push("/dashboard/tickets");
-      return null;
-    }
-
-    if (currentSection === "admin" && isAdmin) {
-      return (
-        <div className="grid gap-6 md:grid-cols-3">
-          <AdminCard
-            title="Eventos"
-            desc="Gestor de eventos."
-            onClick={() => router.push("/admin/events")}
-            button="Abrir gestor de eventos"
-          />
-          <AdminCard
-            title="Tickets de soporte"
-            desc="Ver y responder tickets."
-            onClick={() => router.push("/admin/soporte")}
-            button="Abrir consola de tickets"
-          />
-          <AdminCard
-            title="Usuarios"
-            desc="Administrar usuarios."
-            onClick={() => router.push("/admin/users")}
-            button="Ver usuarios"
-          />
-        </div>
-      );
-    }
-
-    // Secciones placeholder
-    return (
-      <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
-        <h2 className="text-lg font-semibold text-slate-900">Sección</h2>
-        <p className="text-sm text-slate-500 mt-1">
-          Esta sección está en construcción.
-        </p>
-      </div>
-    );
-  };
-
-  return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-10">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 mb-8">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
-              Hola, {headerName} 👋
-            </h1>
-            <p className="text-sm text-slate-500">Este es tu panel de cuenta en TixSwap.</p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => router.push("/")}
-              className="text-sm px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
-            >
-              Volver al inicio
-            </button>
-
-            <button
-              onClick={handleLogout}
-              className="text-sm px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700"
-            >
-              Cerrar sesión
-            </button>
-          </div>
-        </div>
-
-        {/* Layout */}
-        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
-          {/* Sidebar */}
-          <aside className="w-full md:w-60 bg-white border border-slate-100 rounded-2xl p-3 shadow-sm">
-            <nav className="space-y-1">
-              {sidebarSections.map((section) => (
-                <button
-                  key={section.id}
-                  onClick={() => {
-                    if (section.id === "tickets") return router.push("/dashboard/tickets");
-                    if (section.id === "support") return router.push("/dashboard/soporte");
-                    setCurrentSection(section.id);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-sm ${
-                    currentSection === section.id
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  {section.label}
-                </button>
-              ))}
-
-              {isAdmin && (
-                <button
-                  onClick={() => setCurrentSection("admin")}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-sm ${
-                    currentSection === "admin"
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-700 hover:bg-slate-50"
-                  }`}
-                >
-                  Admin
-                </button>
-              )}
-            </nav>
-          </aside>
-
-          {/* Content */}
-          <section className="min-w-0">{renderSection()}</section>
-        </div>
-      </div>
-    </main>
-  );
-}
