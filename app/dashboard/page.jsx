@@ -5,10 +5,46 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../lib/supabaseClient";
 import WalletSection from "./WalletSection";
 
-function roleLabel(role) {
-  if (role === "admin") return "Administrador";
-  if (role === "seller") return "Vendedor";
-  return "Usuario";
+/**
+ * IMPORTANTE:
+ * En tu BD estás usando "role" como categoría/plan (basic, pro, premium...)
+ * y a veces como permiso (admin). Acá lo mostramos como "Categoría" real:
+ * basic -> Básico, etc.
+ */
+const PLAN_LABELS = {
+  basic: "Básico",
+  pro: "Pro",
+  premium: "Premium",
+  elite: "Elite",
+  ultra_premium: "Ultra Premium",
+};
+
+// si llega vacío o raro, cae a basic
+function normalizePlan(role) {
+  const r = String(role || "").trim().toLowerCase();
+  if (!r) return "basic";
+
+  // permisos
+  if (r === "admin") return "admin";
+  if (r === "seller") return "seller";
+
+  // planes válidos
+  if (PLAN_LABELS[r]) return r;
+
+  // alias por si algún día guardaste variantes
+  if (r === "ultra" || r === "ultrapremium") return "ultra_premium";
+
+  return "basic";
+}
+
+function getCategoryLabel(role) {
+  const plan = normalizePlan(role);
+
+  // permisos (si te llega admin acá, lo mostramos igual bonito)
+  if (plan === "admin") return "Administrador";
+  if (plan === "seller") return "Vendedor";
+
+  return PLAN_LABELS[plan] || "Básico";
 }
 
 function buildPrefillTicket({ field, currentValue }) {
@@ -20,13 +56,29 @@ function buildPrefillTicket({ field, currentValue }) {
 
   if (field === "name") {
     base.subject = "Solicitud de cambio de Nombre";
-    base.message = `Hola soporte 👋\n\nQuiero solicitar cambio de mi NOMBRE.\n\nNombre actual: ${currentValue || "—"}\nNombre nuevo: (escríbelo acá)\n\nMotivo / respaldo: (opcional)\n`;
+    base.message = `Hola soporte 👋
+
+Quiero solicitar cambio de mi NOMBRE.
+
+Nombre actual: ${currentValue || "—"}
+Nombre nuevo: (escríbelo acá)
+
+Motivo / respaldo: (opcional)
+`;
     return base;
   }
 
   if (field === "rut") {
     base.subject = "Solicitud de cambio de RUT";
-    base.message = `Hola soporte 👋\n\nQuiero solicitar cambio de mi RUT.\n\nRUT actual: ${currentValue || "—"}\nRUT nuevo: (escríbelo acá)\n\nAdjunto foto/validación si corresponde.\n`;
+    base.message = `Hola soporte 👋
+
+Quiero solicitar cambio de mi RUT.
+
+RUT actual: ${currentValue || "—"}
+RUT nuevo: (escríbelo acá)
+
+Adjunto foto/validación si corresponde.
+`;
     return base;
   }
 
@@ -89,14 +141,13 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    // sync tab con url (opcional y simple)
     const urlTab = sp.get("tab");
     if (urlTab && urlTab !== tab) setTab(urlTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
   const navItems = useMemo(() => {
-    const isAdmin = profile?.role === "admin";
+    const isAdmin = String(profile?.role || "").toLowerCase() === "admin";
     return [
       { id: "resumen", label: "Resumen" },
       { id: "mis_datos", label: "Mis datos" },
@@ -126,7 +177,12 @@ export default function DashboardPage() {
 
   const requestChangeTicket = (field) => {
     const currentValue =
-      field === "name" ? profile?.full_name : field === "rut" ? profile?.rut : "";
+      field === "name"
+        ? profile?.full_name
+        : field === "rut"
+        ? profile?.rut
+        : "";
+
     const t = buildPrefillTicket({ field, currentValue });
 
     const qs = new URLSearchParams({
@@ -164,7 +220,7 @@ export default function DashboardPage() {
 
       if (!email) throw new Error("El correo no puede estar vacío.");
 
-      // 1) actualizar tabla profiles
+      // 1) actualizar tabla profiles (solo email + phone)
       const { error: upErr } = await supabase
         .from("profiles")
         .update({ email, phone })
@@ -172,7 +228,7 @@ export default function DashboardPage() {
 
       if (upErr) throw upErr;
 
-      // 2) si cambió email, actualizar auth (puede requerir confirmación)
+      // 2) si cambió email, actualizar auth (puede pedir confirmación)
       if ((user?.email || "").trim().toLowerCase() !== email.toLowerCase()) {
         const { error: aErr } = await supabase.auth.updateUser({ email });
         if (aErr) throw aErr;
@@ -376,14 +432,19 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    {/* Categoría */}
+                    {/* Categoría REAL (basic/pro/premium...) */}
                     <div className="px-5 py-4 flex items-start justify-between gap-4">
                       <div>
                         <div className="text-xs font-bold text-slate-500">
-                          Categoría de usuario
+                          Categoría
                         </div>
+
                         <div className="mt-2 inline-flex items-center px-3 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-700 text-xs font-extrabold">
-                          {roleLabel(profile?.role)}
+                          {getCategoryLabel(profile?.role)}
+                        </div>
+
+                        <div className="text-xs text-slate-400 mt-2">
+                          (Esta categoría viene de tu plan: basic / pro / premium…)
                         </div>
                       </div>
                     </div>
