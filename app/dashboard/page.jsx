@@ -409,5 +409,331 @@ export default function DashboardPage() {
                   placeholder="Ej: Problema con mi compra"
                 />
               </div>
-            </
+            </div>
+
+            <div className="mt-3">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Mensaje
+              </label>
+              <textarea
+                value={supportMessage}
+                onChange={(e) => setSupportMessage(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm min-h-[90px]"
+                placeholder="Cuéntanos qué pasó…"
+              />
+            </div>
+
+            {supportError ? (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {supportError}
+              </div>
+            ) : null}
+            {supportOk ? (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {supportOk}
+              </div>
+            ) : null}
+
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <button
+                onClick={() => router.push("/dashboard/tickets")}
+                className="text-xs font-medium text-blue-600 hover:text-blue-700"
+              >
+                Ver todos mis tickets →
+              </button>
+
+              <button
+                onClick={submitSupportTicket}
+                disabled={supportSending}
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+              >
+                {supportSending ? "Enviando…" : "Enviar ticket"}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentSection === "profile") {
+      return (
+        <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Mis datos</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                Puedes editar solo <b>correo</b> y <b>teléfono</b>. Para cambiar <b>nombre</b> o <b>RUT</b>, debes solicitarlo por ticket.
+              </p>
+            </div>
+
+            {!profileEditing ? (
+              <button
+                onClick={() => {
+                  setProfileMsgOk("");
+                  setProfileMsgErr("");
+                  setProfileEditing(true);
+                }}
+                className="shrink-0 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold"
+              >
+                Editar
+              </button>
+            ) : (
+              <div className="shrink-0 flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setProfileMsgOk("");
+                    setProfileMsgErr("");
+                    setProfileEditing(false);
+                    // reset a valores actuales
+                    const email = (profileRow?.email || user?.email || "").toString().trim().toLowerCase();
+                    const phone = (profileRow?.phone || user?.user_metadata?.phone || "").toString().trim();
+                    setProfileForm({ email, phone });
+                  }}
+                  disabled={profileSaving}
+                  className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-semibold disabled:opacity-60"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={saveProfile}
+                  disabled={profileSaving}
+                  className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-semibold disabled:opacity-60"
+                >
+                  {profileSaving ? "Guardando…" : "Guardar"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {profileMsgErr ? (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {profileMsgErr}
+            </div>
+          ) : null}
+
+          {profileMsgOk ? (
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {profileMsgOk}
+            </div>
+          ) : null}
+
+          <div className="mt-6 grid md:grid-cols-2 gap-4">
+            {/* Nombre (bloqueado) */}
+            <div className="border border-slate-100 rounded-2xl p-4">
+              <p className="text-xs text-slate-500">Nombre (bloqueado)</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1">
+                {profileRow?.full_name || profileRow?.name || headerName}
+              </p>
+              <button
+                onClick={() => router.push("/dashboard/soporte")}
+                className="mt-2 text-xs font-medium text-blue-600 hover:text-blue-700"
+              >
+                Solicitar cambio por ticket →
+              </button>
+            </div>
+
+            {/* Correo (editable) */}
+            <div className="border border-slate-100 rounded-2xl p-4">
+              <p className="text-xs text-slate-500">Correo</p>
+
+              {!profileEditing ? (
+                <p className="text-sm font-semibold text-slate-900 mt-1">{displayEmail}</p>
+              ) : (
+                <div className="mt-2">
+                  <input
+                    value={profileForm.email}
+                    onChange={(e) => setProfileForm((p) => ({ ...p, email: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                    placeholder="tu@correo.com"
+                    inputMode="email"
+                  />
+                  <p className="text-xs text-slate-400 mt-2">
+                    Si cambias el correo, te llegará un mail para confirmar (Supabase). Hasta confirmar, el login puede seguir siendo el anterior.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* RUT (bloqueado) */}
+            <div className="border border-slate-100 rounded-2xl p-4">
+              <p className="text-xs text-slate-500">RUT (bloqueado)</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1">
+                {profileRow?.rut || "—"}
+              </p>
+              <button
+                onClick={() => router.push("/dashboard/soporte")}
+                className="mt-2 text-xs font-medium text-blue-600 hover:text-blue-700"
+              >
+                Solicitar cambio por ticket →
+              </button>
+            </div>
+
+            {/* Teléfono (editable) */}
+            <div className="border border-slate-100 rounded-2xl p-4">
+              <p className="text-xs text-slate-500">Teléfono</p>
+
+              {!profileEditing ? (
+                <p className="text-sm font-semibold text-slate-900 mt-1">{displayPhone}</p>
+              ) : (
+                <div className="mt-2">
+                  <input
+                    value={profileForm.phone}
+                    onChange={(e) => setProfileForm((p) => ({ ...p, phone: e.target.value }))}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm"
+                    placeholder="+56 9 1234 5678"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Rol */}
+            <div className="border border-slate-100 rounded-2xl p-4 md:col-span-2">
+              <p className="text-xs text-slate-500">Rol</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1">
+                {profileRow?.role || "user"}
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (currentSection === "wallet") {
+      return (
+        <WalletSection
+          walletLoading={walletLoading}
+          setWalletLoading={setWalletLoading}
+        />
+      );
+    }
+
+    if (currentSection === "support") {
+      router.push("/dashboard/soporte");
+      return null;
+    }
+
+    if (currentSection === "tickets") {
+      router.push("/dashboard/tickets");
+      return null;
+    }
+
+    if (currentSection === "purchases") {
+      router.push("/dashboard/purchases");
+      return null;
+    }
+
+    if (currentSection === "admin" && isAdmin) {
+      return (
+        <div className="grid gap-6 md:grid-cols-3">
+          <AdminCard
+            title="Eventos"
+            desc="Gestor de eventos."
+            onClick={() => router.push("/admin/events")}
+            button="Abrir gestor de eventos"
+          />
+          <AdminCard
+            title="Tickets de soporte"
+            desc="Ver y responder tickets."
+            onClick={() => router.push("/admin/soporte")}
+            button="Abrir consola de tickets"
+          />
+          <AdminCard
+            title="Usuarios"
+            desc="Administrar usuarios."
+            onClick={() => router.push("/admin/users")}
+            button="Ver usuarios"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
+        <h2 className="text-lg font-semibold text-slate-900">Sección</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          Esta sección está en construcción.
+        </p>
+      </div>
+    );
+  };
+
+  // Loading simple (para que no se vea “vacío”)
+  if (loadingUser || loadingProfile) {
+    return (
+      <main className="min-h-screen bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 py-10">
+          <div className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm">
+            <p className="text-sm text-slate-600">Cargando tu dashboard…</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-4 py-10">
+        {/* Header (sin botones duplicados, el Header global ya los tiene) */}
+        <div className="mb-8">
+          <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
+            Hola, {headerName} 👋
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Administra tu cuenta, tickets y wallet.
+          </p>
+
+          <button
+            onClick={() => router.push("/")}
+            className="mt-3 text-sm font-semibold text-blue-600 hover:text-blue-700"
+          >
+            ← Volver al inicio
+          </button>
+        </div>
+
+        {/* Layout */}
+        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-6">
+          {/* Sidebar */}
+          <aside className="w-full md:w-60 bg-white border border-slate-100 rounded-2xl p-3 shadow-sm">
+            <nav className="space-y-1">
+              {sidebarSections.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={() => {
+                    if (section.id === "tickets") return router.push("/dashboard/tickets");
+                    if (section.id === "support") return router.push("/dashboard/soporte");
+                    if (section.id === "purchases") return router.push("/dashboard/purchases");
+                    setCurrentSection(section.id);
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm ${
+                    currentSection === section.id
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {section.label}
+                </button>
+              ))}
+
+              {isAdmin && (
+                <button
+                  onClick={() => setCurrentSection("admin")}
+                  className={`w-full text-left px-3 py-2 rounded-xl text-sm ${
+                    currentSection === "admin"
+                      ? "bg-blue-600 text-white"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  Admin
+                </button>
+              )}
+            </nav>
+          </aside>
+
+          {/* Content */}
+          <section className="min-w-0">{renderSection()}</section>
+        </div>
+      </div>
+    </main>
+  );
+}
 
