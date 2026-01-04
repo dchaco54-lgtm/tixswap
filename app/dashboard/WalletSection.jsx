@@ -11,7 +11,7 @@ const ACCOUNT_TYPES = [
   "Cuenta digital (Mach/Tenpo/otro)",
 ];
 
-export default function WalletSection({ user }) {
+export default function WalletSection({ user: userProp = null }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -21,18 +21,8 @@ export default function WalletSection({ user }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const fullName = useMemo(() => {
-    return (
-      user?.user_metadata?.name ||
-      user?.user_metadata?.full_name ||
-      user?.user_metadata?.fullName ||
-      ""
-    );
-  }, [user]);
-
-  const rut = useMemo(() => {
-    return (user?.user_metadata?.rut || "").trim();
-  }, [user]);
+  const [authedUser, setAuthedUser] = useState(userProp);
+  const [profile, setProfile] = useState(null);
 
   const [form, setForm] = useState({
     bank_name: "",
@@ -44,6 +34,31 @@ export default function WalletSection({ user }) {
 
   const [savedView, setSavedView] = useState(null); // payout_accounts row
 
+  // Si el padre algún día pasa user, lo respetamos
+  useEffect(() => {
+    if (userProp?.id) setAuthedUser(userProp);
+  }, [userProp]);
+
+  const holderName = useMemo(() => {
+    const fromProfile = (profile?.full_name || "").trim();
+    if (fromProfile) return fromProfile;
+
+    const meta =
+      authedUser?.user_metadata?.name ||
+      authedUser?.user_metadata?.full_name ||
+      authedUser?.user_metadata?.fullName ||
+      "";
+
+    return String(meta || "").trim();
+  }, [profile?.full_name, authedUser]);
+
+  const holderRut = useMemo(() => {
+    const fromProfile = String(profile?.rut || "").trim();
+    if (fromProfile) return fromProfile;
+
+    return String(authedUser?.user_metadata?.rut || "").trim();
+  }, [profile?.rut, authedUser]);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -51,30 +66,62 @@ export default function WalletSection({ user }) {
       setSuccess("");
 
       try {
-        const { data, error } = await supabase
-          .from("payout_accounts")
-          .select("*")
-          .maybeSingle();
+        // 1) user
+        let u = authedUser;
 
-        if (error) {
-          console.warn(error);
+        if (!u) {
+          const { data } = await supabase.auth.getUser();
+          u = data?.user || null;
+          setAuthedUser(u);
+        }
+
+        if (!u) {
+          setError("Debes iniciar sesión.");
           setConfigured(false);
           setSavedView(null);
-        } else if (data) {
+          setEditing(false);
+          return;
+        }
+
+        // 2) profile (FUENTE REAL pa nombre/rut)
+        const { data: pData } = await supabase
+          .from("profiles")
+          .select("id, full_name, rut, email, phone, role")
+          .eq("id", u.id)
+          .maybeSingle();
+
+        setProfile(pData || null);
+
+        // 3) wallet
+        const { data: wData, error: wErr } = await supabase
+          .from("payout_accounts")
+          .select("*")
+          .eq("user_id", u.id)
+          .maybeSingle();
+
+        if (wErr) {
+          console.warn(wErr);
+          setConfigured(false);
+          setSavedView(null);
+          setEditing(true);
+          return;
+        }
+
+        if (wData) {
           setConfigured(true);
-          setSavedView(data);
+          setSavedView(wData);
           setForm({
-            bank_name: data.bank_name || "",
-            account_type: data.account_type || "Cuenta corriente",
-            account_number: data.account_number || "",
-            transfer_email: data.transfer_email || "",
-            transfer_phone: data.transfer_phone || "",
+            bank_name: wData.bank_name || "",
+            account_type: wData.account_type || "Cuenta corriente",
+            account_number: wData.account_number || "",
+            transfer_email: wData.transfer_email || "",
+            transfer_phone: wData.transfer_phone || "",
           });
           setEditing(false);
         } else {
           setConfigured(false);
           setSavedView(null);
-          setEditing(true); // si no hay wallet, entra en modo editar para crear
+          setEditing(true); // si no hay wallet, entra en modo editar
         }
       } finally {
         setLoading(false);
@@ -82,6 +129,7 @@ export default function WalletSection({ user }) {
     };
 
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setField = (k) => (e) => {
@@ -99,7 +147,6 @@ export default function WalletSection({ user }) {
   const handleCancelEdit = () => {
     setError("");
     setSuccess("");
-    // volver a lo guardado si existe
     if (savedView) {
       setForm({
         bank_name: savedView.bank_name || "",
@@ -116,12 +163,16 @@ export default function WalletSection({ user }) {
     setError("");
     setSuccess("");
 
-    if (!user) {
+    if (!authedUser?.id) {
       setError("Debes iniciar sesión.");
       return;
     }
-    if (!fullName || !rut) {
-      setError("Tu cuenta no tiene Nombre/RUT. Completa el RUT en tu perfil para configurar Wallet.");
+
+    // Importante: nombre/rut deben existir desde cuenta/perfil
+    if (!holderName || !holderRut) {
+      setError(
+        "No encontré tu Nombre/RUT en tu cuenta. Revisa 'Mis datos' (nombre y RUT) o solicita cambio por ticket."
+      );
       return;
     }
 
@@ -135,6 +186,7 @@ export default function WalletSection({ user }) {
 
       const { data: sess } = await supabase.auth.getSession();
       const token = sess?.session?.access_token;
+
       if (!token) {
         setError("Sesión expirada. Vuelve a iniciar sesión.");
         return;
@@ -157,7 +209,7 @@ export default function WalletSection({ user }) {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json?.error || "No se pudo guardar Wallet.");
+        setError(json?.error || json?.details || "No se pudo guardar Wallet.");
         return;
       }
 
@@ -229,12 +281,12 @@ export default function WalletSection({ user }) {
           )}
         </div>
 
-        {/* Bloque anti-estafa */}
+        {/* Bloque anti-estafa (nombre/rut desde cuenta) */}
         <div className="grid gap-4 md:grid-cols-2 mb-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Nombre titular</label>
             <input
-              value={fullName || ""}
+              value={holderName || ""}
               readOnly
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
               placeholder="(se toma desde tu cuenta)"
@@ -247,7 +299,7 @@ export default function WalletSection({ user }) {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">RUT titular</label>
             <input
-              value={rut || ""}
+              value={holderRut || ""}
               readOnly
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600"
               placeholder="(se toma desde tu cuenta)"
@@ -390,3 +442,4 @@ export default function WalletSection({ user }) {
     </div>
   );
 }
+
