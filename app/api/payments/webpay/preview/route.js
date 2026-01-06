@@ -1,56 +1,75 @@
-// app/api/payments/webpay/preview/route.js
-// Devuelve un resumen de compra (ticket + fees) para que el checkout renderice el detalle
-
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getFees } from "@/lib/fees";
 
-export async function GET(request) {
+// GET /api/payments/webpay/preview?ticketId=<uuid>
+// Resumen (precio + comisión + total) y disponibilidad de proveedores.
+export async function GET(req) {
   try {
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = new URL(req.url);
     const ticketId = searchParams.get("ticketId");
 
     if (!ticketId) {
-      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
+      return NextResponse.json({ error: "Falta ticketId" }, { status: 400 });
     }
 
-    const { data: ticket, error: ticketError } = await supabaseAdmin
+    const { data: ticket, error: tErr } = await supabaseAdmin
       .from("tickets")
-      .select("*")
+      .select("id, price, currency, seat, section, row, event_id, seller_id")
       .eq("id", ticketId)
       .single();
 
-    if (ticketError || !ticket) {
+    if (tErr || !ticket) {
       return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
     }
 
-    let event = null;
-    if (ticket.event_id) {
-      const { data: ev } = await supabaseAdmin
-        .from("events")
-        .select("*")
-        .eq("id", ticket.event_id)
-        .single();
-      event = ev ?? null;
+    const { data: event, error: eErr } = await supabaseAdmin
+      .from("events")
+      .select("id, name, venue, city, date")
+      .eq("id", ticket.event_id)
+      .single();
+
+    if (eErr || !event) {
+      return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
     }
 
-    const basePrice = Number(ticket.price || 0);
-    const fees = getFees(basePrice);
+    const fees = getFees(ticket.price);
+    const serviceFee = fees.buyerFee;
 
     const breakdown = {
-      basePrice,
-      buyerFee: fees.buyerFee,
-      total: fees.total,
-      buyerFeeRateApplied: fees.buyerFeeRateApplied,
-      platformFeeRateApplied: fees.platformFeeRateApplied,
+      price: Number(ticket.price || 0),
+      buyerFee: serviceFee,
+      total: Math.round(Number(ticket.price || 0) + serviceFee),
+      currency: ticket.currency || "CLP",
     };
 
-    return NextResponse.json({ ticket, event, fees, breakdown });
-  } catch (e) {
+    // Flags de disponibilidad (para no dejar al usuario pegado si faltan creds)
+    const webpayEnv = (process.env.WEBPAY_ENV || "integration").toLowerCase();
+    const webpayEnabled =
+      webpayEnv !== "production" ||
+      (!!process.env.WEBPAY_COMMERCE_CODE && !!process.env.WEBPAY_API_KEY);
+
+    const banchileEnabled = !!process.env.BANCHILE_LOGIN && !!process.env.BANCHILE_SECRET_KEY;
+
+    return NextResponse.json({
+      ticket,
+      event,
+      fees,
+      serviceFee, // alias
+      buyerFee: breakdown.buyerFee, // lo que el front espera
+      total: breakdown.total, // lo que el front espera
+      breakdown,
+      providers: {
+        webpay: { enabled: webpayEnabled, env: webpayEnv },
+        banchile: { enabled: banchileEnabled, env: (process.env.BANCHILE_ENV || "test").toLowerCase() },
+        mercadoPago: { enabled: false },
+      },
+    });
+  } catch (err) {
+    console.error("webpay/preview error:", err);
     return NextResponse.json(
-      { error: "Error al obtener resumen", details: e?.message },
+      { error: err?.message || "Error obteniendo resumen" },
       { status: 500 }
     );
   }
 }
-
