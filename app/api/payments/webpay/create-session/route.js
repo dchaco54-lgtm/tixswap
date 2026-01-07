@@ -71,7 +71,7 @@ export async function POST(req) {
         payment_method: "webpay",
         payment_state: "pending",
         amount_clp: price,
-        fees_clp: Number(fees.fee) || 0,
+        fees_clp: Number(fees.buyerFee) || 0,
         total_amount: total,
         total_clp: total,
       })
