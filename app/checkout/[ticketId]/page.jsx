@@ -1,90 +1,87 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-function redirectPost(url, fields = {}) {
-  // Webpay (Transbank) espera token_ws vía POST (form submit).
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = url;
-
-  Object.entries(fields).forEach(([k, v]) => {
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = k;
-    input.value = String(v ?? "");
-    form.appendChild(input);
+function clp(n) {
+  const val = Number(n || 0);
+  return val.toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
   });
-
-  document.body.appendChild(form);
-  form.submit();
 }
 
-export default function CheckoutPage() {
-  const { ticketId } = useParams();
-  const router = useRouter();
+export default function CheckoutPage({ params }) {
+  const ticketId = params?.ticketId;
 
-  const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState("");
+  const [preview, setPreview] = useState(null);
 
-  const webpayEnabled = useMemo(
-    () => (preview?.providers?.webpay?.enabled ?? true),
-    [preview]
-  );
-
-  const banchileEnabled = useMemo(
-    () => (preview?.providers?.banchile?.enabled ?? false),
-    [preview]
-  );
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function load() {
-      setLoading(true);
-      setError("");
-
-      try {
-        const res = await fetch(`/api/payments/webpay/preview?ticketId=${ticketId}`);
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data?.error || "Error al obtener resumen");
-        }
-        const data = await res.json();
-        if (mounted) setPreview(data);
-      } catch (e) {
-        if (mounted) setError(e.message || "Error al obtener resumen");
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-
-    if (ticketId) load();
-    return () => {
-      mounted = false;
+  const totals = useMemo(() => {
+    if (!preview) return null;
+    return {
+      ticketPrice: preview?.pricing?.ticketPrice ?? preview?.ticket?.price ?? 0,
+      serviceFee: preview?.pricing?.serviceFee ?? 0,
+      total: preview?.pricing?.total ?? 0,
     };
-  }, [ticketId]);
+  }, [preview]);
 
   async function getAccessToken() {
     const { data } = await supabase.auth.getSession();
     return data?.session?.access_token || null;
   }
 
-  async function payWithWebpay() {
+  async function loadPreview() {
+    setLoading(true);
     setError("");
-    if (!webpayEnabled) {
-      setError("Webpay está en activación (faltan credenciales en producción).");
-      return;
-    }
 
-    setPaying(true);
     try {
       const token = await getAccessToken();
-      if (!token) throw new Error("Debes iniciar sesión para pagar.");
+      if (!token) {
+        setError("Debes iniciar sesión para continuar.");
+        setPreview(null);
+        return;
+      }
+
+      const res = await fetch(`/api/checkout/preview?ticketId=${ticketId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json?.error || "Error al obtener resumen");
+        setPreview(null);
+        return;
+      }
+
+      setPreview(json);
+    } catch (e) {
+      setError(e?.message || "Error inesperado al cargar el checkout");
+      setPreview(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!ticketId) return;
+    loadPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId]);
+
+  async function startWebpay() {
+    setPaying(true);
+    setError("");
+
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setError("Debes iniciar sesión para pagar.");
+        return;
+      }
 
       const res = await fetch("/api/payments/webpay/create-session", {
         method: "POST",
@@ -95,28 +92,31 @@ export default function CheckoutPage() {
         body: JSON.stringify({ ticketId }),
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "No se pudo iniciar Webpay");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(json?.error || "No se pudo iniciar Webpay");
+        return;
+      }
 
-      // ✅ Webpay debe recibir token_ws por POST
-      redirectPost(data.url, { token_ws: data.token });
+      const redirect = `${json.url}?token_ws=${json.token}`;
+      window.location.href = redirect;
     } catch (e) {
-      setError(e.message || "Error iniciando Webpay");
+      setError(e?.message || "Error inesperado iniciando Webpay");
+    } finally {
       setPaying(false);
     }
   }
 
-  async function payWithBancoChile() {
-    setError("");
-    if (!banchileEnabled) {
-      setError("Banco de Chile está en activación (faltan credenciales API).");
-      return;
-    }
-
+  async function startBanchile() {
     setPaying(true);
+    setError("");
+
     try {
       const token = await getAccessToken();
-      if (!token) throw new Error("Debes iniciar sesión para pagar.");
+      if (!token) {
+        setError("Debes iniciar sesión para pagar.");
+        return;
+      }
 
       const res = await fetch("/api/payments/banchile/create-session", {
         method: "POST",
@@ -127,108 +127,134 @@ export default function CheckoutPage() {
         body: JSON.stringify({ ticketId }),
       });
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "No se pudo iniciar Banco de Chile");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(
+          json?.error ||
+            "No se pudo iniciar Banco de Chile (posible falta de credenciales)",
+        );
+        return;
+      }
 
-      // Banco de Chile típicamente redirige por URL normal
-      window.location.href = data.processUrl;
+      if (!json?.processUrl) {
+        setError("Banco de Chile no devolvió URL de pago.");
+        return;
+      }
+
+      window.location.href = json.processUrl;
     } catch (e) {
-      setError(e.message || "Error iniciando Banco de Chile");
+      setError(e?.message || "Error inesperado iniciando Banco de Chile");
+    } finally {
       setPaying(false);
     }
   }
 
   return (
-    <div className="min-h-[70vh] flex items-start justify-center bg-[#f7f8fb]">
-      <div className="w-full max-w-3xl px-4 py-10">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Checkout</h1>
-            <p className="text-gray-600 mt-1">
-              Revisa el resumen y elige tu medio de pago.
-            </p>
+    <div className="max-w-3xl mx-auto px-4 py-10">
+      <div className="flex items-start justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-3xl font-bold">Checkout</h1>
+          <p className="text-gray-600 mt-1">
+            Revisa el resumen y elige tu medio de pago.
+          </p>
+        </div>
+        <button
+          className="text-blue-600 hover:underline"
+          onClick={() => window.history.back()}
+        >
+          Volver
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-6 border border-red-200 bg-red-50 text-red-700 rounded-xl p-4">
+          {error}
+        </div>
+      )}
+
+      <div className="border rounded-2xl p-6 bg-white shadow-sm">
+        {loading ? (
+          <div className="text-gray-600">Cargando resumen del pago...</div>
+        ) : !preview ? (
+          <div className="text-gray-600">
+            No se pudo cargar el resumen. Intenta nuevamente.
           </div>
-
-          <button
-            className="text-blue-600 hover:underline mt-2"
-            onClick={() => router.back()}
-          >
-            Volver
-          </button>
-        </div>
-
-        <div className="mt-6 bg-white rounded-2xl shadow-sm border p-6">
-          {loading ? (
-            <div className="text-gray-600">Cargando resumen del pago...</div>
-          ) : error ? (
-            <div className="text-red-600 font-medium">{error}</div>
-          ) : (
-            <>
-              <div className="grid gap-2">
-                <div className="text-lg font-semibold text-gray-900">
-                  {preview?.event?.name || "Evento"}
-                </div>
-                <div className="text-gray-600">
-                  {preview?.event?.city ? `${preview.event.city} · ` : ""}
-                  {preview?.event?.venue || ""}
-                </div>
+        ) : (
+          <>
+            <div className="mb-5">
+              <div className="text-sm text-gray-500">Evento</div>
+              <div className="text-lg font-semibold">
+                {preview?.ticket?.event?.name || "Evento"}
               </div>
-
-              <div className="mt-6 border-t pt-5 grid gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-700">Entrada</span>
-                  <span className="font-medium">
-                    ${Number(preview?.ticket?.price || 0).toLocaleString("es-CL")}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-700">Comisión TixSwap</span>
-                  <span className="font-medium">
-                    ${Number(preview?.buyerFee || 0).toLocaleString("es-CL")}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between border-t pt-3">
-                  <span className="text-gray-900 font-semibold">Total</span>
-                  <span className="text-gray-900 font-bold text-lg">
-                    ${Number(preview?.total || 0).toLocaleString("es-CL")}
-                  </span>
-                </div>
+              <div className="text-gray-600">
+                {(preview?.ticket?.event?.city || "Santiago") +
+                  (preview?.ticket?.event?.venue
+                    ? ` · ${preview.ticket.event.venue}`
+                    : "")}
               </div>
+            </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <div className="border-t pt-4 space-y-2">
+              <div className="flex justify-between">
+                <span className="text-gray-700">Entrada</span>
+                <span className="font-medium">{clp(totals.ticketPrice)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-700">Comisión TixSwap</span>
+                <span className="font-medium">{clp(totals.serviceFee)}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t">
+                <span className="text-gray-900 font-semibold">Total</span>
+                <span className="text-gray-900 font-semibold">
+                  {clp(totals.total)}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-7">
+              <div className="text-sm text-gray-500 mb-3">Medio de pago</div>
+
+              <div className="grid md:grid-cols-3 gap-3">
                 <button
-                  className={`rounded-xl px-4 py-3 font-semibold transition ${
-                    webpayEnabled && !paying
-                      ? "bg-blue-600 text-white hover:bg-blue-700"
-                      : "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  }`}
-                  onClick={payWithWebpay}
-                  disabled={!webpayEnabled || paying}
+                  onClick={startWebpay}
+                  disabled={paying}
+                  className="rounded-xl border p-4 text-left hover:shadow-sm transition disabled:opacity-60"
                 >
-                  {webpayEnabled ? "Pagar con Webpay" : "Webpay (en activación)"}
+                  <div className="font-semibold">Webpay</div>
+                  <div className="text-sm text-gray-600">
+                    Tarjeta débito/crédito
+                  </div>
                 </button>
 
                 <button
-                  className={`rounded-xl px-4 py-3 font-semibold transition ${
-                    banchileEnabled && !paying
-                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                      : "bg-gray-200 text-gray-500 cursor-not-allowed"
-                  }`}
-                  onClick={payWithBancoChile}
-                  disabled={!banchileEnabled || paying}
+                  onClick={startBanchile}
+                  disabled={paying}
+                  className="rounded-xl border p-4 text-left hover:shadow-sm transition disabled:opacity-60"
                 >
-                  {banchileEnabled ? "Pagar con Banco de Chile" : "Banco de Chile (en activación)"}
+                  <div className="font-semibold">Banco de Chile</div>
+                  <div className="text-sm text-gray-600">
+                    Pago con Banchile/Chile
+                  </div>
+                </button>
+
+                <button
+                  disabled
+                  className="rounded-xl border p-4 text-left opacity-60 cursor-not-allowed"
+                  title="Pronto"
+                >
+                  <div className="font-semibold">Mercado Pago</div>
+                  <div className="text-sm text-gray-600">Pronto</div>
                 </button>
               </div>
 
-              <div className="mt-4 text-xs text-gray-500">
-                Mercado Pago: pronto.
-              </div>
-            </>
-          )}
-        </div>
+              {paying && (
+                <div className="mt-4 text-gray-600">
+                  Iniciando pago... no cierres esta ventana.
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
