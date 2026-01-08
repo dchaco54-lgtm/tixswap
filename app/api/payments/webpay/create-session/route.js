@@ -1,130 +1,77 @@
-// app/api/payments/webpay/create-session/route.js
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getFees } from "@/lib/fees";
-import { getWebpayTransaction } from "@/lib/webpay";
+import { cookies } from "next/headers";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { getFees, getFeeRatesForRole } from "@/lib/fees";
 
-export const runtime = "nodejs";
-
-function json(status, body) {
-  return NextResponse.json(body, { status });
+function parseCLP(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value == null) return 0;
+  const digits = String(value).replace(/[^0-9]/g, "");
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : 0;
 }
 
-function getBearer(req) {
-  const h = req.headers.get("authorization") || "";
-  if (!h.toLowerCase().startsWith("bearer ")) return null;
-  return h.slice(7).trim();
+function pickFirst(...vals) {
+  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
+  return null;
 }
 
-function safeHost() {
-  return (
-    process.env.SITE_URL ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    "https://tixswap.cl"
-  ).replace(/\/$/, "");
-}
-
-function buildBuyOrder(orderId) {
-  const compact = String(orderId).replace(/-/g, "");
-  return `TSW-${compact.slice(0, 20)}`; // <= 26 chars aprox
+function isBuyableStatus(status) {
+  const s = String(status || "").toLowerCase().trim();
+  if (!s) return true;
+  return ["available", "published", "active", "listed"].includes(s);
 }
 
 export async function POST(req) {
   try {
-    const token = getBearer(req);
-    if (!token) return json(401, { error: "No autorizado" });
-
     const body = await req.json().catch(() => ({}));
     const ticketId = body?.ticketId;
-    if (!ticketId) return json(400, { error: "Falta ticketId" });
+    const returnUrl = body?.returnUrl;
 
-    const admin = supabaseAdmin();
-    const { data: userRes, error: userErr } = await admin.auth.getUser(token);
-    const userId = userRes?.user?.id;
-    if (userErr || !userId) return json(401, { error: "Sesión inválida" });
+    if (!ticketId) return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
 
-    const { data: ticket, error: tErr } = await admin
+    const supabase = createRouteHandlerClient({ cookies });
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+
+    const { data: buyerProfile } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const { buyerRate } = getFeeRatesForRole(buyerProfile?.role);
+
+    const { data: ticket } = await supabase
       .from("tickets")
-      .select("id, price, status, event_id, seller_id")
+      .select("*")
       .eq("id", ticketId)
-      .single();
+      .maybeSingle();
 
-    if (tErr || !ticket) return json(404, { error: "Ticket no encontrado" });
-    if (String(ticket.status).toLowerCase() !== "active") {
-      return json(409, { error: "Este ticket no está disponible." });
-    }
+    if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    if (!isBuyableStatus(ticket.status))
+      return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
 
-    const price = Number(ticket.price) || 0;
-    const fees = getFees(price);
-    const total = Number(fees.total) || price;
+    const priceRaw = pickFirst(ticket.price, ticket.value, ticket.amount, ticket.price_clp);
+    const ticketPrice = parseCLP(priceRaw);
+    const fees = getFees(ticketPrice, { buyerRate, buyerMin: 0 });
 
-    // Crear orden
-    const { data: inserted, error: insErr } = await admin
-      .from("orders")
-      .insert({
-        ticket_id: ticketId,
-        buyer_id: userId,
-        seller_id: ticket.seller_id || null,
-        event_id: ticket.event_id || null,
-        status: "pending",
-        payment_provider: "webpay",
-        payment_method: "webpay",
-        payment_state: "pending",
-        amount_clp: price,
-        fees_clp: Number(fees.buyerFee) || 0,
-        total_amount: total,
-        total_clp: total,
-      })
-      .select("id")
-      .single();
+    // ✅ Aquí va la integración REAL con Transbank cuando tengas credenciales.
+    // Por ahora: flujo SIMULADO (para que no se quede pegado / no rompa UX).
+    const origin = new URL(req.url).origin;
+    const finalReturnUrl = returnUrl || `${origin}/checkout/${ticketId}`;
 
-    if (insErr || !inserted?.id) {
-      return json(500, { error: "No se pudo crear la orden" });
-    }
+    const token = `sim_webpay_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const processUrl = `${origin}/pago-simulado/webpay?ticketId=${encodeURIComponent(
+      ticketId
+    )}&amount=${encodeURIComponent(fees.total)}&returnUrl=${encodeURIComponent(
+      finalReturnUrl
+    )}&token=${encodeURIComponent(token)}`;
 
-    const orderId = inserted.id;
-
-    // Reservar ticket en held
-    const { data: heldRows } = await admin
-      .from("tickets")
-      .update({ status: "held" })
-      .eq("id", ticketId)
-      .eq("status", "active")
-      .select("id");
-
-    if (!heldRows || heldRows.length === 0) {
-      return json(409, { error: "Este ticket fue tomado por otra persona." });
-    }
-
-    const host = safeHost();
-    const returnUrl = `${host}/api/payments/webpay/return`;
-    const buyOrder = buildBuyOrder(orderId);
-    const sessionId = orderId;
-
-    const tx = getWebpayTransaction();
-
-    // create() devuelve url + token
-    const createRes = await tx.create(buyOrder, sessionId, total, returnUrl);
-
-    const url = createRes?.url;
-    const webpayToken = createRes?.token;
-
-    if (!url || !webpayToken) {
-      return json(500, { error: "Webpay no devolvió url/token" });
-    }
-
-    await admin
-      .from("orders")
-      .update({
-        buy_order: buyOrder,
-        session_id: sessionId,
-        webpay_token: webpayToken,
-      })
-      .eq("id", orderId);
-
-    return json(200, { url, token: webpayToken, orderId });
+    return NextResponse.json({ token, processUrl, amount: fees.total });
   } catch (e) {
-    console.error(e);
-    return json(500, { error: "Error interno creando pago" });
+    return NextResponse.json({ error: "Error creando sesión Webpay" }, { status: 500 });
   }
 }
+
