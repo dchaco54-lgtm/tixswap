@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { getFees, getFeeRatesForRole } from "@/lib/fees";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 function parseCLP(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -28,23 +29,16 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const ticketId = searchParams.get("ticketId");
-
-    if (!ticketId) {
-      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
-    }
+    if (!ticketId) return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
 
     const supabase = createRouteHandlerClient({ cookies });
+    const admin = supabaseAdmin();
 
-    const {
-      data: { user },
-      error: authErr,
-    } = await supabase.auth.getUser();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    if (authErr || !user) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
-
-    const { data: buyerProfile } = await supabase
+    // Leemos con Service Role (evita bloqueos RLS)
+    const { data: buyerProfile } = await admin
       .from("profiles")
       .select("id, role")
       .eq("id", user.id)
@@ -52,7 +46,7 @@ export async function GET(req) {
 
     const { buyerRate } = getFeeRatesForRole(buyerProfile?.role);
 
-    const { data: ticket, error: tErr } = await supabase
+    const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("*")
       .eq("id", ticketId)
@@ -60,23 +54,18 @@ export async function GET(req) {
 
     if (tErr) return NextResponse.json({ error: "Error leyendo ticket" }, { status: 500 });
     if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    if (!isBuyableStatus(ticket.status))
-      return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
+    if (!isBuyableStatus(ticket.status)) return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
 
     let event = null;
     if (ticket.event_id) {
-      const { data: ev } = await supabase
-        .from("events")
-        .select("*")
-        .eq("id", ticket.event_id)
-        .maybeSingle();
+      const { data: ev } = await admin.from("events").select("*").eq("id", ticket.event_id).maybeSingle();
       event = ev || null;
     }
 
     const sellerId = pickFirst(ticket.seller_id, ticket.owner_id, ticket.user_id);
     let seller = null;
     if (sellerId) {
-      const { data: s } = await supabase
+      const { data: s } = await admin
         .from("profiles")
         .select("id, full_name, email, rating_avg, rating_count")
         .eq("id", sellerId)
@@ -118,7 +107,8 @@ export async function GET(req) {
           }
         : null,
     });
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: "Error al obtener resumen" }, { status: 500 });
   }
 }
+
