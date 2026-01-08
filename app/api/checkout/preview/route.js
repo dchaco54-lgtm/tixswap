@@ -1,95 +1,124 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getFees } from "@/lib/fees";
+import { cookies } from "next/headers";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { getFees, getFeeRatesForRole } from "@/lib/fees";
 
 function parseCLP(value) {
-  if (value === null || value === undefined) return 0;
-  if (typeof value === "number") return Math.round(value);
-  const normalized = String(value).replace(/[^\d]/g, "");
-  const n = parseInt(normalized || "0", 10);
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value == null) return 0;
+  const digits = String(value).replace(/[^0-9]/g, "");
+  const n = Number(digits);
   return Number.isFinite(n) ? n : 0;
 }
 
-function sellerDisplayName(fullName, fallback = "Vendedor") {
-  if (!fullName) return fallback;
-  const parts = String(fullName).trim().split(/\s+/);
-  if (parts.length === 1) return parts[0];
-  return `${parts[0]} ${parts[1].slice(0, 1)}.`;
+function pickFirst(...vals) {
+  for (const v of vals) {
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return null;
+}
+
+function isBuyableStatus(status) {
+  const s = String(status || "").toLowerCase().trim();
+  if (!s) return true;
+  return ["available", "published", "active", "listed"].includes(s);
 }
 
 export async function GET(req) {
   try {
-    const url = new URL(req.url);
-    const ticketId = url.searchParams.get("ticketId") || url.searchParams.get("ticket");
+    const { searchParams } = new URL(req.url);
+    const ticketId = searchParams.get("ticketId");
 
     if (!ticketId) {
-      return NextResponse.json({ error: "Falta ticketId" }, { status: 400 });
+      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
     }
 
-    const admin = supabaseAdmin();
+    const supabase = createRouteHandlerClient({ cookies });
 
-    const { data: ticket, error: tErr } = await admin
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabase.auth.getUser();
+
+    if (authErr || !user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    const { data: buyerProfile } = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const { buyerRate } = getFeeRatesForRole(buyerProfile?.role);
+
+    const { data: ticket, error: tErr } = await supabase
       .from("tickets")
-      .select("id, event_id, seller_id, price, sector, row, seat, status")
+      .select("*")
       .eq("id", ticketId)
       .maybeSingle();
 
-    if (tErr) {
-      return NextResponse.json({ error: "Error leyendo ticket", details: tErr.message }, { status: 500 });
-    }
-    if (!ticket) {
-      return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    }
-
-    const status = String(ticket.status || "active").toLowerCase().trim();
-    if (status !== "active") {
+    if (tErr) return NextResponse.json({ error: "Error leyendo ticket" }, { status: 500 });
+    if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    if (!isBuyableStatus(ticket.status))
       return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
-    }
 
-    const { data: event, error: eErr } = await admin
-      .from("events")
-      .select("id, title, city, venue")
-      .eq("id", ticket.event_id)
-      .maybeSingle();
-
-    if (eErr) {
-      return NextResponse.json({ error: "Error leyendo evento", details: eErr.message }, { status: 500 });
-    }
-    if (!event) {
-      return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
-    }
-
-    let seller = null;
-    if (ticket.seller_id) {
-      const { data: prof } = await admin
-        .from("profiles")
-        .select("id, full_name")
-        .eq("id", ticket.seller_id)
+    let event = null;
+    if (ticket.event_id) {
+      const { data: ev } = await supabase
+        .from("events")
+        .select("*")
+        .eq("id", ticket.event_id)
         .maybeSingle();
-
-      if (prof) {
-        seller = {
-          id: prof.id,
-          full_name: prof.full_name,
-          displayName: sellerDisplayName(prof.full_name),
-        };
-      }
+      event = ev || null;
     }
 
-    const ticketPrice = parseCLP(ticket.price);
-    const fees = getFees(ticketPrice);
+    const sellerId = pickFirst(ticket.seller_id, ticket.owner_id, ticket.user_id);
+    let seller = null;
+    if (sellerId) {
+      const { data: s } = await supabase
+        .from("profiles")
+        .select("id, full_name, email, rating_avg, rating_count")
+        .eq("id", sellerId)
+        .maybeSingle();
+      seller = s || null;
+    }
+
+    const priceRaw = pickFirst(ticket.price, ticket.value, ticket.amount, ticket.price_clp);
+    const ticketPrice = parseCLP(priceRaw);
+    const fees = getFees(ticketPrice, { buyerRate, buyerMin: 0 });
 
     return NextResponse.json({
-      ticket,
-      event,
-      seller,
+      ticketId,
+      feeRate: buyerRate,
       ticketPrice,
       serviceFee: fees.buyerFee,
       total: fees.total,
-      commissionPct: fees.buyerRate,
+      ticket: {
+        id: ticket.id,
+        sector: pickFirst(ticket.sector, ticket.section, ticket.zone),
+        row: pickFirst(ticket.row),
+        seat: pickFirst(ticket.seat),
+      },
+      event: event
+        ? {
+            id: event.id,
+            title: pickFirst(event.title, event.name),
+            city: pickFirst(event.city),
+            venue: pickFirst(event.venue),
+            date: pickFirst(event.date),
+          }
+        : null,
+      seller: seller
+        ? {
+            id: seller.id,
+            full_name: pickFirst(seller.full_name, seller.email),
+            rating_avg: seller.rating_avg,
+            rating_count: seller.rating_count,
+          }
+        : null,
     });
   } catch (e) {
-    console.error("checkout/preview error:", e);
-    return NextResponse.json({ error: e?.message || "Error interno." }, { status: 500 });
+    return NextResponse.json({ error: "Error al obtener resumen" }, { status: 500 });
   }
 }
