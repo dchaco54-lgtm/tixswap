@@ -29,16 +29,27 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const ticketId = searchParams.get("ticketId");
-    if (!ticketId) return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
 
+    if (!ticketId) {
+      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
+    }
+
+    // Cliente normal solo para validar sesión del usuario
     const supabase = createRouteHandlerClient({ cookies });
+
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabase.auth.getUser();
+
+    if (authErr || !user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    }
+
+    // 👇 ESTE ES EL FIX REAL: supabaseAdmin es una FUNCIÓN => hay que ejecutarla
     const admin = supabaseAdmin();
 
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
-    if (authErr || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-
-    // Leemos con Service Role (evita bloqueos RLS)
-    const { data: buyerProfile } = await admin
+    const { data: buyerProfile } = await supabase
       .from("profiles")
       .select("id, role")
       .eq("id", user.id)
@@ -46,6 +57,7 @@ export async function GET(req) {
 
     const { buyerRate } = getFeeRatesForRole(buyerProfile?.role);
 
+    // Ticket se lee SIEMPRE con service-role (evita RLS y errores)
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("*")
@@ -54,16 +66,23 @@ export async function GET(req) {
 
     if (tErr) return NextResponse.json({ error: "Error leyendo ticket" }, { status: 500 });
     if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    if (!isBuyableStatus(ticket.status)) return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
+
+    if (!isBuyableStatus(ticket.status))
+      return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
 
     let event = null;
     if (ticket.event_id) {
-      const { data: ev } = await admin.from("events").select("*").eq("id", ticket.event_id).maybeSingle();
+      const { data: ev } = await admin
+        .from("events")
+        .select("*")
+        .eq("id", ticket.event_id)
+        .maybeSingle();
       event = ev || null;
     }
 
     const sellerId = pickFirst(ticket.seller_id, ticket.owner_id, ticket.user_id);
     let seller = null;
+
     if (sellerId) {
       const { data: s } = await admin
         .from("profiles")
@@ -107,8 +126,9 @@ export async function GET(req) {
           }
         : null,
     });
-  } catch {
+  } catch (e) {
     return NextResponse.json({ error: "Error al obtener resumen" }, { status: 500 });
   }
 }
+
 
