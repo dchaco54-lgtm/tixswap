@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { getFees, getFeeRatesForRole } from "@/lib/fees";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 function parseCLP(value) {
@@ -46,26 +45,22 @@ export async function GET(req) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    // 👇 ESTE ES EL FIX REAL: supabaseAdmin es una FUNCIÓN => hay que ejecutarla
+    // supabaseAdmin es FUNCIÓN => hay que ejecutarla
     const admin = supabaseAdmin();
 
-    const { data: buyerProfile } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("id", user.id)
-      .maybeSingle();
+    // Comisión fija TixSwap (comprador): 2.5%
+    const buyerRate = 0.025;
 
-    const { buyerRate } = getFeeRatesForRole(buyerProfile?.role);
-
-    // Ticket se lee SIEMPRE con service-role (evita RLS y errores)
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("*")
       .eq("id", ticketId)
       .maybeSingle();
 
-    if (tErr) return NextResponse.json({ error: "Error leyendo ticket" }, { status: 500 });
-    if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    if (tErr)
+      return NextResponse.json({ error: "Error leyendo ticket" }, { status: 500 });
+    if (!ticket)
+      return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
 
     if (!isBuyableStatus(ticket.status))
       return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
@@ -94,16 +89,18 @@ export async function GET(req) {
 
     const priceRaw = pickFirst(ticket.price, ticket.value, ticket.amount, ticket.price_clp);
     const ticketPrice = parseCLP(priceRaw);
-    const fees = getFees(ticketPrice, { buyerRate, buyerMin: 0 });
+    const serviceFee = Math.round(ticketPrice * buyerRate);
+    const total = ticketPrice + serviceFee;
 
     return NextResponse.json({
       ticketId,
       feeRate: buyerRate,
       ticketPrice,
-      serviceFee: fees.buyerFee,
-      total: fees.total,
+      serviceFee,
+      total,
       ticket: {
         id: ticket.id,
+        location: pickFirst(ticket.location, ticket.ubication, ticket.ubicacion),
         sector: pickFirst(ticket.sector, ticket.section, ticket.zone),
         row: pickFirst(ticket.row),
         seat: pickFirst(ticket.seat),
@@ -130,5 +127,3 @@ export async function GET(req) {
     return NextResponse.json({ error: "Error al obtener resumen" }, { status: 500 });
   }
 }
-
-
