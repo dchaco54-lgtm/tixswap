@@ -1,91 +1,87 @@
-import TicketCard from "@/components/ticketCard";
+// app/events/[id]/page.jsx
 import Link from "next/link";
-import { cookies } from "next/headers";
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
-import { supabaseReadServer } from "@/lib/supabaseReadServer";
-import { supabaseServiceOptional } from "@/lib/supabaseServiceOptional";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { formatCLP } from "@/lib/format";
 import SellerReputation from "./sellerReputation";
 
-function shortName(fullName) {
-  if (!fullName) return "Vendedor";
-  const parts = String(fullName).trim().split(/\s+/);
-  if (parts.length === 1) return parts[0];
-  return `${parts[0]} ${parts[1][0]}.`;
-}
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function isAvailableStatus(status) {
-  // Si no hay columna status, lo consideramos "disponible" (compatibilidad)
-  if (!status) return true;
-  const s = String(status).toLowerCase();
-  return s === "active" || s === "available" || s === "published" || s === "listed";
+  const s = String(status || "").toLowerCase();
+  return s === "" || s === "active" || s === "available" || s === "published";
 }
 
-async function fetchEvent(supabase, eventId) {
-  const { data, error } = await supabase.from("events").select("*").eq("id", eventId).single();
-  return { data, error };
-}
-
-async function fetchTickets(supabase, eventId) {
-  // Intentamos con un select estándar (sin columnas opcionales que rompen)
-  const { data, error } = await supabase
+async function fetchTickets(admin, eventId) {
+  // Intento 1: con ubicación + seller
+  let res = await admin
     .from("tickets")
-    .select("id,event_id,price,section,row,seat,status,seller_id,created_at")
-    .eq("event_id", eventId)
-    .order("created_at", { ascending: false });
+    .select("id,event_id,price,status,notes,sector,row,seat,created_at,seller_id")
+    .eq("event_id", eventId);
 
-  return { data: data || [], error };
+  if (!res.error) return res;
+
+  // Fallback 1: mínimo con seller_id (para no caerse por columnas de ubicación)
+  res = await admin
+    .from("tickets")
+    .select("id,event_id,price,status,created_at,seller_id")
+    .eq("event_id", eventId);
+
+  if (!res.error) return res;
+
+  // Fallback 2: ultra mínimo
+  return admin
+    .from("tickets")
+    .select("id,event_id,price,status,created_at")
+    .eq("event_id", eventId);
+}
+
+function shortName(fullName) {
+  const raw = String(fullName || "").trim();
+  if (!raw) return "—";
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const first = parts[0] || raw;
+  const last = parts.length >= 2 ? parts[parts.length - 1] : "";
+  const lastInitial = last ? `${last[0].toUpperCase()}.` : "";
+  return lastInitial ? `${first} ${lastInitial}` : first;
 }
 
 export default async function EventPage({ params }) {
+  const admin = supabaseAdmin();
   const { id } = params;
 
-  // Clients: service role (si existe), auth cookies, anon
-  const cookieStore = cookies();
-  const supabaseAuth = createServerComponentClient({ cookies: () => cookieStore });
-  const supabaseService = supabaseServiceOptional();
-  const supabaseAnon = supabaseReadServer();
-  const readClients = [supabaseService, supabaseAuth, supabaseAnon].filter(Boolean);
+  const { data: event, error: eventErr } = await admin
+    .from("events")
+    .select("*")
+    .eq("id", id)
+    .single();
 
-  const profileClient = supabaseService || supabaseAuth;
-
-  // Helper: query against multiple clients until it returns data
-  const tryQuery = async (fn) => {
-    let lastErr = null;
-    for (const client of readClients) {
-      const { data, error } = await fn(client);
-      if (!error && data) return { data, error: null };
-      lastErr = error;
-    }
-    return { data: null, error: lastErr };
-  };
-
-  // Fetch event (smart)
-  const { data: event, error: eventErr } = await tryQuery((client) => fetchEvent(client, id));
-
-  // Fetch tickets (smart: prefer first non-empty)
-  let ticketsRaw = [];
-  let ticketsErr = null;
-  for (const client of readClients) {
-    const { data, error } = await fetchTickets(client, id);
-    if (error) {
-      ticketsErr = error;
-      continue;
-    }
-    ticketsRaw = data || [];
-    ticketsErr = null;
-    if ((data || []).length > 0) break;
+  if (eventErr || !event) {
+    return (
+      <div className="max-w-5xl mx-auto p-6">
+        <Link className="text-blue-600 underline" href="/events">
+          ← Volver a eventos
+        </Link>
+        <div className="mt-6 p-4 rounded-md bg-red-50 border border-red-200 text-red-700">
+          Evento no encontrado.
+        </div>
+      </div>
+    );
   }
+
+  const { data: ticketsRaw, error: ticketsErr } = await fetchTickets(admin, id);
 
   const tickets = (ticketsRaw || []).filter((t) => isAvailableStatus(t.status));
 
-  // Best-effort: resolve seller names
-  const sellerIds = Array.from(new Set((tickets || []).map((t) => t?.seller_id).filter(Boolean)));
-  const sellerNameById = new Map();
+  // Resolver nombres de vendedores (best-effort)
+  const sellerIds = Array.from(
+    new Set((tickets || []).map((t) => t?.seller_id).filter(Boolean))
+  );
 
+  const sellerNameById = new Map();
   if (sellerIds.length > 0) {
     try {
-      const { data: sellers, error: sellersErr } = await profileClient
+      const { data: sellers, error: sellersErr } = await admin
         .from("profiles")
         .select("id, full_name")
         .in("id", sellerIds)
@@ -101,19 +97,6 @@ export default async function EventPage({ params }) {
     }
   }
 
-  if (eventErr || !event) {
-    return (
-      <div className="max-w-5xl mx-auto p-6">
-        <Link className="text-blue-600 underline" href="/events">
-          ← Volver a eventos
-        </Link>
-        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
-          Error cargando evento.
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-5xl mx-auto p-6">
       <Link className="text-blue-600 underline" href="/events">
@@ -122,46 +105,72 @@ export default async function EventPage({ params }) {
 
       <div className="mt-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">{event?.name || "Evento"}</h1>
-          <p className="text-slate-600">
-            {(event?.city || "Chile") + (event?.venue ? ` · ${event.venue}` : "")}
+          <h1 className="text-3xl font-bold">{event.title}</h1>
+          <p className="text-gray-600">
+            {event.city} · {event.venue}
           </p>
         </div>
 
         <Link
-          href="/tickets/publish"
-          className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700"
+          href={`/tickets/publish?eventId=${event.id}`}
+          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md"
         >
           Publicar entrada
         </Link>
       </div>
 
-      <h2 className="mt-10 text-xl font-semibold">Entradas disponibles</h2>
+      <h2 className="text-xl font-semibold mt-10">Entradas disponibles</h2>
 
       {ticketsErr ? (
-        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
-          Error obteniendo tickets.
-        </div>
+        <p className="text-red-600 mt-2">
+          No pude cargar las entradas: {ticketsErr.message}
+        </p>
       ) : tickets.length === 0 ? (
-        <p className="mt-2 text-slate-600">No hay entradas disponibles por ahora.</p>
+        <p className="text-gray-600 mt-2">No hay entradas disponibles por ahora.</p>
       ) : (
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 grid gap-3">
           {tickets.map((t) => (
-            <TicketCard
+            <div
               key={t.id}
-              ticket={{
-                id: t.id,
-                price: t.price,
-                section: t.section,
-                row: t.row,
-                seat: t.seat,
-                sellerName: sellerNameById.get(t.seller_id) || "Vendedor nuevo",
-              }}
-              priceLabel={formatCLP(t.price)}
-            />
+              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-xl font-semibold text-slate-900">
+                    {formatCLP(t.price)}
+                  </p>
+
+                  <p className="mt-1 text-sm text-slate-600">
+                    Ubicación:{" "}
+                    <span className="font-medium text-slate-800">
+                      {t.sector ?? "—"} / {t.row ?? "—"} / {t.seat ?? "—"}
+                    </span>
+                  </p>
+                </div>
+
+                <Link
+                  className="shrink-0 inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700"
+                  href={`/checkout/${t.id}`}
+                >
+                  Comprar
+                </Link>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-slate-600">
+                  Vendedor:{" "}
+                  <span className="font-medium text-slate-900">
+                    {t?.seller_id ? sellerNameById.get(t.seller_id) || "—" : "—"}
+                  </span>
+                </p>
+
+                <SellerReputation sellerId={t?.seller_id ?? null} />
+              </div>
+            </div>
           ))}
         </div>
       )}
     </div>
   );
 }
+
