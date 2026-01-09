@@ -1,175 +1,211 @@
-// app/events/[id]/page.jsx
+export const dynamic = "force-dynamic";
+
 import Link from "next/link";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { formatCLP } from "@/lib/format";
-import SellerReputation from "./sellerReputation";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+function formatCLP(n) {
+  const val = Number(n);
+  if (!Number.isFinite(val)) return "$0";
+  return val.toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+}
 
 function isAvailableStatus(status) {
-  const s = String(status || "").toLowerCase();
-  return s === "" || s === "active" || s === "available" || s === "published";
+  const s = (status || "").toString().trim().toLowerCase();
+
+  // Legacy/empty rows: treat as available
+  if (!s) return true;
+
+  // Explicit available statuses
+  const available = new Set([
+    "active",
+    "available",
+    "published",
+    "listed",
+    "for_sale",
+    "on_sale",
+    "onsale",
+  ]);
+  if (available.has(s)) return true;
+
+  // Explicit not-available statuses
+  const notAvailable = new Set([
+    "sold",
+    "paid",
+    "completed",
+    "cancelled",
+    "canceled",
+    "expired",
+    "deleted",
+    "inactive",
+  ]);
+  if (notAvailable.has(s)) return false;
+
+  // Conservative default: if we don't recognize it, assume it's available.
+  // (This avoids “desaparecieron todas las entradas” when a new status is introduced.)
+  return true;
 }
 
 async function fetchTickets(admin, eventId) {
-  // Intento 1: con ubicación + seller
-  let res = await admin
-    .from("tickets")
-    .select("id,event_id,price,status,notes,sector,row,seat,created_at,seller_id")
-    .eq("event_id", eventId);
+  const attempts = [
+    {
+      label: "price_clp+seat",
+      select:
+        "id, event_id, price_clp, sector, row, seat, seat_info, seller_id, seller_name, status, created_at",
+    },
+    {
+      label: "price+seat",
+      select:
+        "id, event_id, price, sector, row, seat, seat_info, seller_id, seller_name, status, created_at",
+    },
+    {
+      label: "price_clp minimal",
+      select: "id, event_id, price_clp, seller_id, seller_name, status, created_at",
+    },
+    {
+      label: "price minimal",
+      select: "id, event_id, price, seller_id, seller_name, status, created_at",
+    },
+    { label: "*", select: "*" },
+  ];
 
-  if (!res.error) return res;
+  let lastError = null;
 
-  // Fallback 1: mínimo con seller_id (para no caerse por columnas de ubicación)
-  res = await admin
-    .from("tickets")
-    .select("id,event_id,price,status,created_at,seller_id")
-    .eq("event_id", eventId);
+  for (const a of attempts) {
+    const res = await admin
+      .from("tickets")
+      .select(a.select)
+      .eq("event_id", eventId)
+      .order("created_at", { ascending: false });
 
-  if (!res.error) return res;
+    if (!res.error) {
+      return { data: res.data || [], error: null, used: a.label };
+    }
 
-  // Fallback 2: ultra mínimo
-  return admin
-    .from("tickets")
-    .select("id,event_id,price,status,created_at")
-    .eq("event_id", eventId);
-}
+    lastError = res.error;
+  }
 
-function shortName(fullName) {
-  const raw = String(fullName || "").trim();
-  if (!raw) return "—";
-  const parts = raw.split(/\s+/).filter(Boolean);
-  const first = parts[0] || raw;
-  const last = parts.length >= 2 ? parts[parts.length - 1] : "";
-  const lastInitial = last ? `${last[0].toUpperCase()}.` : "";
-  return lastInitial ? `${first} ${lastInitial}` : first;
+  return { data: [], error: lastError, used: null };
 }
 
 export default async function EventPage({ params }) {
+  const eventId = params?.id;
   const admin = supabaseAdmin();
-  const { id } = params;
 
-  const { data: event, error: eventErr } = await admin
+  // 1) Load event
+  const { data: event, error: eventError } = await admin
     .from("events")
     .select("*")
-    .eq("id", id)
-    .single();
+    .eq("id", eventId)
+    .maybeSingle();
 
-  if (eventErr || !event) {
+  if (eventError) {
     return (
-      <div className="max-w-5xl mx-auto p-6">
-        <Link className="text-blue-600 underline" href="/events">
-          ← Volver a eventos
-        </Link>
-        <div className="mt-6 p-4 rounded-md bg-red-50 border border-red-200 text-red-700">
-          Evento no encontrado.
-        </div>
+      <div className="mx-auto max-w-4xl px-4 py-10">
+        <h1 className="text-2xl font-semibold">Evento</h1>
+        <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+          Error cargando el evento.
+        </p>
       </div>
     );
   }
 
-  const { data: ticketsRaw, error: ticketsErr } = await fetchTickets(admin, id);
-
-  const tickets = (ticketsRaw || []).filter((t) => isAvailableStatus(t.status));
-
-  // Resolver nombres de vendedores (best-effort)
-  const sellerIds = Array.from(
-    new Set((tickets || []).map((t) => t?.seller_id).filter(Boolean))
-  );
-
-  const sellerNameById = new Map();
-  if (sellerIds.length > 0) {
-    try {
-      const { data: sellers, error: sellersErr } = await admin
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", sellerIds)
-        .limit(2000);
-
-      if (!sellersErr && Array.isArray(sellers)) {
-        for (const s of sellers) {
-          if (s?.id) sellerNameById.set(s.id, shortName(s?.full_name));
-        }
-      }
-    } catch {
-      // noop
-    }
+  if (!event) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-10">
+        <h1 className="text-2xl font-semibold">Evento no encontrado</h1>
+        <p className="mt-2 text-gray-600">Verifica el enlace e inténtalo nuevamente.</p>
+      </div>
+    );
   }
 
-  return (
-    <div className="max-w-5xl mx-auto p-6">
-      <Link className="text-blue-600 underline" href="/events">
-        ← Volver a eventos
-      </Link>
+  // 2) Load tickets
+  const { data: ticketsRaw, error: ticketsError } = await fetchTickets(admin, eventId);
+  const tickets = (ticketsRaw || []).filter((t) => isAvailableStatus(t?.status));
 
-      <div className="mt-6 flex items-start justify-between gap-4">
+  const title = event?.title || event?.name || "Evento";
+  const city = event?.city || event?.location_city || "";
+  const venue = event?.venue || event?.location_venue || "";
+
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-10">
+      <div className="mb-6">
+        <Link href="/events" className="text-blue-600 hover:underline">
+          ← Volver a eventos
+        </Link>
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">{event.title}</h1>
-          <p className="text-gray-600">
-            {event.city} · {event.venue}
+          <h1 className="text-4xl font-bold text-gray-900">{title}</h1>
+          <p className="mt-1 text-gray-600">
+            {city}
+            {city && venue ? " · " : ""}
+            {venue}
           </p>
         </div>
 
         <Link
-          href={`/tickets/publish?eventId=${event.id}`}
-          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md"
+          href={`/sell?eventId=${encodeURIComponent(eventId)}`}
+          className="tix-btn tix-btn-success whitespace-nowrap"
         >
           Publicar entrada
         </Link>
       </div>
 
-      <h2 className="text-xl font-semibold mt-10">Entradas disponibles</h2>
+      <div className="mt-10">
+        <h2 className="text-xl font-semibold text-gray-900">Entradas disponibles</h2>
 
-      {ticketsErr ? (
-        <p className="text-red-600 mt-2">
-          No pude cargar las entradas: {ticketsErr.message}
-        </p>
-      ) : tickets.length === 0 ? (
-        <p className="text-gray-600 mt-2">No hay entradas disponibles por ahora.</p>
-      ) : (
-        <div className="mt-4 grid gap-3">
-          {tickets.map((t) => (
-            <div
-              key={t.id}
-              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-xl font-semibold text-slate-900">
-                    {formatCLP(t.price)}
-                  </p>
+        {ticketsError ? (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+            Error al cargar las entradas. (Tip: suele pasar cuando cambian nombres de columnas)
+          </div>
+        ) : null}
 
-                  <p className="mt-1 text-sm text-slate-600">
-                    Ubicación:{" "}
-                    <span className="font-medium text-slate-800">
-                      {t.sector ?? "—"} / {t.row ?? "—"} / {t.seat ?? "—"}
-                    </span>
-                  </p>
-                </div>
+        {tickets.length === 0 ? (
+          <p className="mt-3 text-gray-600">No hay entradas disponibles por ahora.</p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            {tickets.map((t) => {
+              const price = Number(t?.price_clp ?? t?.price ?? 0);
+              const seller = t?.seller_name || "Vendedor";
 
-                <Link
-                  className="shrink-0 inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-700"
-                  href={`/checkout/${t.id}`}
+              const sector = t?.sector || "-";
+              const row = t?.row || "-";
+              const seat = t?.seat || "-";
+              const seatInfo = t?.seat_info;
+
+              const locationText = seatInfo
+                ? seatInfo
+                : `${sector !== "-" ? sector : "-"} / ${row !== "-" ? row : "-"} / ${seat !== "-" ? seat : "-"}`;
+
+              return (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-sm"
                 >
-                  Comprar
-                </Link>
-              </div>
+                  <div>
+                    <div className="text-2xl font-bold text-gray-900">{formatCLP(price)}</div>
+                    <div className="mt-2 text-sm text-gray-600">Ubicación: {locationText}</div>
+                    <div className="mt-2 text-sm text-gray-600">Vendedor: {seller}</div>
+                  </div>
 
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm text-slate-600">
-                  Vendedor:{" "}
-                  <span className="font-medium text-slate-900">
-                    {t?.seller_id ? sellerNameById.get(t.seller_id) || "—" : "—"}
-                  </span>
-                </p>
-
-                <SellerReputation sellerId={t?.seller_id ?? null} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+                  <Link
+                    href={`/checkout/${t.id}`}
+                    className="tix-btn tix-btn-primary px-8 py-3 text-base"
+                  >
+                    Comprar
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+
