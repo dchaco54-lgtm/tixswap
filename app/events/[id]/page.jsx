@@ -1,125 +1,193 @@
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import Link from "next/link";
-import { notFound } from "next/navigation";
+// app/events/[id]/page.jsx
+"use client";
 
-function isAvailableStatus(status) {
-  // Public statuses we consider "available".
-  // NOTE: "listed" is used in our checkout API and DB.
-  const s = String(status ?? "listed").trim().toLowerCase();
-  return ["listed", "active", "available", "published"].includes(s);
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useParams } from "next/navigation";
+import supabase from "@/lib/supabaseClient";
+
+function formatCurrencyCLP(value) {
+  const n = Number(value ?? 0);
+  return n.toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
 }
 
-function formatCLP(value) {
-  const n = typeof value === "number" ? value : parseInt(String(value || "0").replace(/\D/g, ""), 10) || 0;
-  return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP" }).format(n);
+function safeString(v, fallback = "—") {
+  if (v === null || v === undefined) return fallback;
+  const s = String(v).trim();
+  return s.length ? s : fallback;
 }
 
-async function fetchEvent(eventId) {
-  const { data, error } = await supabaseAdmin
-    .from("events")
-    .select("*")
-    .eq("id", eventId)
-    .single();
+const AVAILABLE_STATUSES = ["active", "available", "listed"]; // tolerante (históricos)
 
-  if (error) return null;
-  return data;
-}
-
-async function fetchTickets(eventId) {
-  const { data: ticketsRaw, error: ticketsErr } = await supabaseAdmin
-    .from("tickets")
-    .select("*")
-    .eq("event_id", eventId)
-    .order("created_at", { ascending: false });
-
-  if (ticketsErr) return [];
-
-  const tickets = (ticketsRaw || []).filter((t) => isAvailableStatus(t.status));
-  return tickets;
-}
-
-async function fetchSellerNamesByIds(ids) {
-  if (!ids.length) return {};
-  const { data, error } = await supabaseAdmin
-    .from("profiles")
-    .select("id, full_name, email")
-    .in("id", ids);
-
-  if (error) return {};
-  const map = {};
-  for (const p of data || []) {
-    map[p.id] = p.full_name || p.email || "Vendedor";
-  }
-  return map;
-}
-
-export default async function EventPage({ params }) {
+export default function EventDetailPage() {
+  const router = useRouter();
+  const params = useParams();
   const id = params?.id;
-  if (!id) return notFound();
 
-  const event = await fetchEvent(id);
-  if (!event) return notFound();
+  const [event, setEvent] = useState(null);
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const tickets = await fetchTickets(id);
+  const locationText = useMemo(() => {
+    if (!event) return "";
+    const city = event.city ? ` • ${event.city}` : "";
+    const venue = event.venue ? ` • ${event.venue}` : "";
+    return `${city}${venue}`.trim();
+  }, [event]);
 
-  const sellerIds = [...new Set((tickets || []).map((t) => t.seller_id).filter(Boolean))];
-  const sellerNameById = await fetchSellerNamesByIds(sellerIds);
+  useEffect(() => {
+    if (!id) return;
+
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // 1) Evento
+        const { data: eventData, error: eventError } = await supabase
+          .from("events")
+          .select("id, name, venue, city, date")
+          .eq("id", id)
+          .single();
+
+        if (eventError) throw eventError;
+        if (!cancelled) setEvent(eventData);
+
+        // 2) Tickets (sin joins frágiles)
+        const { data: ticketRows, error: ticketsError } = await supabase
+          .from("tickets")
+          .select("id, price, section, row, seat, seller_id, status, created_at")
+          .eq("event_id", id)
+          .in("status", AVAILABLE_STATUSES)
+          .order("created_at", { ascending: false });
+
+        if (ticketsError) throw ticketsError;
+
+        const sellerIds = Array.from(
+          new Set((ticketRows || []).map((t) => t.seller_id).filter(Boolean))
+        );
+
+        // 3) Perfiles del vendedor (2da query => robusto)
+        let profilesById = {};
+        if (sellerIds.length > 0) {
+          const { data: profiles, error: profilesError } = await supabase
+            .from("profiles")
+            .select("id, username, reputation")
+            .in("id", sellerIds);
+
+          // Si falla, NO rompas tickets
+          if (!profilesError && profiles) {
+            profilesById = profiles.reduce((acc, p) => {
+              acc[p.id] = p;
+              return acc;
+            }, {});
+          }
+        }
+
+        const merged = (ticketRows || []).map((t) => ({
+          ...t,
+          seller: profilesById[t.seller_id] || null,
+        }));
+
+        if (!cancelled) setTickets(merged);
+      } catch (err) {
+        console.error("Error cargando evento/tickets:", err);
+        if (!cancelled) {
+          setTickets([]);
+          setError("No pudimos cargar las entradas en este momento.");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  function handleBuy(ticketId) {
+    router.push(`/checkout/${ticketId}`);
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-5xl px-4 py-10">
-        <Link href="/events" className="text-blue-600 hover:underline">
+      <div className="max-w-4xl mx-auto px-4 py-8">
+        <button
+          onClick={() => router.push("/events")}
+          className="text-blue-600 hover:underline mb-4"
+        >
           ← Volver a eventos
-        </Link>
+        </button>
 
-        <div className="mt-4 flex items-start justify-between">
-          <div>
-            <h1 className="text-4xl font-bold text-gray-900">{event.title || event.name}</h1>
-            <p className="mt-1 text-gray-600">
-              {(event.city || "Chile") + " · " + (event.venue || event.location || "")}
-            </p>
+        {loading ? (
+          <div className="bg-white p-6 rounded-lg shadow-sm">
+            Cargando evento...
           </div>
-
-          <Link
-            href="/sell"
-            className="rounded-lg bg-green-600 px-5 py-3 font-semibold text-white hover:bg-green-700"
-          >
-            Publicar entrada
-          </Link>
-        </div>
-
-        <h2 className="mt-10 text-2xl font-bold text-gray-900">Entradas disponibles</h2>
-
-        {tickets.length === 0 ? (
-          <p className="mt-4 text-gray-600">No hay entradas disponibles por ahora.</p>
+        ) : error ? (
+          <div className="bg-white p-6 rounded-lg shadow-sm">
+            <div className="text-red-600 font-medium">{error}</div>
+          </div>
         ) : (
-          <div className="mt-4 space-y-4">
-            {tickets.map((t) => (
-              <div
-                key={t.id}
-                className="flex items-center justify-between rounded-xl border bg-white p-5 shadow-sm"
-              >
-                <div>
-                  <div className="text-2xl font-bold text-gray-900">{formatCLP(t.price || t.value || t.amount || t.price_clp)}</div>
-                  <div className="mt-1 text-gray-600">
-                    Ubicación: {t.section || "-"} / {t.row || "-"} / {t.seat || "-"}
-                  </div>
-                  <div className="mt-2 text-gray-600">
-                    Vendedor: {sellerNameById[t.seller_id] || "Vendedor"}
-                  </div>
-                </div>
+          <>
+            <div className="bg-white p-6 rounded-lg shadow-sm mb-6">
+              <h1 className="text-3xl font-bold">{safeString(event?.name)}</h1>
+              <p className="text-gray-600 mt-1">{locationText}</p>
+            </div>
 
-                <Link
-                  href={`/checkout/${t.id}`}
-                  className="rounded-lg bg-blue-600 px-6 py-3 font-bold text-white hover:bg-blue-700"
-                >
-                  Comprar
-                </Link>
+            <h2 className="text-xl font-semibold mb-3">Entradas disponibles</h2>
+
+            {tickets.length === 0 ? (
+              <div className="bg-white p-6 rounded-lg shadow-sm text-gray-600">
+                No hay entradas disponibles por ahora.
               </div>
-            ))}
-          </div>
+            ) : (
+              <div className="space-y-3">
+                {tickets.map((t) => (
+                  <TicketCard key={t.id} ticket={t} onBuy={() => handleBuy(t.id)} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
+    </div>
+  );
+}
+
+function TicketCard({ ticket, onBuy }) {
+  const sellerName = ticket?.seller?.username || "Vendedor";
+  const sellerRep = Number(ticket?.seller?.reputation ?? 0);
+
+  return (
+    <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between">
+      <div>
+        <div className="text-lg font-semibold">{formatCurrencyCLP(ticket.price)}</div>
+        <div className="text-sm text-gray-600">
+          Ubicación:{" "}
+          {ticket.section || ticket.row || ticket.seat
+            ? `${safeString(ticket.section, "-")} / ${safeString(ticket.row, "-")} / ${safeString(ticket.seat, "-")}`
+            : "—"}
+        </div>
+        <div className="text-sm text-gray-600 mt-1">
+          Vendedor: <span className="font-medium text-gray-800">{sellerName}</span>
+          <span className="ml-2 text-gray-500">({sellerRep.toFixed(1)}/5)</span>
+        </div>
+      </div>
+
+      <button
+        onClick={onBuy}
+        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-md font-medium"
+      >
+        Comprar
+      </button>
     </div>
   );
 }
