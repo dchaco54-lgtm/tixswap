@@ -1,43 +1,72 @@
 // app/api/orders/my/route.js
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createClient } from "@supabase/supabase-js";
 
-function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
-  if (!h.toLowerCase().startsWith("bearer ")) return null;
-  return h.slice(7).trim();
-}
-
-export async function GET(req) {
+export async function GET(request) {
   try {
-    const admin = supabaseAdmin();
+    const authHeader = request.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.replace("Bearer ", "")
+      : null;
 
-    const token = getBearerToken(req);
-    if (!token) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const { data: userRes } = await admin.auth.getUser(token);
-    const user = userRes?.user;
-    if (!user) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        global: {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      }
+    );
 
-    const { data, error } = await admin
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: orders, error } = await supabase
       .from("orders")
-      .select(`
-        id, status, total_amount, total_paid_clp, created_at, paid_at, payment_state,
-        ticket:ticket_id (
-          id, price, sector, row, seat, notes, status,
-          event:events ( id, title, starts_at, venue, city )
+      .select(
+        `
+        id,
+        total_amount,
+        status,
+        created_at,
+        provider,
+        ticket: tickets (
+          id,
+          price,
+          section,
+          row,
+          seat,
+          event: events ( id, name, venue, city ),
+          seller: profiles!tickets_seller_id_fkey ( id, username, reputation )
         )
-      `)
+      `
+      )
       .eq("buyer_id", user.id)
       .order("created_at", { ascending: false });
 
+    // Si la tabla no existe aún (o algo cambió), no rompas la UI:
     if (error) {
-      return NextResponse.json({ error: "No se pudieron cargar las compras." }, { status: 500 });
+      const code = error.code || error?.details?.code;
+      if (code === "42P01") {
+        return NextResponse.json({ orders: [], notReady: true }, { status: 200 });
+      }
+      return NextResponse.json({ orders: [], warning: error.message }, { status: 200 });
     }
 
-    return NextResponse.json({ orders: data || [] });
+    return NextResponse.json({ orders: orders || [] });
   } catch (e) {
-    console.error("orders/my error:", e);
-    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+    // Nunca rompas la UI por un error inesperado
+    return NextResponse.json({ orders: [], warning: "Unexpected error" }, { status: 200 });
   }
 }
