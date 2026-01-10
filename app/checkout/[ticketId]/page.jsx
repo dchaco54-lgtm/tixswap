@@ -1,290 +1,244 @@
+// app/checkout/[ticketId]/page.jsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { formatCLP } from "@/lib/format";
-import { supabase } from "@/lib/supabaseClient";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
-function buildSeatLabel(ticket) {
-  const sector = ticket?.sector ?? "-";
-  const row = ticket?.row ?? "-";
-  const seat = ticket?.seat ?? "-";
-  return `${sector} / ${row} / ${seat}`;
+function formatCLP(value) {
+  const n = Number(value ?? 0);
+  return n.toLocaleString("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  });
+}
+
+function BluePayButton({ title, subtitle, disabled, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "w-full text-left rounded-lg border px-5 py-4 transition",
+        disabled
+          ? "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
+          : "bg-blue-600 border-blue-700 text-white hover:bg-blue-700",
+      ].join(" ")}
+    >
+      <div className="font-semibold">{title}</div>
+      <div className={disabled ? "text-gray-400 text-sm" : "text-blue-100 text-sm"}>
+        {subtitle}
+      </div>
+    </button>
+  );
 }
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { ticketId } = useParams();
+  const params = useParams();
+  const searchParams = useSearchParams();
+
+  const ticketId = params?.ticketId;
 
   const [loading, setLoading] = useState(true);
-  const [previewLoading, setPreviewLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [error, setError] = useState("");
-  const [paying, setPaying] = useState(false);
 
-  const [webpayForm, setWebpayForm] = useState(null); // { url, token }
-
-  const seatLabel = useMemo(() => buildSeatLabel(preview?.ticket), [preview]);
-
-  // 1) Validar sesión
+  // Si volvemos del “pago simulado”, manda a Mis Compras sí o sí (success o fail)
   useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase.auth.getSession();
-      const session = data?.session;
+    const payment = searchParams.get("payment"); // success | failed
+    const provider = searchParams.get("provider");
+    if (payment && provider) {
+      router.replace("/dashboard/purchases");
+    }
+  }, [router, searchParams]);
 
-      if (error || !session?.user) {
-        router.replace(`/login?redirectTo=${encodeURIComponent(`/checkout/${ticketId}`)}`);
-        return;
-      }
-
-      setLoading(false);
-    })();
-  }, [router, ticketId]);
-
-  // 2) Cargar resumen del checkout
   useEffect(() => {
     if (!ticketId) return;
 
-    (async () => {
-      try {
-        setPreviewLoading(true);
-        setError("");
+    let cancelled = false;
 
-        const res = await fetch(`/api/checkout/preview?ticketId=${ticketId}`, {
-          method: "GET",
-          cache: "no-store",
+    async function loadPreview() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const res = await fetch("/api/checkout/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticketId }),
         });
 
-        const json = await res.json().catch(() => ({}));
+        const data = await res.json();
 
         if (!res.ok) {
-          throw new Error(json?.error || "No se pudo cargar el resumen.");
+          throw new Error(data?.error || "No se pudo cargar el resumen.");
         }
 
-        setPreview(json);
+        if (!cancelled) setPreview(data);
       } catch (e) {
-        setError(e?.message || "Error al obtener resumen.");
+        console.error("Checkout preview error:", e);
+        if (!cancelled) setError("Error al obtener resumen");
       } finally {
-        setPreviewLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    loadPreview();
+    return () => {
+      cancelled = true;
+    };
   }, [ticketId]);
 
-  // Helpers: token supabase para llamadas POST a create-session
-  async function getAccessTokenOrRedirect() {
-    const { data } = await supabase.auth.getSession();
-    const token = data?.session?.access_token;
+  const price = useMemo(() => Number(preview?.ticket?.price ?? 0), [preview]);
+  const fee = useMemo(() => Math.round(price * 0.025), [price]);
+  const total = useMemo(() => price + fee, [price, fee]);
 
-    if (!token) {
-      router.replace(`/login?redirectTo=${encodeURIComponent(`/checkout/${ticketId}`)}`);
-      return null;
-    }
-    return token;
-  }
-
-  async function payWebpay() {
+  async function startPayment(provider) {
     try {
-      setPaying(true);
-      setError("");
+      setError(null);
 
-      const token = await getAccessTokenOrRedirect();
-      if (!token) return;
+      const endpoint =
+        provider === "webpay"
+          ? "/api/payments/webpay/create-session"
+          : provider === "banchile"
+            ? "/api/payments/banchile/create-session"
+            : "/api/payments/mercadopago/create-session";
 
-      const res = await fetch("/api/payments/webpay/create-session", {
+      const res = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ ticketId }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticketId,
+          amount: total,
+          // el retorno lo maneja /pago-simulado/[provider]
+          returnUrl: `/checkout/${ticketId}`,
+        }),
       });
 
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || "No se pudo iniciar pago con Webpay.");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "No se pudo iniciar el pago.");
 
-      setWebpayForm({ url: json.url, token: json.token });
-    } catch (e) {
-      setError(e?.message || "Error iniciando Webpay.");
-    } finally {
-      setPaying(false);
-    }
-  }
-
-  async function payBanchile() {
-    try {
-      setPaying(true);
-      setError("");
-
-      const token = await getAccessTokenOrRedirect();
-      if (!token) return;
-
-      const origin = window.location.origin;
-      const returnUrl = `${origin}/payment/banchile/result`;
-
-      const res = await fetch("/api/payments/banchile/create-session", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ ticketId, returnUrl }),
-      });
-
-      const json = await res.json().catch(() => ({}));
-
-      if (res.status === 501) {
-        throw new Error("Banco de Chile aún sin credenciales. Queda listo apenas las tengas.");
+      if (data?.processUrl) {
+        window.location.href = data.processUrl;
+        return;
       }
 
-      if (!res.ok) throw new Error(json?.error || "No se pudo iniciar pago con Banco de Chile.");
-
-      if (json.processUrl) {
-        window.location.href = json.processUrl;
-      } else {
-        throw new Error("No se recibió processUrl desde Banco de Chile.");
-      }
+      throw new Error("No recibimos URL de pago.");
     } catch (e) {
-      setError(e?.message || "Error iniciando Banco de Chile.");
-    } finally {
-      setPaying(false);
+      console.error("startPayment error:", e);
+      setError(e.message || "No se pudo iniciar el pago.");
     }
-  }
-
-  // Auto-POST a Webpay cuando se recibe url+token
-  useEffect(() => {
-    if (!webpayForm?.url || !webpayForm?.token) return;
-
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = webpayForm.url;
-
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = "token_ws";
-    input.value = webpayForm.token;
-
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
-  }, [webpayForm]);
-
-  if (loading) {
-    return (
-      <div className="max-w-3xl mx-auto p-6">
-        <h1 className="text-xl font-bold">Cargando checkout...</h1>
-      </div>
-    );
   }
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">Checkout</h1>
-          <p className="text-gray-600">Revisa el resumen y elige tu medio de pago.</p>
-        </div>
-
-        <button className="tix-link" onClick={() => router.back()}>
-          Volver
-        </button>
-      </div>
-
-      {error && (
-        <div className="bg-red-100 text-red-700 p-3 rounded mb-4">
-          {error}
-        </div>
-      )}
-
-      {previewLoading ? (
-        <p className="text-gray-500">Cargando resumen...</p>
-      ) : !preview ? (
-        <p className="text-gray-500">No hay información para mostrar.</p>
-      ) : (
-        <div className="tix-card p-6">
-          {/* Confirmación evento */}
-          <div className="mb-5">
-            <p className="text-sm text-gray-500">Evento</p>
-            <p className="text-lg font-semibold">{preview.event?.title || "Evento"}</p>
-            <p className="text-gray-600">
-              {preview.event?.city || "—"} {preview.event?.venue ? `· ${preview.event.venue}` : ""}
-            </p>
-          </div>
-
-          <hr className="my-5" />
-
-          {/* Resumen compra */}
-          <div className="grid gap-3">
-            <div className="flex justify-between">
-              <span className="text-gray-700">Ubicación</span>
-              <span className="font-medium">{seatLabel}</span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-gray-700">Vendedor</span>
-              <span className="font-medium">{preview.seller?.displayName || "—"}</span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-gray-700">Valor entrada</span>
-              <span className="font-medium">{formatCLP(preview.ticketPrice)}</span>
-            </div>
-
-            <div className="flex justify-between">
-              <span className="text-gray-700">
-                Comisión TixSwap ({Math.round((preview.commissionPct || 0) * 1000) / 10}%)
-              </span>
-              <span className="font-medium">{formatCLP(preview.serviceFee)}</span>
-            </div>
-
-            <hr className="my-2" />
-
-            <div className="flex justify-between text-lg font-bold">
-              <span>Total</span>
-              <span>{formatCLP(preview.total)}</span>
-            </div>
-
-            <p className="text-xs text-gray-500">
-              * El total es el monto que se envía al medio de pago.
-            </p>
-          </div>
-
-          <hr className="my-6" />
-
-          {/* Medios de pago */}
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <p className="font-semibold mb-3">Medio de pago</p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <button
-                className="tix-btn-primary w-full"
-                onClick={payWebpay}
-                disabled={paying}
-              >
-                Webpay
-                <span className="block text-xs opacity-90 font-normal">
-                  Tarjeta débito/crédito
-                </span>
-              </button>
-
-              <button
-                className="tix-btn-primary w-full"
-                onClick={payBanchile}
-                disabled={paying}
-              >
-                Banco de Chile
-                <span className="block text-xs opacity-90 font-normal">
-                  Pago con Banchile/Chile
-                </span>
-              </button>
-
-              <button className="tix-btn-primary w-full opacity-50 cursor-not-allowed" disabled>
-                Mercado Pago
-                <span className="block text-xs opacity-90 font-normal">Pronto</span>
-              </button>
-            </div>
+            <h1 className="text-3xl font-bold">Checkout</h1>
+            <p className="text-gray-600">Revisa el resumen y elige tu medio de pago.</p>
           </div>
+          <button
+            onClick={() => router.back()}
+            className="text-blue-600 hover:underline"
+          >
+            Volver
+          </button>
         </div>
-      )}
+
+        {loading ? (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            Cargando resumen del pago...
+          </div>
+        ) : error ? (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="bg-red-50 text-red-700 border border-red-200 rounded-md px-4 py-3 font-medium">
+              {error}
+            </div>
+            <div className="text-gray-600 mt-3">No hay información para mostrar.</div>
+          </div>
+        ) : (
+          <>
+            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+              <div className="text-sm text-gray-500">Evento</div>
+              <div className="text-xl font-semibold">{preview?.event?.name || "Evento"}</div>
+              <div className="text-gray-600">
+                {(preview?.event?.city || "Santiago") +
+                  (preview?.event?.venue ? ` • ${preview.event.venue}` : "")}
+              </div>
+
+              <div className="border-t my-5" />
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <div className="text-gray-500">Entrada</div>
+                  <div className="font-medium">
+                    {preview?.ticket?.section || preview?.ticket?.row || preview?.ticket?.seat
+                      ? `${preview?.ticket?.section || "-"} / ${preview?.ticket?.row || "-"} / ${preview?.ticket?.seat || "-"}`
+                      : "Sin ubicación"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Vendedor</div>
+                  <div className="font-medium">
+                    {preview?.seller?.username || "Vendedor"}
+                    {typeof preview?.seller?.reputation !== "undefined" && (
+                      <span className="ml-2 text-gray-500">
+                        ({Number(preview.seller.reputation).toFixed(1)}/5)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t my-5" />
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Entrada</span>
+                  <span className="font-medium">{formatCLP(price)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Comisión TixSwap (2,5%)</span>
+                  <span className="font-medium">{formatCLP(fee)}</span>
+                </div>
+                <div className="flex justify-between text-base pt-2 border-t">
+                  <span className="font-semibold">Total</span>
+                  <span className="font-semibold">{formatCLP(total)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-sm p-6">
+              <div className="text-sm font-semibold text-gray-700 mb-3">Medio de pago</div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <BluePayButton
+                  title="Webpay"
+                  subtitle="Tarjeta débito/crédito"
+                  onClick={() => startPayment("webpay")}
+                />
+                <BluePayButton
+                  title="Banco de Chile"
+                  subtitle="Pago con Banchile/Chile"
+                  onClick={() => startPayment("banchile")}
+                />
+                <BluePayButton
+                  title="Mercado Pago"
+                  subtitle="Pronto"
+                  disabled
+                  onClick={() => {}}
+                />
+              </div>
+
+              <div className="text-xs text-gray-500 mt-4">
+                * Por ahora el flujo está en modo “simulado” hasta que lleguen las credenciales reales (Webpay / Banco de Chile).
+              </div>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
