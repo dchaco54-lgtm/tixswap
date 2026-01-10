@@ -1,78 +1,56 @@
-// app/api/orders/[orderId]/route.js
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
 
-export async function GET(request, { params }) {
-  try {
-    const { orderId } = params || {};
+function toNum(v) {
+  const n = typeof v === "number" ? v : Number(String(v ?? "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
 
-    const authHeader = request.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ")
-      ? authHeader.replace("Bearer ", "")
-      : null;
+export async function GET(req, { params }) {
+  const supabase = createRouteHandlerClient({ cookies });
 
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    if (!orderId) return NextResponse.json({ error: "Missing orderId" }, { status: 400 });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      }
-    );
+  if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+  const orderId = params.orderId;
+  const { data: order, error } = await supabase.from("orders").select("*").eq("id", orderId).maybeSingle();
 
-    if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (error || !order) return NextResponse.json({ error: "Compra no encontrada" }, { status: 404 });
 
-    // Intento 1: con joins
-    const { data: order, error } = await supabase
-      .from("orders")
-      .select(
-        `
-        id,
-        buyer_id,
-        seller_id,
-        ticket_id,
-        total_amount,
-        status,
-        provider,
-        created_at,
-        ticket: tickets (
-          id,
-          price,
-          section,
-          row,
-          seat,
-          event: events ( id, name, venue, city ),
-          seller: profiles!tickets_seller_id_fkey ( id, username, reputation )
-        )
-      `
-      )
-      .eq("id", orderId)
-      .single();
+  if (order.buyer_id !== user.id) return NextResponse.json({ error: "Prohibido" }, { status: 403 });
 
-    if (error) {
-      const code = error.code || error?.details?.code;
-      if (code === "42P01") {
-        return NextResponse.json({ order: null, notReady: true }, { status: 200 });
-      }
-      return NextResponse.json({ order: null, warning: error.message }, { status: 200 });
-    }
+  const ticket = order.ticket_id
+    ? (await supabase.from("tickets").select("*").eq("id", order.ticket_id).maybeSingle()).data
+    : null;
 
-    // Seguridad básica: que sea del comprador
-    if (order?.buyer_id !== user.id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+  const eventId = order.event_id ?? ticket?.event_id ?? null;
+  const event = eventId
+    ? (await supabase.from("events").select("*").eq("id", eventId).maybeSingle()).data
+    : null;
 
-    return NextResponse.json({ order });
-  } catch (e) {
-    return NextResponse.json({ order: null, warning: "Unexpected error" }, { status: 200 });
-  }
+  const sellerId = order.seller_id ?? ticket?.seller_id ?? null;
+  const seller = sellerId
+    ? (await supabase.from("profiles").select("*").eq("id", sellerId).maybeSingle()).data
+    : null;
+
+  return NextResponse.json(
+    {
+      order: {
+        id: order.id,
+        status: order.status ?? "pending",
+        created_at: order.created_at,
+        total_clp: toNum(order.total_clp ?? order.total_paid_clp ?? order.total_amount),
+        fee_clp: toNum(order.fee_clp ?? order.fees_clp),
+        payment_provider: order.payment_provider ?? order.payment_method ?? null,
+      },
+      ticket,
+      event,
+      seller,
+    },
+    { status: 200 }
+  );
 }
