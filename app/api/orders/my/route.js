@@ -1,130 +1,115 @@
+// app/api/orders/my/route.js
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-function num(...vals) {
-  for (const v of vals) {
-    const n = Number(v);
-    if (!Number.isNaN(n) && Number.isFinite(n)) return n;
-  }
-  return 0;
-}
-
-function buildRatingMap(rows) {
-  const agg = new Map();
-  for (const r of rows || []) {
-    const id = r.target_id;
-    const stars = Number(r.stars) || 0;
-    const cur = agg.get(id) || { sum: 0, count: 0 };
-    cur.sum += stars;
-    cur.count += 1;
-    agg.set(id, cur);
-  }
-  const out = new Map();
-  for (const [id, v] of agg.entries()) {
-    out.set(id, { rating_count: v.count, rating_avg: v.count ? v.sum / v.count : null });
-  }
-  return out;
-}
-
-export async function GET(request) {
+/**
+ * Devuelve las compras (orders) del usuario logeado.
+ * - Auth por cookies (lo normal en el navegador).
+ * - Si existe SERVICE ROLE, lo usa para evitar dramas de RLS.
+ * - Si no existen FK (joins), arma la data manualmente con maps (robusto).
+ */
+export async function GET() {
   try {
-    const authHeader = request.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.replace("Bearer ", "") : null;
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const cookieStore = cookies();
+    const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
 
     const {
       data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser(token);
+      error: userError,
+    } = await supabaseUser.auth.getUser();
 
-    if (userErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (userError || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const { data: orders, error } = await supabase
+    let admin = null;
+    try {
+      admin = supabaseAdmin();
+    } catch {
+      // sin SERVICE KEY, seguimos con el client del usuario
+    }
+
+    const client = admin || supabaseUser;
+
+    // 1) orders del buyer
+    const { data: orders, error: ordersError } = await client
       .from("orders")
-      .select(
-        `
-        id,status,created_at,updated_at,
-        buyer_id,seller_id,ticket_id,event_id,
-        total_clp,total_amount,amount_clp,fees_clp,fee_clp,payment_provider,payment_state,
-        ticket:tickets (
-          id,price,sector,row_label,seat_label,title,description,seller_id,seller_name,event_id,
-          event:events ( id,title,venue,city,starts_at,image_url )
-        )
-      `
-      )
+      .select("*")
       .eq("buyer_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (error) {
-      return NextResponse.json({ orders: [], warning: error.message }, { status: 200 });
+    if (ordersError) {
+      console.error("orders/my ordersError:", ordersError);
+      return NextResponse.json({ error: "Error cargando compras." }, { status: 500 });
     }
 
-    const sellerIds = Array.from(new Set((orders || []).map((o) => o?.ticket?.seller_id || o?.seller_id).filter(Boolean)));
+    const safeOrders = orders || [];
 
-    let ratingMap = new Map();
-    if (sellerIds.length) {
-      const { data: ratingRows } = await supabase
-        .from("ratings")
-        .select("target_id,stars")
-        .eq("role", "seller")
-        .in("target_id", sellerIds);
+    // 2) tickets por ticket_id
+    const ticketIds = Array.from(
+      new Set(safeOrders.map((o) => o.ticket_id).filter(Boolean))
+    );
 
-      ratingMap = buildRatingMap(ratingRows || []);
+    let ticketsById = {};
+    if (ticketIds.length) {
+      const { data: tickets, error: ticketsError } = await client
+        .from("tickets")
+        .select("*")
+        .in("id", ticketIds);
+
+      if (ticketsError) {
+        console.warn("orders/my ticketsError (seguimos igual):", ticketsError);
+      } else {
+        ticketsById = Object.fromEntries((tickets || []).map((t) => [t.id, t]));
+      }
     }
 
-    const normalized = (orders || []).map((o) => {
-      const t = o.ticket || null;
-      const ev = t?.event || null;
+    // 3) events (desde orders.event_id o ticket.event_id)
+    const eventIds = Array.from(
+      new Set(
+        safeOrders
+          .map((o) => o.event_id)
+          .concat(Object.values(ticketsById).map((t) => t?.event_id))
+          .filter(Boolean)
+      )
+    );
 
-      const sellerId = t?.seller_id || o.seller_id || null;
-      const rating = ratingMap.get(sellerId) || { rating_avg: null, rating_count: 0 };
+    let eventsById = {};
+    if (eventIds.length) {
+      const { data: events, error: eventsError } = await client
+        .from("events")
+        .select("*")
+        .in("id", eventIds);
 
-      const event = ev
-        ? { ...ev, name: ev.title ?? ev.name ?? null, date: ev.starts_at ?? ev.date ?? null }
-        : null;
+      if (eventsError) {
+        console.warn("orders/my eventsError (seguimos igual):", eventsError);
+      } else {
+        eventsById = Object.fromEntries((events || []).map((e) => [e.id, e]));
+      }
+    }
 
-      const ticket = t
-        ? {
-            ...t,
-            section: t.sector ?? null,
-            row: t.row_label ?? null,
-            seat: t.seat_label ?? null,
-            notes: t.description ?? null,
-            event,
-            seller: {
-              id: sellerId,
-              username: t.seller_name || null,
-              reputation: rating.rating_avg,
-              rating_avg: rating.rating_avg,
-              rating_count: rating.rating_count
-            }
-          }
-        : null;
-
-      const total_amount = num(o.total_clp, o.total_amount);
-      const service_fee = num(o.fees_clp, o.fee_clp);
-      const amount_clp = num(o.amount_clp, total_amount - service_fee);
+    const enriched = safeOrders.map((o) => {
+      const ticket = o.ticket_id ? ticketsById[o.ticket_id] : null;
+      const event = o.event_id
+        ? eventsById[o.event_id]
+        : ticket?.event_id
+          ? eventsById[ticket.event_id]
+          : null;
 
       return {
-        id: o.id,
-        status: o.status,
-        created_at: o.created_at,
-        updated_at: o.updated_at,
-        ticket_id: o.ticket_id,
-        provider: o.payment_provider || null,
-        total_amount,
-        service_fee,
-        amount_clp,
-        ticket
+        ...o,
+        ticket: ticket || null,
+        event: event || null,
       };
     });
 
-    return NextResponse.json({ orders: normalized }, { status: 200 });
-  } catch (e) {
-    console.error("[api/orders/my] exception:", e);
-    return NextResponse.json({ orders: [], warning: "Unexpected error" }, { status: 200 });
+    return NextResponse.json({ orders: enriched });
+  } catch (err) {
+    console.error("orders/my fatal error:", err);
+    return NextResponse.json({ error: "Error interno" }, { status: 500 });
   }
 }
+
 
