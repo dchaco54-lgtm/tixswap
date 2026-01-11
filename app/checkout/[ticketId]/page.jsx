@@ -181,14 +181,14 @@ export default function CheckoutPage() {
                 </div>
                 <div>
                   <div className="text-gray-500">Vendedor</div>
-                  <div className="font-medium">
-                    {preview?.seller?.username || "Vendedor"}
-                    {typeof preview?.seller?.reputation !== "undefined" && (
-                      <span className="ml-2 text-gray-500">
-                        ({Number(preview.seller.reputation).toFixed(1)}/5)
-                      </span>
-                    )}
-                  </div>
+<div className="font-medium">
+  {preview?.seller?.name || preview?.seller?.email || "Vendedor"}
+  {preview?.seller?.rating != null && (
+    <span className="ml-2 text-gray-500">
+      ★ {preview.seller.rating} ({preview.seller.ratingCount || 0})
+    </span>
+  )}
+</div>
                 </div>
               </div>
 
