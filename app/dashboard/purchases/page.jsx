@@ -3,206 +3,223 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import supabase from "@/lib/supabaseClient";
-import StarRating from "@/components/StarRating";
 
 function formatCLP(value) {
   const n = Number(value ?? 0);
-  return n.toLocaleString("es-CL", {
+  if (Number.isNaN(n)) return "$0";
+  return new Intl.NumberFormat("es-CL", {
     style: "currency",
     currency: "CLP",
     maximumFractionDigits: 0,
-  });
+  }).format(n);
+}
+
+function formatDateCL(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("es-CL", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(d);
 }
 
 export default function PurchasesPage() {
-  const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState([]);
-  const [buyerProfile, setBuyerProfile] = useState(null);
-  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  async function load() {
+  async function loadOrders() {
     try {
       setLoading(true);
-      setError(null);
+      setError("");
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const res = await fetch("/api/orders/my", { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
 
-      // Perfil comprador (reputación)
-      const userId = session?.user?.id;
-      if (userId) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id, username, reputation")
-          .eq("id", userId)
-          .single();
-        setBuyerProfile(profile || null);
-      } else {
-        setBuyerProfile(null);
+      if (!res.ok) {
+        throw new Error(json?.error || "No se pudieron cargar las compras.");
       }
 
-      if (!session?.access_token) {
-        setOrders([]);
-        return;
-      }
-
-      const res = await fetch("/api/orders/my", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-
-      const data = await res.json();
-      setOrders(data.orders || []);
+      setOrders(Array.isArray(json.orders) ? json.orders : []);
     } catch (e) {
       console.error(e);
-      setError("No se pudieron cargar las compras.");
+      setError(e?.message || "No se pudieron cargar las compras.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadOrders();
   }, []);
 
-  const buyerRep = useMemo(
-    () => Number(buyerProfile?.reputation ?? 0),
-    [buyerProfile]
-  );
+  const normalized = useMemo(() => {
+    return (orders || []).map((o) => {
+      const ticket = o.ticket || null;
+      const event = o.event || ticket?.event || null;
+
+      const eventTitle = event?.title ?? event?.name ?? "Evento";
+      const eventWhen = formatDateCL(event?.starts_at ?? event?.date ?? null);
+      const eventWhere = [event?.city, event?.venue].filter(Boolean).join(" • ");
+
+      const sector = ticket?.sector ?? ticket?.section ?? null;
+      const rowLabel = ticket?.row_label ?? ticket?.row ?? ticket?.fila ?? null;
+      const seatLabel = ticket?.seat_label ?? ticket?.seat ?? ticket?.asiento ?? null;
+
+      const seatText = [
+        sector ? `Sector ${sector}` : null,
+        rowLabel ? `Fila ${rowLabel}` : null,
+        seatLabel ? `Asiento ${seatLabel}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • ");
+
+      return {
+        ...o,
+        _eventTitle: eventTitle,
+        _eventWhen: eventWhen,
+        _eventWhere: eventWhere,
+        _seatText: seatText,
+      };
+    });
+  }, [orders]);
+
+  async function handleDownloadPdf(ticketId) {
+    try {
+      if (!ticketId) return;
+
+      const res = await fetch(`/api/tickets/${ticketId}/pdf`, { cache: "no-store" });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(json?.error || "No se pudo generar el link del PDF.");
+      }
+
+      if (!json?.signedUrl) {
+        throw new Error("No se encontró el PDF para este ticket.");
+      }
+
+      window.open(json.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "No se pudo descargar el PDF.");
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <Link href="/events" className="text-blue-600 hover:underline">
-              ← Volver a eventos
+      <header className="bg-white border-b">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/dashboard" className="text-sm text-blue-600 hover:underline">
+              ← Volver al panel
             </Link>
-
-            <h1 className="text-3xl font-bold mt-2">Mis compras</h1>
-            <p className="text-gray-600 mt-1">
-              Aquí verás tus compras y podrás descargar tus entradas.
-            </p>
-
-            <div className="mt-3 bg-white rounded-lg border p-4 inline-block">
-              <div className="text-sm text-gray-500">Tu reputación de comprador</div>
-              <div className="flex items-center gap-3 mt-1">
-                <StarRating value={buyerRep} />
-                <div className="text-gray-700 font-medium">
-                  {buyerRep.toFixed(1)}/5
-                </div>
-                {buyerProfile?.username && (
-                  <div className="text-gray-500 text-sm">({buyerProfile.username})</div>
-                )}
-              </div>
-            </div>
+            <span className="text-gray-300">|</span>
+            <Link href="/events" className="text-sm text-blue-600 hover:underline">
+              Ir a comprar
+            </Link>
           </div>
 
+          <h1 className="text-lg font-semibold">Mis compras</h1>
+
           <button
-            onClick={load}
-            className="bg-white border px-4 py-2 rounded-lg hover:bg-gray-50"
+            onClick={loadOrders}
+            className="text-sm px-3 py-2 rounded-lg border hover:bg-gray-50"
+            disabled={loading}
           >
-            Recargar
+            Refrescar
           </button>
         </div>
+      </header>
 
-        <div className="mt-6">
-          {loading ? (
-            <div className="bg-white rounded-lg shadow-sm p-6">Cargando...</div>
-          ) : error ? (
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3">
-                {error}
-              </div>
-            </div>
-          ) : orders.length === 0 ? (
-            <div className="bg-white rounded-lg shadow-sm p-6 text-gray-600">
-              Aún no tienes compras.
-            </div>
-          ) : (
-            <div className="bg-white rounded-lg shadow-sm overflow-hidden">
-              <div className="grid grid-cols-12 gap-2 px-4 py-3 border-b text-xs font-semibold text-gray-600">
-                <div className="col-span-4">Evento</div>
-                <div className="col-span-2">Total</div>
-                <div className="col-span-2">Vendedor</div>
-                <div className="col-span-2">Estado</div>
-                <div className="col-span-2 text-right">Acciones</div>
-              </div>
-
-              {orders.map((o) => {
-                const event = o?.ticket?.event;
-                const seller = o?.ticket?.seller;
-                const total = o?.total_amount ?? 0;
-
-                return (
-                  <div
-                    key={o.id}
-                    className="grid grid-cols-12 gap-2 px-4 py-4 border-b last:border-b-0 items-center"
-                  >
-                    <div className="col-span-4">
-                      <div className="font-medium text-gray-900">
-                        {event?.name || "Evento"}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        {(event?.city || "Santiago") +
-                          (event?.venue ? ` • ${event.venue}` : "")}
-                      </div>
-                      <div className="text-xs text-gray-400 mt-1">
-                        {new Date(o.created_at).toLocaleString("es-CL")}
-                      </div>
+      <main className="max-w-6xl mx-auto px-4 py-8">
+        {loading ? (
+          <div className="text-gray-600">Cargando compras...</div>
+        ) : error ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
+            {error}
+          </div>
+        ) : normalized.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow p-6 text-gray-600">
+            Aún no tienes compras.
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {normalized.map((o) => (
+              <div key={o.id} className="bg-white rounded-2xl shadow p-6">
+                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                  <div>
+                    <div className="text-xl font-semibold">{o._eventTitle}</div>
+                    <div className="text-gray-600">
+                      {[o._eventWhere, o._eventWhen].filter(Boolean).join(" • ")}
                     </div>
 
-                    <div className="col-span-2 font-semibold">{formatCLP(total)}</div>
+                    {o._seatText && (
+                      <div className="text-gray-600 mt-2">{o._seatText}</div>
+                    )}
 
-                    <div className="col-span-2">
-                      <div className="text-sm font-medium text-gray-900">
-                        {seller?.username || "Vendedor"}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {(Number(seller?.reputation ?? 0)).toFixed(1)}/5
-                      </div>
+                    <div className="text-sm text-gray-500 mt-2">
+                      Orden: <span className="font-mono">{o.id}</span>
                     </div>
 
-                    <div className="col-span-2">
-                      <span className="inline-flex text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
-                        {o.status}
-                      </span>
-                    </div>
-
-                    <div className="col-span-2 flex items-center justify-end gap-2">
-                      <Link
-                        href={`/dashboard/purchases/${o.id}`}
-                        className="text-blue-600 hover:underline text-sm"
-                      >
-                        Ver
-                      </Link>
-
-                      {o.status === "paid" && (
-                        <a
-                          href={`/api/orders/download?orderId=${o.id}`}
-                          className="text-blue-600 hover:underline text-sm"
-                        >
-                          PDF
-                        </a>
-                      )}
-
-                      <button
-                        disabled
-                        className="text-sm text-gray-400 cursor-not-allowed"
-                        title="Chat viene en el siguiente paso"
-                      >
-                        Chat
-                      </button>
+                    <div className="text-sm text-gray-500">
+                      Estado: <span className="font-semibold">{o.status ?? "—"}</span>
+                      {o.created_at ? (
+                        <>
+                          {" "}
+                          • Comprado:{" "}
+                          <span className="font-semibold">
+                            {formatDateCL(o.created_at)}
+                          </span>
+                        </>
+                      ) : null}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
+
+                  <div className="flex flex-col items-start md:items-end gap-3">
+                    <div className="text-2xl font-bold">
+                      {formatCLP(o.total_paid_clp ?? o.total_clp ?? o.amount_clp)}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleDownloadPdf(o.ticket_id)}
+                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                        disabled={!o.ticket_id}
+                        title={!o.ticket_id ? "Esta compra no tiene ticket_id asociado." : "Descargar tu entrada en PDF"}
+                      >
+                        Descargar PDF
+                      </button>
+
+                      <Link
+                        href={`/dashboard/soporte?new=1&category=disputa_compra&subject=${encodeURIComponent(
+                          `Compra ${o.id}`
+                        )}&message=${encodeURIComponent(
+                          `Hola! Necesito hablar con el vendedor por mi compra.\n\nOrden: ${o.id}\nTicket: ${o.ticket_id || "—"}\nVendedor: ${o.seller_id || "—"}\n\n(Escribe tu mensaje acá)`
+                        )}`}
+                        className="px-4 py-2 rounded-xl border hover:bg-gray-50 font-semibold"
+                      >
+                        Chat con vendedor
+                      </Link>
+                    </div>
+
+                    {o.event_id && (
+                      <Link
+                        href={`/events/${o.event_id}`}
+                        className="text-sm text-blue-600 hover:underline"
+                      >
+                        Ver evento
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
