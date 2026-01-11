@@ -1,66 +1,271 @@
+// app/events/[id]/page.jsx
 "use client";
 
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import supabase from "../../lib/supabaseClient";
 
-import { supabase } from "@/lib/supabaseClient";
-import { normalizeEventRow } from "@/app/lib/events";
-import { formatCLP, formatDateLongCL } from "@/app/lib/format";
+const AVAILABLE_TICKET_STATUSES = new Set([
+  "active",
+  "available",
+  "listed",
+  "published",
+]);
 
-function Stars({ value = 0 }) {
-  const v = Math.max(0, Math.min(5, Number(value || 0)));
-  const full = Math.floor(v);
-  const half = v - full >= 0.5 ? 1 : 0;
-  const empty = 5 - full - half;
+function normalizeTicket(t) {
+  const status = (t?.status ?? "").toString().toLowerCase();
 
-  return (
-    <span className="inline-flex items-center gap-0.5">
-      {Array.from({ length: full }).map((_, i) => (
-        <span key={`f-${i}`} className="text-yellow-500">★</span>
-      ))}
-      {half ? <span className="text-yellow-500">☆</span> : null}
-      {Array.from({ length: empty }).map((_, i) => (
-        <span key={`e-${i}`} className="text-gray-300">★</span>
-      ))}
-    </span>
-  );
+  return {
+    ...t,
+    // compat nombres antiguos
+    sector: t?.sector ?? t?.section ?? null,
+    row_label: t?.row_label ?? t?.row ?? t?.fila ?? null,
+    seat_label: t?.seat_label ?? t?.seat ?? t?.asiento ?? null,
+    _statusNorm: status,
+  };
 }
 
-function TicketCard({ ticket, onBuy }) {
-  const seatLine = useMemo(() => {
-    const parts = [];
-    if (ticket?.sector) parts.push(`Sector: ${ticket.sector}`);
-    if (ticket?.row_label) parts.push(`Fila: ${ticket.row_label}`);
-    if (ticket?.seat_label) parts.push(`Asiento: ${ticket.seat_label}`);
-    return parts.length ? parts.join(" • ") : "Ubicación: — / — / —";
-  }, [ticket]);
+function normalizeEvent(e) {
+  return {
+    ...e,
+    // compat
+    title_norm: e?.title ?? e?.name ?? "Evento",
+    starts_at_norm: e?.starts_at ?? e?.date ?? null,
+  };
+}
+
+function formatCLP(value) {
+  const n = Number(value ?? 0);
+  if (Number.isNaN(n)) return "$0";
+  return new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
+function formatDateCL(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("es-CL", {
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+  }).format(d);
+}
+
+export default function EventDetailPage({ params }) {
+  const router = useRouter();
+  const { id } = params;
+
+  const [event, setEvent] = useState(null);
+  const [tickets, setTickets] = useState([]);
+  const [profilesById, setProfilesById] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError("");
+
+        // 1) evento (select * para no romper si cambian columnas)
+        const { data: eventData, error: eventError } = await supabase
+          .from("events")
+          .select("*")
+          .eq("id", id)
+          .single();
+
+        if (eventError) throw eventError;
+
+        const e = normalizeEvent(eventData);
+        if (!cancelled) setEvent(e);
+
+        // 2) tickets del evento (select * para evitar mismatch de columnas)
+        const { data: ticketsData, error: ticketsError } = await supabase
+          .from("tickets")
+          .select("*")
+          .eq("event_id", id)
+          .order("created_at", { ascending: false });
+
+        if (ticketsError) throw ticketsError;
+
+        const normalized = (ticketsData || []).map(normalizeTicket);
+        const visible = normalized.filter((t) => {
+          if (!t._statusNorm) return true; // si no hay status, igual mostrar
+          return AVAILABLE_TICKET_STATUSES.has(t._statusNorm);
+        });
+
+        if (!cancelled) setTickets(visible);
+
+        // 3) perfiles vendedores (si existe RLS y falla, no mata la página)
+        const sellerIds = Array.from(
+          new Set(visible.map((t) => t.seller_id).filter(Boolean))
+        );
+
+        if (sellerIds.length > 0) {
+          const { data: profilesData, error: profilesError } = await supabase
+            .from("profiles")
+            .select("id,username,full_name,reputation")
+            .in("id", sellerIds);
+
+          if (!profilesError && profilesData) {
+            const map = {};
+            for (const p of profilesData) map[p.id] = p;
+            if (!cancelled) setProfilesById(map);
+          }
+        }
+      } catch (err) {
+        console.error("EventDetailPage load error:", err);
+        if (!cancelled) setError("No pudimos cargar las entradas en este momento.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    if (id) load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const eventTitle = event?.title_norm ?? "Evento";
+  const eventWhen = formatDateCL(event?.starts_at_norm);
+  const eventWhere = [event?.city, event?.venue].filter(Boolean).join(" • ");
+
+  const sortedTickets = useMemo(() => {
+    // orden por precio (sube) si hay price
+    return [...tickets].sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+  }, [tickets]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <main className="max-w-5xl mx-auto px-4 py-10">
+          <p className="text-gray-600">Cargando entradas...</p>
+        </main>
+      </div>
+    );
+  }
 
   return (
-    <div className="border rounded-xl bg-white p-5 flex flex-col gap-2 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-2xl font-semibold">{formatCLP(ticket?.price)}</div>
-          <div className="text-gray-600">{seatLine}</div>
-          <div className="text-gray-500 text-sm mt-2">
-            Vendedor:{" "}
-            <span className="text-gray-800 font-medium">
-              {ticket?.seller?.name || ticket?.seller?.email || "Vendedor"}
-            </span>{" "}
-            {ticket?.seller?.rating != null ? (
-              <span className="ml-2 inline-flex items-center gap-1 text-gray-500">
-                <Stars value={ticket.seller.rating} />
-                <span className="text-xs">
-                  ({ticket.seller.ratingCount || 0})
-                </span>
-              </span>
-            ) : null}
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+
+      <main className="max-w-5xl mx-auto px-4 py-10">
+        <div className="mb-6">
+          <Link href="/events" className="text-blue-600 hover:underline">
+            ← Volver a eventos
+          </Link>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow p-6 mb-8">
+          <h1 className="text-3xl font-bold mb-2">{eventTitle}</h1>
+
+          <div className="text-gray-600">
+            {eventWhere && <div>{eventWhere}</div>}
+            {eventWhen && <div>{eventWhen}</div>}
           </div>
         </div>
 
+        <h2 className="text-xl font-semibold mb-4">Entradas disponibles</h2>
+
+        {error ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
+            {error}
+          </div>
+        ) : sortedTickets.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow p-6 text-gray-600">
+            No hay entradas disponibles por ahora.
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {sortedTickets.map((t) => {
+              const sellerProfile = t.seller_id ? profilesById[t.seller_id] : null;
+              return (
+                <TicketCard
+                  key={t.id}
+                  ticket={t}
+                  sellerProfile={sellerProfile}
+                  onBuy={() => router.push(`/checkout/${t.id}`)}
+                />
+              );
+            })}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Header() {
+  return (
+    <header className="bg-white border-b">
+      <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <Link href="/" className="text-xl font-bold text-blue-600">
+          TixSwap
+        </Link>
+        <nav className="flex items-center gap-6 text-gray-700">
+          <Link href="/events" className="hover:text-blue-600">
+            Comprar
+          </Link>
+          <Link href="/sell" className="hover:text-blue-600">
+            Vender
+          </Link>
+          <Link href="/how" className="hover:text-blue-600">
+            Cómo funciona
+          </Link>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function TicketCard({ ticket, sellerProfile, onBuy }) {
+  const sellerName =
+    sellerProfile?.full_name ||
+    sellerProfile?.username ||
+    ticket?.seller_name ||
+    "Vendedor";
+
+  const reputation = sellerProfile?.reputation ?? null;
+
+  const meta = [
+    ticket?.sector ? `Sector: ${ticket.sector}` : null,
+    ticket?.row_label ? `Fila: ${ticket.row_label}` : null,
+    ticket?.seat_label ? `Asiento: ${ticket.seat_label}` : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="bg-white rounded-2xl shadow p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="font-semibold">{sellerName}</div>
+          {reputation !== null ? (
+            <div className="text-sm text-gray-600">★ {Number(reputation).toFixed(1)}</div>
+          ) : (
+            <div className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+              Vendedor nuevo
+            </div>
+          )}
+        </div>
+
+        {ticket?.title && <div className="text-gray-900 mb-1">{ticket.title}</div>}
+        {meta.length > 0 && <div className="text-gray-600 text-sm">{meta.join(" • ")}</div>}
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="text-2xl font-bold">{formatCLP(ticket?.price)}</div>
         <button
           onClick={onBuy}
-          className="px-6 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-xl"
         >
           Comprar
         </button>
@@ -69,170 +274,5 @@ function TicketCard({ ticket, onBuy }) {
   );
 }
 
-export default function EventDetailPage() {
-  const params = useParams();
-  const router = useRouter();
-  const eventId = params?.id;
-
-  const [event, setEvent] = useState(null);
-  const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  useEffect(() => {
-    if (!eventId) return;
-    let alive = true;
-
-    async function load() {
-      try {
-        setLoading(true);
-        setErrorMsg("");
-
-        // ✅ EVENT REAL
-        const { data: eventRow, error: eventError } = await supabase
-          .from("events")
-          .select("id, title, venue, city, starts_at, image_url")
-          .eq("id", eventId)
-          .maybeSingle();
-
-        if (eventError) throw eventError;
-        if (!eventRow) throw new Error("Evento no encontrado");
-
-        const eventNorm = normalizeEventRow(eventRow);
-
-        // ✅ TICKETS REAL
-        const { data: ticketRows, error: ticketError } = await supabase
-          .from("tickets")
-          .select("id, event_id, seller_id, sector, row_label, seat_label, price, status, created_at")
-          .eq("event_id", eventId)
-          .eq("status", "active")
-          .order("created_at", { ascending: false });
-
-        if (ticketError) throw ticketError;
-
-        const rows = ticketRows || [];
-        const sellerIds = Array.from(
-          new Set(rows.map((t) => t.seller_id).filter(Boolean))
-        );
-
-        // perfiles
-        let sellerMap = {};
-        if (sellerIds.length) {
-          const { data: sellers } = await supabase
-            .from("profiles")
-            .select("id, full_name, email")
-            .in("id", sellerIds);
-
-          (sellers || []).forEach((s) => {
-            sellerMap[s.id] = {
-              id: s.id,
-              name: s.full_name || null,
-              email: s.email || null,
-            };
-          });
-        }
-
-        // rating vendedores (si existe)
-        let ratingMap = {};
-        if (sellerIds.length) {
-          const { data: ratings } = await supabase
-            .from("ratings")
-            .select("target_id, stars, role")
-            .in("target_id", sellerIds)
-            .eq("role", "seller");
-
-          const grouped = {};
-          (ratings || []).forEach((r) => {
-            grouped[r.target_id] = grouped[r.target_id] || [];
-            grouped[r.target_id].push(Number(r.stars || 0));
-          });
-
-          Object.entries(grouped).forEach(([id, arr]) => {
-            const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
-            ratingMap[id] = { avg: Number(avg.toFixed(1)), count: arr.length };
-          });
-        }
-
-        const withSeller = rows.map((t) => {
-          const s = sellerMap[t.seller_id] || {};
-          const r = ratingMap[t.seller_id] || null;
-          return {
-            ...t,
-            seller: {
-              ...s,
-              rating: r ? r.avg : null,
-              ratingCount: r ? r.count : 0,
-            },
-          };
-        });
-
-        if (!alive) return;
-        setEvent(eventNorm);
-        setTickets(withSeller);
-      } catch (err) {
-        console.error(err);
-        if (!alive) return;
-        setErrorMsg("No pudimos cargar las entradas en este momento.");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    }
-
-    load();
-    return () => {
-      alive = false;
-    };
-  }, [eventId]);
-
-  return (
-    <main className="max-w-4xl mx-auto px-6 py-10">
-      <div className="mb-6">
-        <Link href="/events" className="text-blue-600 hover:underline">
-          ← Volver a eventos
-        </Link>
-      </div>
-
-      {event ? (
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold">{event.title}</h1>
-          <div className="text-gray-600 mt-1">
-            {event.city ? `${event.city} · ` : ""}{event.venue || ""}{" "}
-            {event.startsAt ? `· ${formatDateLongCL(event.startsAt)}` : ""}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-semibold">Entradas disponibles</h2>
-        <button
-          className="px-5 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700"
-          onClick={() => router.push("/sell")}
-        >
-          Publicar entrada
-        </button>
-      </div>
-
-      {loading ? (
-        <div className="p-6 bg-white rounded-xl border">Cargando…</div>
-      ) : errorMsg ? (
-        <div className="p-6 bg-white rounded-xl border text-red-600">{errorMsg}</div>
-      ) : tickets.length === 0 ? (
-        <div className="p-6 bg-white rounded-xl border text-gray-600">
-          No hay entradas disponibles por ahora.
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {tickets.map((t) => (
-            <TicketCard
-              key={t.id}
-              ticket={t}
-              onBuy={() => router.push(`/checkout/${t.id}`)}
-            />
-          ))}
-        </div>
-      )}
-    </main>
-  );
-}
 
 
