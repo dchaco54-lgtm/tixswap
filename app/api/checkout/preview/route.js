@@ -1,129 +1,125 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-
-function parseCLP(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (value == null) return 0;
-  const digits = String(value).replace(/[^0-9]/g, "");
-  const n = Number(digits);
-  return Number.isFinite(n) ? n : 0;
-}
+import { supabaseAdmin as getAdmin } from "@/lib/supabaseAdmin";
 
 function pickFirst(...vals) {
-  for (const v of vals) {
-    if (v !== undefined && v !== null && v !== "") return v;
-  }
+  for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== "") return v;
   return null;
 }
 
-function isBuyableStatus(status) {
-  const s = String(status || "").toLowerCase().trim();
-  if (!s) return true;
-  return ["available", "published", "active", "listed"].includes(s);
+async function getSellerRating(admin, sellerId) {
+  if (!sellerId) return { rating_avg: null, rating_count: 0 };
+
+  const { data, error } = await admin
+    .from("ratings")
+    .select("stars")
+    .eq("target_id", sellerId)
+    .eq("role", "seller");
+
+  if (error || !data) return { rating_avg: null, rating_count: 0 };
+
+  const rating_count = data.length;
+  const rating_avg =
+    rating_count > 0
+      ? data.reduce((acc, r) => acc + (Number(r.stars) || 0), 0) / rating_count
+      : null;
+
+  return { rating_avg, rating_count };
 }
 
 export async function GET(req) {
   try {
-    const { searchParams } = new URL(req.url);
-    const ticketId = searchParams.get("ticketId");
+    const url = new URL(req.url);
+    const ticketId = url.searchParams.get("ticketId");
 
     if (!ticketId) {
       return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
     }
 
-    // Cliente normal solo para validar sesión del usuario
     const supabase = createRouteHandlerClient({ cookies });
-
     const {
       data: { user },
-      error: authErr,
+      error: userErr,
     } = await supabase.auth.getUser();
 
-    if (authErr || !user) {
+    if (userErr || !user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    // supabaseAdmin es FUNCIÓN => hay que ejecutarla
-    const admin = supabaseAdmin();
-
-    // Comisión fija TixSwap (comprador): 2.5%
-    const buyerRate = 0.025;
+    const admin = getAdmin();
 
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
       .select("*")
       .eq("id", ticketId)
-      .maybeSingle();
+      .single();
 
-    if (tErr)
-      return NextResponse.json({ error: "Error leyendo ticket" }, { status: 500 });
-    if (!ticket)
+    if (tErr || !ticket) {
       return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-
-    if (!isBuyableStatus(ticket.status))
-      return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
-
-    let event = null;
-    if (ticket.event_id) {
-      const { data: ev } = await admin
-        .from("events")
-        .select("*")
-        .eq("id", ticket.event_id)
-        .maybeSingle();
-      event = ev || null;
     }
 
-    const sellerId = pickFirst(ticket.seller_id, ticket.owner_id, ticket.user_id);
+    const { data: event, error: eErr } = await admin
+      .from("events")
+      .select("*")
+      .eq("id", ticket.event_id)
+      .single();
+
+    if (eErr || !event) {
+      return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
+    }
+
     let seller = null;
-
-    if (sellerId) {
-      const { data: s } = await admin
+    if (ticket.seller_id) {
+      const { data: sellerRow } = await admin
         .from("profiles")
-        .select("id, full_name, email, rating_avg, rating_count")
-        .eq("id", sellerId)
+        .select("id,full_name,email")
+        .eq("id", ticket.seller_id)
         .maybeSingle();
-      seller = s || null;
+
+      const rating = await getSellerRating(admin, ticket.seller_id);
+
+      seller = {
+        id: ticket.seller_id,
+        username: pickFirst(sellerRow?.full_name, ticket.seller_name, sellerRow?.email, ticket.seller_email),
+        rating_avg: rating.rating_avg,
+        rating_count: rating.rating_count,
+        reputation: rating.rating_avg
+      };
     }
 
-    const priceRaw = pickFirst(ticket.price, ticket.value, ticket.amount, ticket.price_clp);
-    const ticketPrice = parseCLP(priceRaw);
-    const serviceFee = Math.round(ticketPrice * buyerRate);
-    const total = ticketPrice + serviceFee;
+    const base = Number(ticket.price || 0);
+    const service_fee = Math.round(base * 0.05);
+    const total_clp = base + service_fee;
 
-    return NextResponse.json({
-      ticketId,
-      feeRate: buyerRate,
-      ticketPrice,
-      serviceFee,
-      total,
-      ticket: {
-        id: ticket.id,
-        location: pickFirst(ticket.location, ticket.ubication, ticket.ubicacion),
-        sector: pickFirst(ticket.sector, ticket.section, ticket.zone),
-        row: pickFirst(ticket.row),
-        seat: pickFirst(ticket.seat),
+    const ticketOut = {
+      ...ticket,
+      section: ticket.sector ?? null,
+      row: ticket.row_label ?? null,
+      seat: ticket.seat_label ?? null,
+      notes: ticket.description ?? null
+    };
+
+    const eventOut = {
+      ...event,
+      name: event.title ?? event.name ?? null,
+      date: event.starts_at ?? event.date ?? null
+    };
+
+    return NextResponse.json(
+      {
+        ticket: ticketOut,
+        event: eventOut,
+        seller,
+        amount_clp: base,
+        service_fee,
+        total_clp
       },
-      event: event
-        ? {
-            id: event.id,
-            title: pickFirst(event.title, event.name),
-            city: pickFirst(event.city),
-            venue: pickFirst(event.venue),
-            date: pickFirst(event.date),
-          }
-        : null,
-      seller: seller
-        ? {
-            id: seller.id,
-            full_name: pickFirst(seller.full_name, seller.email),
-            rating_avg: seller.rating_avg,
-            rating_count: seller.rating_count,
-          }
-        : null,
-    });
+      { status: 200 }
+    );
   } catch (e) {
+    console.error("[api/checkout/preview] exception:", e);
     return NextResponse.json({ error: "Error al obtener resumen" }, { status: 500 });
   }
 }
+
