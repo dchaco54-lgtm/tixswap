@@ -10,9 +10,8 @@ export const runtime = "nodejs";
 const BUYABLE = new Set(["available", "published", "active", "listed"]);
 
 function makeBuyOrder() {
-  // <= 26 chars, sin acentos
-  const ts = Date.now().toString(); // 13
-  const rnd = Math.floor(Math.random() * 9000 + 1000).toString(); // 4
+  const ts = Date.now().toString();
+  const rnd = Math.floor(Math.random() * 9000 + 1000).toString();
   return `TSW${ts}${rnd}`.slice(0, 26);
 }
 
@@ -32,8 +31,11 @@ export async function POST(req) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 
+    // ✅ admin client
+    const admin = supabaseAdmin();
+
     // 1) Ticket
-    const { data: ticket, error: ticketErr } = await supabaseAdmin
+    const { data: ticket, error: ticketErr } = await admin
       .from("tickets")
       .select("id, price, status, seller_id, event_id")
       .eq("id", ticketId)
@@ -55,18 +57,18 @@ export async function POST(req) {
     const baseUrl = `${proto}://${host}`;
     const returnUrl = `${baseUrl}/api/payments/webpay/return`;
 
-    // 3) Hold ticket (para que tu return/abort lo pueda liberar)
-    await supabaseAdmin.from("tickets").update({ status: "held" }).eq("id", ticketId);
+    // 3) Hold ticket
+    await admin.from("tickets").update({ status: "held" }).eq("id", ticketId);
 
-    // 4) Crear transacción real
+    // 4) Crear transacción Webpay
     const buyOrder = makeBuyOrder();
     const sessionId = `${user.id}:${ticketId}`.slice(0, 61);
 
     const tx = getWebpayTransaction();
     const { token, url } = await tx.create(buyOrder, sessionId, total, returnUrl);
 
-    // 5) Guardar orden mínima (IMPORTANTE: tu return busca por webpay_token)
-    const { data: order, error: orderErr } = await supabaseAdmin
+    // 5) Guardar orden mínima
+    const { data: order, error: orderErr } = await admin
       .from("orders")
       .insert({
         ticket_id: ticketId,
@@ -83,8 +85,6 @@ export async function POST(req) {
       .single();
 
     if (orderErr) {
-      // Si tu tabla tiene columnas NOT NULL distintas, aquí te va a botar el error.
-      // Ajusta el payload para tu esquema real.
       console.error("Order insert error:", orderErr);
       return NextResponse.json({ ok: false, error: "Order insert failed (check DB schema)" }, { status: 500 });
     }
@@ -98,3 +98,4 @@ export async function POST(req) {
     return NextResponse.json({ ok: false, error: "Unexpected error" }, { status: 500 });
   }
 }
+
