@@ -1,43 +1,35 @@
-// app/events/[id]/page.jsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import supabase from "../../lib/supabaseClient";
 
-const AVAILABLE_TICKET_STATUSES = new Set([
-  "active",
-  "available",
-  "listed",
-  "published",
-]);
-
-function normalizeTicket(t) {
-  const status = (t?.status ?? "").toString().toLowerCase();
-
-  return {
-    ...t,
-    // compat nombres antiguos
-    sector: t?.sector ?? t?.section ?? null,
-    row_label: t?.row_label ?? t?.row ?? t?.fila ?? null,
-    seat_label: t?.seat_label ?? t?.seat ?? t?.asiento ?? null,
-    _statusNorm: status,
-  };
+function formatDateCL(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("es-CL", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+  }).format(d);
 }
 
-function normalizeEvent(e) {
-  return {
-    ...e,
-    // compat
-    title_norm: e?.title ?? e?.name ?? "Evento",
-    starts_at_norm: e?.starts_at ?? e?.date ?? null,
-  };
+function formatTimeCL(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("es-CL", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
 }
 
 function formatCLP(value) {
-  const n = Number(value ?? 0);
-  if (Number.isNaN(n)) return "$0";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
   return new Intl.NumberFormat("es-CL", {
     style: "currency",
     currency: "CLP",
@@ -45,234 +37,159 @@ function formatCLP(value) {
   }).format(n);
 }
 
-function formatDateCL(value) {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return new Intl.DateTimeFormat("es-CL", {
-    year: "numeric",
-    month: "long",
-    day: "2-digit",
-  }).format(d);
-}
-
-export default function EventDetailPage({ params }) {
-  const router = useRouter();
-  const { id } = params;
+export default function EventDetailPage() {
+  const params = useParams();
+  const id = params?.id;
 
   const [event, setEvent] = useState(null);
   const [tickets, setTickets] = useState([]);
-  const [profilesById, setProfilesById] = useState({});
+  const [sellerMap, setSellerMap] = useState({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
+    if (!id) return;
 
-    async function load() {
+    const load = async () => {
       try {
         setLoading(true);
-        setError("");
+        setErrorMsg("");
 
-        // 1) evento (select * para no romper si cambian columnas)
-        const { data: eventData, error: eventError } = await supabase
-          .from("events")
-          .select("*")
-          .eq("id", id)
-          .single();
+        // 1) Evento (server API)
+        const evRes = await fetch(`/api/events/${id}`, { cache: "no-store" });
+        const evJson = await evRes.json().catch(() => ({}));
+        if (!evRes.ok) {
+          throw new Error(evJson?.details || evJson?.error || "No pudimos cargar el evento.");
+        }
+        setEvent(evJson.event || null);
 
-        if (eventError) throw eventError;
+        // 2) Tickets (server API)
+        const tRes = await fetch(`/api/events/${id}/tickets`, { cache: "no-store" });
+        const tJson = await tRes.json().catch(() => ({}));
+        if (!tRes.ok) {
+          throw new Error(tJson?.details || tJson?.error || "No pudimos cargar las entradas en este momento.");
+        }
 
-        const e = normalizeEvent(eventData);
-        if (!cancelled) setEvent(e);
+        const list = Array.isArray(tJson.tickets) ? tJson.tickets : [];
+        setTickets(list);
 
-        // 2) tickets del evento (select * para evitar mismatch de columnas)
-        const { data: ticketsData, error: ticketsError } = await supabase
-          .from("tickets")
-          .select("*")
-          .eq("event_id", id)
-          .order("created_at", { ascending: false });
-
-        if (ticketsError) throw ticketsError;
-
-        const normalized = (ticketsData || []).map(normalizeTicket);
-        const visible = normalized.filter((t) => {
-          if (!t._statusNorm) return true; // si no hay status, igual mostrar
-          return AVAILABLE_TICKET_STATUSES.has(t._statusNorm);
-        });
-
-        if (!cancelled) setTickets(visible);
-
-        // 3) perfiles vendedores (si existe RLS y falla, no mata la página)
+        // 3) Vendedores (best-effort, si falla no bloquea)
         const sellerIds = Array.from(
-          new Set(visible.map((t) => t.seller_id).filter(Boolean))
+          new Set(list.map((t) => t?.seller_id).filter(Boolean))
         );
 
-        if (sellerIds.length > 0) {
-          const { data: profilesData, error: profilesError } = await supabase
+        if (sellerIds.length) {
+          const { data: profs, error: profErr } = await supabase
             .from("profiles")
-            .select("id,username,full_name,reputation")
+            .select("id, full_name, email")
             .in("id", sellerIds);
 
-          if (!profilesError && profilesData) {
+          if (!profErr && Array.isArray(profs)) {
             const map = {};
-            for (const p of profilesData) map[p.id] = p;
-            if (!cancelled) setProfilesById(map);
+            for (const p of profs) map[p.id] = p;
+            setSellerMap(map);
           }
         }
-      } catch (err) {
-        console.error("EventDetailPage load error:", err);
-        if (!cancelled) setError("No pudimos cargar las entradas en este momento.");
+      } catch (e) {
+        console.error(e);
+        setErrorMsg(e?.message || "Ocurrió un error cargando el evento.");
+        setEvent(null);
+        setTickets([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
-    }
-
-    if (id) load();
-
-    return () => {
-      cancelled = true;
     };
+
+    load();
   }, [id]);
 
-  const eventTitle = event?.title_norm ?? "Evento";
-  const eventWhen = formatDateCL(event?.starts_at_norm);
-  const eventWhere = [event?.city, event?.venue].filter(Boolean).join(" • ");
+  const title = useMemo(() => {
+    return event?.title || event?.name || "Evento";
+  }, [event]);
 
-  const sortedTickets = useMemo(() => {
-    // orden por precio (sube) si hay price
-    return [...tickets].sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
-  }, [tickets]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Header />
-        <main className="max-w-5xl mx-auto px-4 py-10">
-          <p className="text-gray-600">Cargando entradas...</p>
-        </main>
-      </div>
-    );
-  }
+  const subtitle = useMemo(() => {
+    const date = event?.starts_at ? formatDateCL(event.starts_at) : "";
+    const time = event?.starts_at ? formatTimeCL(event.starts_at) : "";
+    const place = [event?.venue, event?.city].filter(Boolean).join(", ");
+    return [date && time ? `${date} · ${time}` : (date || time), place]
+      .filter(Boolean)
+      .join(" · ");
+  }, [event]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
+    <div className="max-w-5xl mx-auto px-4 py-10">
+      <Link href="/events" className="text-blue-600 hover:underline">
+        ← Volver a eventos
+      </Link>
 
-      <main className="max-w-5xl mx-auto px-4 py-10">
-        <div className="mb-6">
-          <Link href="/events" className="text-blue-600 hover:underline">
-            ← Volver a eventos
-          </Link>
+      <div className="mt-6 p-6 rounded-2xl border bg-white">
+        <h1 className="text-3xl font-bold">{title}</h1>
+        {subtitle && <div className="text-gray-600 mt-2">{subtitle}</div>}
+      </div>
+
+      <h2 className="text-2xl font-semibold mt-10 mb-4">Entradas disponibles</h2>
+
+      {loading && <div className="text-gray-600">Cargando entradas...</div>}
+
+      {!loading && errorMsg && (
+        <div className="p-4 rounded-lg border border-red-200 bg-red-50 text-red-700">
+          {errorMsg}
         </div>
+      )}
 
-        <div className="bg-white rounded-2xl shadow p-6 mb-8">
-          <h1 className="text-3xl font-bold mb-2">{eventTitle}</h1>
+      {!loading && !errorMsg && tickets.length === 0 && (
+        <div className="text-gray-600">Aún no hay entradas publicadas para este evento.</div>
+      )}
 
-          <div className="text-gray-600">
-            {eventWhere && <div>{eventWhere}</div>}
-            {eventWhen && <div>{eventWhen}</div>}
-          </div>
+      {!loading && !errorMsg && tickets.length > 0 && (
+        <div className="grid md:grid-cols-2 gap-6">
+          {tickets.map((t) => (
+            <TicketCard key={t.id} ticket={t} seller={sellerMap[t.seller_id]} />
+          ))}
         </div>
-
-        <h2 className="text-xl font-semibold mb-4">Entradas disponibles</h2>
-
-        {error ? (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
-            {error}
-          </div>
-        ) : sortedTickets.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow p-6 text-gray-600">
-            No hay entradas disponibles por ahora.
-          </div>
-        ) : (
-          <div className="grid gap-4">
-            {sortedTickets.map((t) => {
-              const sellerProfile = t.seller_id ? profilesById[t.seller_id] : null;
-              return (
-                <TicketCard
-                  key={t.id}
-                  ticket={t}
-                  sellerProfile={sellerProfile}
-                  onBuy={() => router.push(`/checkout/${t.id}`)}
-                />
-              );
-            })}
-          </div>
-        )}
-      </main>
+      )}
     </div>
   );
 }
 
-function Header() {
+function TicketCard({ ticket, seller }) {
+  const price =
+    ticket?.price ||
+    ticket?.price_clp ||
+    ticket?.amount ||
+    ticket?.total_paid_clp ||
+    ticket?.total ||
+    null;
+
+  const section = ticket?.section || ticket?.sector || "";
+  const row = ticket?.row || ticket?.fila || "";
+  const seat = ticket?.seat || ticket?.asiento || "";
+
+  const sellerName = seller?.full_name || seller?.email || "Vendedor";
+
   return (
-    <header className="bg-white border-b">
-      <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-        <Link href="/" className="text-xl font-bold text-blue-600">
-          TixSwap
-        </Link>
-        <nav className="flex items-center gap-6 text-gray-700">
-          <Link href="/events" className="hover:text-blue-600">
+    <div className="p-5 rounded-2xl border bg-white">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-lg font-semibold">
+            {section ? `Sección ${section}` : "Entrada"}
+          </div>
+          <div className="text-gray-600 mt-1">
+            {[row && `Fila ${row}`, seat && `Asiento ${seat}`].filter(Boolean).join(" · ")}
+          </div>
+          <div className="text-gray-600 mt-2">Vende: {sellerName}</div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-xl font-bold">{price ? formatCLP(price) : "-"}</div>
+          <Link
+            href={`/checkout/${ticket.id}`}
+            className="inline-block mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700"
+          >
             Comprar
           </Link>
-          <Link href="/sell" className="hover:text-blue-600">
-            Vender
-          </Link>
-          <Link href="/how" className="hover:text-blue-600">
-            Cómo funciona
-          </Link>
-        </nav>
-      </div>
-    </header>
-  );
-}
-
-function TicketCard({ ticket, sellerProfile, onBuy }) {
-  const sellerName =
-    sellerProfile?.full_name ||
-    sellerProfile?.username ||
-    ticket?.seller_name ||
-    "Vendedor";
-
-  const reputation = sellerProfile?.reputation ?? null;
-
-  const meta = [
-    ticket?.sector ? `Sector: ${ticket.sector}` : null,
-    ticket?.row_label ? `Fila: ${ticket.row_label}` : null,
-    ticket?.seat_label ? `Asiento: ${ticket.seat_label}` : null,
-  ].filter(Boolean);
-
-  return (
-    <div className="bg-white rounded-2xl shadow p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-      <div>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="font-semibold">{sellerName}</div>
-          {reputation !== null ? (
-            <div className="text-sm text-gray-600">★ {Number(reputation).toFixed(1)}</div>
-          ) : (
-            <div className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-              Vendedor nuevo
-            </div>
-          )}
         </div>
-
-        {ticket?.title && <div className="text-gray-900 mb-1">{ticket.title}</div>}
-        {meta.length > 0 && <div className="text-gray-600 text-sm">{meta.join(" • ")}</div>}
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="text-2xl font-bold">{formatCLP(ticket?.price)}</div>
-        <button
-          onClick={onBuy}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-xl"
-        >
-          Comprar
-        </button>
       </div>
     </div>
   );
 }
-
-
-
