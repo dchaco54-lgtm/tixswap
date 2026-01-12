@@ -3,205 +3,107 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
+import { useRouter } from "next/navigation";
+import supabase from "../lib/supabaseClient";
 
-function norm(str) {
-  return (str || "")
-    .toString()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}
-
-function formatEventDate(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return new Intl.DateTimeFormat("es-CL", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(d);
-  } catch {
-    return String(iso);
-  }
-}
-
-// ✅ Orden global: próximos primero (más cercanos), luego lejanos, al final pasados
-function sortEventsByProximity(list = []) {
-  const now = Date.now();
-  const arr = Array.isArray(list) ? [...list] : [];
-
-  arr.sort((a, b) => {
-    const ta = a?.starts_at ? new Date(a.starts_at).getTime() : null;
-    const tb = b?.starts_at ? new Date(b.starts_at).getTime() : null;
-
-    const aMissing = !ta || Number.isNaN(ta);
-    const bMissing = !tb || Number.isNaN(tb);
-    if (aMissing && bMissing) return 0;
-    if (aMissing) return 1; // sin fecha al final
-    if (bMissing) return -1;
-
-    const aFuture = ta >= now;
-    const bFuture = tb >= now;
-
-    if (aFuture && !bFuture) return -1; // futuros primero
-    if (!aFuture && bFuture) return 1;
-
-    // ambos futuros: asc (más cercano primero)
-    if (aFuture && bFuture) return ta - tb;
-
-    // ambos pasados: desc (más reciente pasado primero)
-    return tb - ta;
-  });
-
-  return arr;
+function formatDateCL(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("es-CL", {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  }).format(d);
 }
 
 export default function EventsPage() {
   const router = useRouter();
-  const pathname = usePathname();
-
-  const [userChecked, setUserChecked] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [events, setEvents] = useState([]);
-  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
 
-  // Auth guard: si no hay sesión -> login y vuelve a /events
+  // Mantengo tu guard de sesión (si quieres que sea público, se saca)
   useEffect(() => {
-    const guard = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data?.user) {
-        router.replace(`/login?redirectTo=${encodeURIComponent(pathname || "/events")}`);
-        return;
-      }
-      setUserChecked(true);
+    const checkSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data?.session) router.push("/login");
     };
-    guard();
-  }, [router, pathname]);
+    checkSession();
+  }, [router]);
 
   useEffect(() => {
-    if (!userChecked) return;
-
     const load = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .order("starts_at", { ascending: true, nullsFirst: false });
+      try {
+        setLoading(true);
+        setErrorMsg("");
 
-      if (!error) {
-        const sorted = sortEventsByProximity(Array.isArray(data) ? data : []);
-        setEvents(sorted);
+        const res = await fetch("/api/events", { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          throw new Error(json?.details || json?.error || "No se pudieron cargar los eventos.");
+        }
+
+        setEvents(Array.isArray(json.events) ? json.events : []);
+      } catch (e) {
+        console.error(e);
+        setErrorMsg(e?.message || "No se pudieron cargar los eventos.");
+        setEvents([]);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     load();
-  }, [userChecked]);
+  }, []);
 
-  const filtered = useMemo(() => {
-    const q = norm(query);
-    if (!q) return events;
-
-    return (events || []).filter((ev) => {
-      const hay = norm(
-        `${ev?.title || ev?.name || ""} ${ev?.venue || ev?.location || ""} ${ev?.city || ""}`
-      );
-      return hay.includes(q);
-    });
-  }, [query, events]);
-
-  if (!userChecked) {
-    return <div className="max-w-6xl mx-auto px-4 py-16 text-slate-600">Cargando…</div>;
-  }
+  const hasEvents = useMemo(() => events.length > 0, [events]);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-12">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <Link href="/" className="text-sm text-slate-600 hover:text-blue-600">
-            ← Volver al inicio
-          </Link>
-          <h1 className="mt-2 text-3xl font-bold text-slate-900">Eventos disponibles</h1>
-          <p className="mt-2 text-slate-600">
-            Elige un evento para ver las entradas publicadas por otros usuarios.
-          </p>
+    <div className="max-w-5xl mx-auto px-4 py-10">
+      <h1 className="text-3xl font-bold mb-6">Eventos</h1>
+
+      {loading && (
+        <div className="text-gray-600">Cargando eventos...</div>
+      )}
+
+      {!loading && errorMsg && (
+        <div className="p-4 rounded-lg border border-red-200 bg-red-50 text-red-700">
+          {errorMsg}
         </div>
+      )}
 
-        <button
-          onClick={() => router.push("/sell")}
-          className="bg-green-600 text-white px-5 py-2.5 rounded-full font-semibold hover:opacity-90"
-        >
-          Publicar entrada
-        </button>
-      </div>
+      {!loading && !errorMsg && !hasEvents && (
+        <div className="text-gray-600">No hay eventos disponibles.</div>
+      )}
 
-      <div className="mt-8">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Buscar evento (artista, recinto, ciudad...)"
-          className="w-full border rounded-xl px-5 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-        />
-      </div>
-
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {loading ? (
-          <p className="text-slate-600">Cargando eventos…</p>
-        ) : filtered.length === 0 ? (
-          <p className="text-slate-600">No hay eventos que coincidan con tu búsqueda.</p>
-        ) : (
-          filtered.map((ev) => {
+      {!loading && !errorMsg && hasEvents && (
+        <div className="grid md:grid-cols-2 gap-6">
+          {events.map((ev) => {
             const title = ev?.title || ev?.name || "Evento";
-            const date = formatEventDate(ev?.starts_at || ev?.date);
-            const venue = ev?.venue || ev?.location || "";
+            const date = ev?.starts_at ? formatDateCL(ev.starts_at) : "";
             const city = ev?.city || "";
-            const imageUrl = (ev?.image_url || "").trim();
-
+            const venue = ev?.venue || "";
             return (
-              <div key={ev.id} className="bg-white border rounded-xl p-6 shadow-sm">
-                {/* ✅ Imagen (solo se agrega, no cambia lo demás) */}
-                <div className="w-full h-40 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center mb-4">
-                  {imageUrl ? (
-                    <img
-                      src={imageUrl}
-                      alt={title}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <span className="text-sm text-gray-400">Falta cargar imagen</span>
-                  )}
+              <Link
+                key={ev.id}
+                href={`/events/${ev.id}`}
+                className="block p-5 rounded-2xl border bg-white hover:shadow-md transition"
+              >
+                <div className="text-xl font-semibold">{title}</div>
+                <div className="text-gray-600 mt-1">
+                  {date ? `${date}` : ""}
+                  {date && (city || venue) ? " · " : ""}
+                  {[venue, city].filter(Boolean).join(", ")}
                 </div>
-
-                <h3 className="text-xl font-bold text-slate-900">{title}</h3>
-                <div className="mt-3 text-slate-700 space-y-1">
-                  {date && <p>📅 {date}</p>}
-                  {(venue || city) && (
-                    <p>
-                      📍 {venue}
-                      {venue && city ? " · " : ""}
-                      {city}
-                    </p>
-                  )}
-                </div>
-
-                <Link
-                  href={`/events/${ev.id}`}
-                  className="mt-5 inline-block text-blue-600 font-semibold hover:underline"
-                >
-                  Ver entradas disponibles →
-                </Link>
-              </div>
+              </Link>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   );
 }
+
