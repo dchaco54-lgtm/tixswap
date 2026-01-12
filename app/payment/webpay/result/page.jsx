@@ -3,23 +3,22 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import RedirectCountdown from "./RedirectCountdown";
 
 export default async function WebpayResultPage({ searchParams }) {
-  const token = searchParams?.token;
-  const status = searchParams?.status;
-
-  let payment = null;
-
-  if (token) {
-    const supabase = supabaseAdmin();
-    const { data } = await supabase
-      .from("payment_transactions")
-      .select("id, status, amount_clp, order_id, ticket_id, created_at")
-      .eq("webpay_token", token)
-      .single();
-
-    payment = data || null;
-  }
+  const status = searchParams?.status || "unknown";
+  const orderId = searchParams?.orderId || null;
+  const token = searchParams?.token || null;
 
   const isApproved = status === "approved";
+  const admin = supabaseAdmin();
+
+  let order = null;
+
+  if (orderId) {
+    const { data } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
+    order = data || null;
+  } else if (token) {
+    const { data } = await admin.from("orders").select("*").eq("webpay_token", token).maybeSingle();
+    order = data || null;
+  }
 
   return (
     <div className="max-w-xl mx-auto p-6">
@@ -28,23 +27,66 @@ export default async function WebpayResultPage({ searchParams }) {
       </h1>
 
       <p className="text-gray-600 mb-4">
-        Estado recibido: <b>{status || "desconocido"}</b>
+        Estado recibido: <b>{status}</b>
       </p>
 
-      {payment && (
-        <div className="border rounded p-4 mb-4 text-sm">
+      {order && (
+        <div className="border rounded p-4 mb-4 text-sm space-y-2">
           <div className="flex justify-between">
-            <span>ID Transacción</span>
-            <span className="font-mono">{payment.id}</span>
+            <span>Orden</span>
+            <span className="font-mono">{order.id}</span>
           </div>
+
+          {!!order.buy_order && (
+            <div className="flex justify-between">
+              <span>BuyOrder</span>
+              <span className="font-mono">{order.buy_order}</span>
+            </div>
+          )}
+
           <div className="flex justify-between">
             <span>Monto</span>
-            <span>${Number(payment.amount_clp || 0).toLocaleString("es-CL")}</span>
+            <span>
+              $
+              {Number(
+                order.total_paid_clp ??
+                  order.total_amount ??
+                  order.amount_clp ??
+                  order.amount ??
+                  0
+              ).toLocaleString("es-CL")}
+            </span>
           </div>
+
           <div className="flex justify-between">
             <span>Status interno</span>
-            <span>{payment.status}</span>
+            <span>{order.status || order.payment_state}</span>
           </div>
+
+          {isApproved && (
+            <>
+              {!!order.webpay_authorization_code && (
+                <div className="flex justify-between">
+                  <span>Autorización</span>
+                  <span className="font-mono">{order.webpay_authorization_code}</span>
+                </div>
+              )}
+
+              {!!order.webpay_card_last4 && (
+                <div className="flex justify-between">
+                  <span>Tarjeta</span>
+                  <span>**** {order.webpay_card_last4}</span>
+                </div>
+              )}
+
+              {!!order.paid_at && (
+                <div className="flex justify-between">
+                  <span>Fecha</span>
+                  <span>{new Date(order.paid_at).toLocaleString("es-CL")}</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -53,8 +95,8 @@ export default async function WebpayResultPage({ searchParams }) {
           {isApproved ? "Ir al dashboard" : "Volver al inicio"}
         </Link>
 
-        {!isApproved && payment?.ticket_id && (
-          <Link className="tix-btn-outline" href={`/tickets/${payment.ticket_id}`}>
+        {!isApproved && order?.ticket_id && (
+          <Link className="tix-btn-outline" href={`/tickets/${order.ticket_id}`}>
             Intentar nuevamente
           </Link>
         )}
