@@ -1,59 +1,67 @@
 import { NextResponse } from "next/server";
-import supabaseAdmin from "@/lib/supabaseAdmin";
+import { createClient } from "@supabase/supabase-js";
 
-// Devuelve tickets (entradas) para un evento.
-// BD usa: sector / row_label / seat_label
-// Front espera: section / row / seat (legacy)
+export const runtime = "nodejs";
+
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !serviceKey) {
+    throw new Error(
+      "Missing env vars: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"
+    );
+  }
+
+  return createClient(url, serviceKey, {
+    auth: { persistSession: false },
+  });
+}
+
+async function columnExists(supabase, table, column) {
+  const { error } = await supabase.from(table).select(column).limit(1);
+  return !error;
+}
+
 export async function GET(_req, { params }) {
   try {
-    const eventId = params?.id;
-    if (!eventId) {
+    const { id } = params || {};
+    if (!id) {
       return NextResponse.json({ error: "Missing event id" }, { status: 400 });
     }
 
-    const supabase = supabaseAdmin();
+    const supabase = getSupabaseAdmin();
 
-    let { data: tickets, error } = await supabase
+    let q = supabase
       .from("tickets")
-      .select(
-        "id,event_id,price,status,created_at,sector,row_label,seat_label,title,description,seller_id,seller_name,seller_email,seller_rut"
-      )
-      .eq("event_id", eventId)
-      .eq("status", "active")
+      .select("*")
+      .eq("event_id", id)
       .order("created_at", { ascending: false });
 
-    // fallback ultra simple (por si algo raro pasa)
-    if (error) {
-      const fallback = await supabase
-        .from("tickets")
-        .select("id,event_id,price,status,created_at,sector,row_label,seat_label,seller_id,seller_name")
-        .eq("event_id", eventId)
-        .eq("status", "active")
-        .order("created_at", { ascending: false });
-
-      tickets = fallback.data || [];
-      error = fallback.error;
+    // Filtrado seguro según columnas disponibles
+    if (await columnExists(supabase, "tickets", "status")) {
+      // Lo más típico en tu repo: active / available
+      q = q.in("status", ["active", "available"]);
+    } else if (await columnExists(supabase, "tickets", "is_sold")) {
+      q = q.eq("is_sold", false);
+    } else if (await columnExists(supabase, "tickets", "sold")) {
+      q = q.eq("sold", false);
     }
 
+    const { data, error } = await q;
+
     if (error) {
-      console.error("[api/events/:id/tickets] error:", error);
       return NextResponse.json(
-        { tickets: [], count: 0, warning: error.message || "Error loading tickets" },
-        { status: 200 }
+        { error: "DB error", details: error.message },
+        { status: 500 }
       );
     }
 
-    const normalized = (tickets || []).map((t) => ({
-      ...t,
-      section: t.sector ?? null,
-      row: t.row_label ?? null,
-      seat: t.seat_label ?? null,
-      notes: t.description ?? null
-    }));
-
-    return NextResponse.json({ tickets: normalized, count: normalized.length }, { status: 200 });
+    return NextResponse.json({ tickets: data ?? [] });
   } catch (e) {
-    console.error("[api/events/:id/tickets] exception:", e);
-    return NextResponse.json({ tickets: [], count: 0, error: "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Server error", details: e?.message ?? String(e) },
+      { status: 500 }
+    );
   }
 }
