@@ -1,77 +1,100 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { getFees, getFeeRatesForRole } from "@/lib/fees";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getFees } from "@/lib/fees";
+import { getWebpayTransaction } from "@/lib/webpay";
 
-function parseCLP(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (value == null) return 0;
-  const digits = String(value).replace(/[^0-9]/g, "");
-  const n = Number(digits);
-  return Number.isFinite(n) ? n : 0;
-}
+export const runtime = "nodejs";
 
-function pickFirst(...vals) {
-  for (const v of vals) if (v !== undefined && v !== null && v !== "") return v;
-  return null;
-}
+const BUYABLE = new Set(["available", "published", "active", "listed"]);
 
-function isBuyableStatus(status) {
-  const s = String(status || "").toLowerCase().trim();
-  if (!s) return true;
-  return ["available", "published", "active", "listed"].includes(s);
+function makeBuyOrder() {
+  // <= 26 chars, sin acentos
+  const ts = Date.now().toString(); // 13
+  const rnd = Math.floor(Math.random() * 9000 + 1000).toString(); // 4
+  return `TSW${ts}${rnd}`.slice(0, 26);
 }
 
 export async function POST(req) {
   try {
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json();
     const ticketId = body?.ticketId;
-    const returnUrl = body?.returnUrl;
 
-    if (!ticketId) return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
+    if (!ticketId) {
+      return NextResponse.json({ ok: false, error: "ticketId is required" }, { status: 400 });
+    }
 
     const supabase = createRouteHandlerClient({ cookies });
-
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const { data: buyerProfile } = await supabase
-      .from("profiles")
-      .select("id, role")
-      .eq("id", user.id)
-      .maybeSingle();
+    if (!user) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
 
-    const { buyerRate } = getFeeRatesForRole(buyerProfile?.role);
-
-    const { data: ticket } = await supabase
+    // 1) Ticket
+    const { data: ticket, error: ticketErr } = await supabaseAdmin
       .from("tickets")
-      .select("*")
+      .select("id, price, status, seller_id, event_id")
       .eq("id", ticketId)
-      .maybeSingle();
+      .single();
 
-    if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    if (!isBuyableStatus(ticket.status))
-      return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
+    if (ticketErr || !ticket) {
+      return NextResponse.json({ ok: false, error: "Ticket not found" }, { status: 404 });
+    }
+    if (!BUYABLE.has(ticket.status)) {
+      return NextResponse.json({ ok: false, error: "Ticket not available" }, { status: 409 });
+    }
 
-    const priceRaw = pickFirst(ticket.price, ticket.value, ticket.amount, ticket.price_clp);
-    const ticketPrice = parseCLP(priceRaw);
-    const fees = getFees(ticketPrice, { buyerRate, buyerMin: 0 });
+    const fees = getFees(ticket.price);
+    const total = fees.total;
 
-    // ✅ Aquí va la integración REAL con Transbank cuando tengas credenciales.
-    // Por ahora: flujo SIMULADO (para que no se quede pegado / no rompa UX).
-    const origin = new URL(req.url).origin;
-    const finalReturnUrl = returnUrl || `${origin}/checkout/${ticketId}`;
+    // 2) URLs
+    const proto = req.headers.get("x-forwarded-proto") || "https";
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host");
+    const baseUrl = `${proto}://${host}`;
+    const returnUrl = `${baseUrl}/api/payments/webpay/return`;
 
-    const token = `sim_webpay_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const processUrl = `${origin}/pago-simulado/webpay?ticketId=${encodeURIComponent(
-      ticketId
-    )}&amount=${encodeURIComponent(fees.total)}&returnUrl=${encodeURIComponent(
-      finalReturnUrl
-    )}&token=${encodeURIComponent(token)}`;
+    // 3) Hold ticket (para que tu return/abort lo pueda liberar)
+    await supabaseAdmin.from("tickets").update({ status: "held" }).eq("id", ticketId);
 
-    return NextResponse.json({ token, processUrl, amount: fees.total });
+    // 4) Crear transacción real
+    const buyOrder = makeBuyOrder();
+    const sessionId = `${user.id}:${ticketId}`.slice(0, 61);
+
+    const tx = getWebpayTransaction();
+    const { token, url } = await tx.create(buyOrder, sessionId, total, returnUrl);
+
+    // 5) Guardar orden mínima (IMPORTANTE: tu return busca por webpay_token)
+    const { data: order, error: orderErr } = await supabaseAdmin
+      .from("orders")
+      .insert({
+        ticket_id: ticketId,
+        seller_id: ticket.seller_id,
+        event_id: ticket.event_id,
+        buy_order: buyOrder,
+        webpay_token: token,
+        total_amount: total,
+        amount_clp: ticket.price,
+        buyer_id: user.id,
+        status: "pending_payment",
+      })
+      .select("id")
+      .single();
+
+    if (orderErr) {
+      // Si tu tabla tiene columnas NOT NULL distintas, aquí te va a botar el error.
+      // Ajusta el payload para tu esquema real.
+      console.error("Order insert error:", orderErr);
+      return NextResponse.json({ ok: false, error: "Order insert failed (check DB schema)" }, { status: 500 });
+    }
+
+    // 6) URL interna que hace POST a Webpay
+    const processUrl = `${baseUrl}/payment/webpay/redirect?token=${encodeURIComponent(token)}&url=${encodeURIComponent(url)}`;
+
+    return NextResponse.json({ ok: true, processUrl, token, url, buyOrder, orderId: order.id });
   } catch (e) {
-    return NextResponse.json({ error: "Error creando sesión Webpay" }, { status: 500 });
+    console.error(e);
+    return NextResponse.json({ ok: false, error: "Unexpected error" }, { status: 500 });
   }
 }
-
