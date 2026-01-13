@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { getWebpayTransaction } from '@/lib/webpay';
 
 // Fuerza runtime Node (Transbank SDK usa Node APIs)
@@ -82,8 +82,9 @@ export async function POST(req) {
     const fee = calcFeeCLP(subtotal);
     const total = subtotal + fee;
 
-    const buyOrder = uuidv4().replace(/-/g, '').slice(0, 26); // Webpay: máx 26
-    const sessionId = uuidv4();
+    // Webpay: buy_order máx 26 chars
+    const buyOrder = randomUUID().replace(/-/g, '').slice(0, 26);
+    const sessionId = randomUUID();
 
     const { data: order, error: orderErr } = await supabase
       .from('orders')
