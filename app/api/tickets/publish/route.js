@@ -1,195 +1,65 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextResponse } from 'next/server';
+import { supabaseReadServer } from '@/lib/supabaseReadServer';
 
-export const runtime = "nodejs";
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL");
-  if (!serviceKey) throw new Error("Missing env: SUPABASE_SERVICE_ROLE_KEY");
-
-  return createClient(url, serviceKey, {
-    auth: { persistSession: false },
-  });
-}
-
-async function columnExists(supabase, table, col) {
-  const { error } = await supabase.from(table).select(col).limit(1);
-  return !error;
-}
-
-function pickFirstDefined(obj, keys) {
-  for (const k of keys) {
-    if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
-  }
-  return null;
-}
-
-export async function POST(req) {
+export async function POST(request) {
   try {
-    const supabase = getSupabaseAdmin();
+    const body = await request.json();
+    const { eventId, sector, fila, asiento, price } = body || {};
 
-    // AUTH
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    if (!token) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+    if (!eventId || !price) {
+      return NextResponse.json(
+        { error: 'Faltan datos: eventId y price son requeridos.' },
+        { status: 400 }
+      );
     }
 
-    const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userData?.user) {
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    }
-    const user = userData.user;
+    const supabase = supabaseReadServer();
 
-    // BODY
-    const body = await req.json().catch(() => ({}));
-    const event_id = body?.event_id ?? null;
-    const price = Number(body?.price);
-
-    if (!event_id) return NextResponse.json({ error: "Falta event_id" }, { status: 400 });
-    if (!Number.isFinite(price) || price <= 0) {
-      return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
+    const { data: auth, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !auth?.user) {
+      return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
     }
 
-    const table = "tickets";
+    // seller profile
+    const sellerId = auth.user.id;
 
-    // payload base
-    const insertPayload = { event_id, price };
+    const { data: profile, error: profErr } = await supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', sellerId)
+      .maybeSingle();
 
-    // seller_id + seller_rut
-    if (await columnExists(supabase, table, "seller_id")) {
-      insertPayload.seller_id = user.id;
+    if (profErr) {
+      return NextResponse.json({ error: profErr.message }, { status: 500 });
     }
 
-    if (await columnExists(supabase, table, "seller_rut")) {
-      const { data: prof, error: profErr } = await supabase
-        .from("profiles")
-        .select("rut")
-        .eq("id", user.id)
-        .maybeSingle();
+    const insertPayload = {
+      event_id: eventId,
+      seller_id: sellerId,
+      seller_name: profile?.full_name || auth.user.email || 'Vendedor',
+      seller_email: profile?.email || auth.user.email || null,
+      price: Number(price),
+      status: 'active',
 
-      if (!profErr && prof?.rut) insertPayload.seller_rut = prof.rut;
-    }
+      // ✅ Estas columnas EXISTEN en tu schema -> insert directo (sin columnExists)
+      sector: sector || null,
+      row_label: fila || null,
+      seat_label: asiento || null,
+    };
 
-    // seller_name (opcional)
-    if (await columnExists(supabase, table, "seller_name")) {
-      const sellerName =
-        pickFirstDefined(user.user_metadata, ["name", "full_name", "nombre"]) || user.email || null;
-      if (sellerName) insertPayload.seller_name = sellerName;
-    }
-
-    // paso 1 (opcionales)
-    const description = body?.description ?? null;
-    if (description && (await columnExists(supabase, table, "description"))) insertPayload.description = description;
-
-    const sector = body?.sector ?? null;
-    if (sector && (await columnExists(supabase, table, "sector"))) insertPayload.sector = sector;
-
-    const rowValue = body?.fila ?? body?.row ?? null;
-    if (rowValue) {
-      if (await columnExists(supabase, table, "row")) insertPayload.row = rowValue;
-      else if (await columnExists(supabase, table, "fila")) insertPayload.fila = rowValue;
-    }
-
-    const seatValue = body?.asiento ?? body?.seat ?? null;
-    if (seatValue) {
-      if (await columnExists(supabase, table, "seat")) insertPayload.seat = seatValue;
-      else if (await columnExists(supabase, table, "asiento")) insertPayload.asiento = seatValue;
-    }
-
-    // original price
-    const originalPrice = body?.originalPrice;
-    const originalNumber =
-      originalPrice === null || originalPrice === undefined ? null : Number(originalPrice);
-
-    if (Number.isFinite(originalNumber)) {
-      if (await columnExists(supabase, table, "original_price")) insertPayload.original_price = originalNumber;
-      else if (await columnExists(supabase, table, "price_original")) insertPayload.price_original = originalNumber;
-    }
-
-    // sale type
-    const saleType = body?.saleType || "fixed";
-    if (await columnExists(supabase, table, "sale_type")) insertPayload.sale_type = saleType;
-
-    // status/title si existen
-    if (await columnExists(supabase, table, "status")) insertPayload.status = "active";
-    if (await columnExists(supabase, table, "title")) insertPayload.title = "Entrada";
-
-    // pdf link (best-effort)
-    const tu = body?.ticketUpload || {};
-    const ticketUploadId = tu?.ticketUploadId ?? tu?.id ?? null;
-    const storagePath = tu?.filePath ?? tu?.storagePath ?? null;
-    const fileHash = tu?.sha256 ?? tu?.fileHash ?? null;
-
-    if (ticketUploadId && (await columnExists(supabase, table, "ticket_upload_id"))) {
-      insertPayload.ticket_upload_id = ticketUploadId;
-    }
-    if (storagePath && (await columnExists(supabase, table, "ticket_pdf_path"))) {
-      insertPayload.ticket_pdf_path = storagePath;
-    }
-    if (fileHash && (await columnExists(supabase, table, "file_hash"))) {
-      insertPayload.file_hash = fileHash;
-    }
-
-    // INSERT
-    // --- Cargos por servicio (MVP): 2.5% comprador + 2.5% vendedor (Ultra 0%) ---
-let userRole = "basic";
-try {
-  const { data: prof } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-  userRole = prof?.role || "basic";
-} catch {
-  // fallback basic
-}
-
-const buyer_fee_rate = 0.025;
-const seller_fee_rate = String(userRole).toLowerCase() === "ultra_premium" ? 0 : 0.025;
-
-const buyer_fee_clp = Math.max(0, Math.round(price * buyer_fee_rate));
-const seller_fee_clp = Math.max(0, Math.round(price * seller_fee_rate));
-const total_paid_clp = Math.max(0, price + buyer_fee_clp);
-const seller_payout_clp = Math.max(0, price - seller_fee_clp);
-const platform_fee_clp = Math.max(0, buyer_fee_clp + seller_fee_clp);
-
-// Guardamos breakdown si existen las columnas (no rompe si la tabla aún no las tiene)
-if (await columnExists(supabase, table, "buyer_fee_rate")) insertPayload.buyer_fee_rate = buyer_fee_rate;
-if (await columnExists(supabase, table, "seller_fee_rate")) insertPayload.seller_fee_rate = seller_fee_rate;
-
-if (await columnExists(supabase, table, "buyer_fee_clp")) insertPayload.buyer_fee_clp = buyer_fee_clp;
-if (await columnExists(supabase, table, "seller_fee_clp")) insertPayload.seller_fee_clp = seller_fee_clp;
-
-if (await columnExists(supabase, table, "total_paid_clp")) insertPayload.total_paid_clp = total_paid_clp;
-if (await columnExists(supabase, table, "seller_payout_clp")) insertPayload.seller_payout_clp = seller_payout_clp;
-
-if (await columnExists(supabase, table, "platform_fee_clp")) insertPayload.platform_fee_clp = platform_fee_clp;
-    const { data: inserted, error: insErr } = await supabase
-      .from(table)
+    const { data: created, error: insertErr } = await supabase
+      .from('tickets')
       .insert(insertPayload)
-      .select("id, event_id, seller_id, seller_rut")
+      .select('*')
       .single();
 
-    if (insErr) {
-      return NextResponse.json({ error: "DB insert error", details: insErr.message }, { status: 500 });
+    if (insertErr) {
+      return NextResponse.json({ error: insertErr.message }, { status: 500 });
     }
 
-    return NextResponse.json({
-      ok: true,
-      ticket_id: inserted.id,
-      event_id: inserted.event_id,
-      seller_id: inserted.seller_id ?? null,
-      seller_rut: inserted.seller_rut ?? null,
-    });
+    return NextResponse.json({ ok: true, ticket: created });
   } catch (e) {
-    return NextResponse.json(
-      { error: "Server error", details: e?.message || String(e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'Error inesperado' }, { status: 500 });
   }
 }
+
