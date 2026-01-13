@@ -1,129 +1,119 @@
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getWebpayTransaction } from "@/lib/webpay";
-
-function supabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing Supabase admin env vars");
-  return createClient(url, key, { auth: { persistSession: false } });
-}
-
-function getBaseUrl(request) {
-  const proto = request.headers.get("x-forwarded-proto") || "https";
-  const host =
-    request.headers.get("x-forwarded-host") ||
-    request.headers.get("host") ||
-    "";
-  if (!host) return "https://tixswap.cl";
-  return `${proto}://${host}`;
-}
-
-function safeRelativePath(p) {
-  if (!p) return "/payment/webpay/result?status=error&reason=missing_path";
-  // Bloquear redirects a URLs absolutas
-  if (p.startsWith("http://") || p.startsWith("https://")) {
-    return "/payment/webpay/result?status=error&reason=invalid_redirect";
-  }
-  if (!p.startsWith("/")) return `/${p}`;
-  return p;
-}
-
-function redirectTo(request, path) {
-  const base = getBaseUrl(request);
-  return NextResponse.redirect(new URL(safeRelativePath(path), base));
-}
-
-async function finalizeTicketPurchase(sessionId, payload) {
-  const sb = supabaseAdmin();
-
-  const { data: orders, error: orderErr } = await sb
-    .from("orders")
-    .select("*")
-    .eq("session_id", sessionId)
-    .eq("status", "pending")
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (orderErr) throw orderErr;
-  const order = orders?.[0];
-  if (!order) throw new Error("Order not found for this session");
-
-  const { error: updOrderErr } = await sb
-    .from("orders")
-    .update({
-      status: "paid",
-      paid_at: new Date().toISOString(),
-      payment_payload: payload,
-    })
-    .eq("id", order.id);
-
-  if (updOrderErr) throw updOrderErr;
-
-  const { error: updTicketErr } = await sb
-    .from("tickets")
-    .update({
-      status: "sold",
-      sold_at: new Date().toISOString(),
-      sold_order_id: order.id,
-    })
-    .eq("id", order.ticket_id);
-
-  if (updTicketErr) throw updTicketErr;
-
-  return order;
-}
+import { NextResponse } from 'next/server';
+import { WebpayPlus } from 'transbank-sdk';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function POST(request) {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+  const supabase = supabaseAdmin();
+
   try {
-    // Webpay vuelve normalmente con token_ws en POST form-data
-    let token = null;
+    const formData = await request.formData();
 
-    const url = new URL(request.url);
-    token = url.searchParams.get("token_ws");
+    // Webpay success normally sends token_ws
+    const tokenWs = formData.get('token_ws')?.toString() || null;
 
-    if (!token) {
-      const ct = request.headers.get("content-type") || "";
-      if (ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data")) {
-        const form = await request.formData();
-        token = form.get("token_ws");
+    // When user cancels, Webpay often sends TBK_* fields (token_ws absent)
+    const tbkToken = formData.get('TBK_TOKEN')?.toString() || null;
+    const tbkBuyOrder = formData.get('TBK_ORDEN_COMPRA')?.toString() || null;
+
+    // 1) CANCELLED FLOW (no token_ws)
+    if (!tokenWs) {
+      if (tbkBuyOrder) {
+        const { data: order } = await supabase
+          .from('orders')
+          .select('id, ticket_id, status')
+          .eq('buy_order', tbkBuyOrder)
+          .single();
+
+        if (order) {
+          await supabase
+            .from('orders')
+            .update({ status: 'canceled', payment_state: 'canceled' })
+            .eq('id', order.id);
+
+          await supabase
+            .from('tickets')
+            .update({ status: 'active' })
+            .eq('id', order.ticket_id)
+            .eq('status', 'held');
+
+          const redirect = new URL(`/checkout/${order.ticket_id}`, siteUrl);
+          redirect.searchParams.set('payment', 'failed');
+          redirect.searchParams.set('provider', 'webpay');
+          return NextResponse.redirect(redirect);
+        }
       }
+
+      return NextResponse.redirect(new URL('/checkout?payment=failed&provider=webpay', siteUrl));
     }
 
-    if (!token) {
-      return redirectTo(request, "/payment/webpay/result?status=error&reason=missing_token");
+    // 2) Find order by token
+    const { data: order, error: orderErr } = await supabase
+      .from('orders')
+      .select('id, ticket_id, buy_order, session_id, status')
+      .or(`payment_request_id.eq.${tokenWs},webpay_token.eq.${tokenWs}`)
+      .single();
+
+    if (orderErr || !order) {
+      return NextResponse.redirect(new URL('/checkout?payment=failed&provider=webpay', siteUrl));
     }
 
-    const tx = getWebpayTransaction();
-    const result = await tx.commit(token);
+    const okRedirect = new URL(`/checkout/${order.ticket_id}`, siteUrl);
+    okRedirect.searchParams.set('payment', 'success');
+    okRedirect.searchParams.set('provider', 'webpay');
 
-    const isAuthorized =
-      result?.status === "AUTHORIZED" &&
-      (result?.response_code === 0 || result?.response_code === "0");
+    const failRedirect = new URL(`/checkout/${order.ticket_id}`, siteUrl);
+    failRedirect.searchParams.set('payment', 'failed');
+    failRedirect.searchParams.set('provider', 'webpay');
 
-    if (!isAuthorized) {
-      return redirectTo(
-        request,
-        `/payment/webpay/result?status=failed&token=${encodeURIComponent(token)}`
-      );
+    // 3) Commit transaction with Webpay
+    const tx = new WebpayPlus.Transaction();
+    const commit = await tx.commit(tokenWs);
+
+    const ok = commit?.status === 'AUTHORIZED' && commit?.response_code === 0;
+
+    if (ok) {
+      await supabase
+        .from('orders')
+        .update({
+          status: 'paid',
+          payment_state: 'paid',
+          paid_at: new Date().toISOString(),
+          total_paid_clp: commit.amount,
+          payment_method: commit.payment_type_code || null,
+          payment_payload: commit,
+        })
+        .eq('id', order.id);
+
+      await supabase
+        .from('tickets')
+        .update({ status: 'sold' })
+        .eq('id', order.ticket_id);
+
+      return NextResponse.redirect(okRedirect);
     }
 
-    // Guardar pago en DB
-    const order = await finalizeTicketPurchase(result.session_id, result);
+    // 4) FAIL / NOT AUTHORIZED => release ticket
+    await supabase
+      .from('orders')
+      .update({
+        status: 'payment_failed',
+        payment_state: 'failed',
+        payment_payload: commit,
+      })
+      .eq('id', order.id);
 
-    return redirectTo(
-      request,
-      `/payment/webpay/result?status=success&orderId=${encodeURIComponent(order.id)}`
-    );
+    await supabase
+      .from('tickets')
+      .update({ status: 'active' })
+      .eq('id', order.ticket_id)
+      .eq('status', 'held');
+
+    return NextResponse.redirect(failRedirect);
   } catch (err) {
-    console.error("Webpay return error:", err);
-    return redirectTo(
-      request,
-      `/payment/webpay/result?status=error&reason=${encodeURIComponent(err?.message || "unknown")}`
-    );
+    console.error('Webpay return error:', err);
+    return NextResponse.redirect(new URL('/checkout?payment=failed&provider=webpay', siteUrl));
   }
 }
+
 
