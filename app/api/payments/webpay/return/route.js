@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { WebpayPlus } from 'transbank-sdk';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getWebpayTransaction } from '@/lib/webpay';
 
 export async function POST(request) {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
   const supabase = supabaseAdmin();
 
   try {
@@ -13,7 +13,6 @@ export async function POST(request) {
     const tokenWs = formData.get('token_ws')?.toString() || null;
 
     // When user cancels, Webpay often sends TBK_* fields (token_ws absent)
-    const tbkToken = formData.get('TBK_TOKEN')?.toString() || null;
     const tbkBuyOrder = formData.get('TBK_ORDEN_COMPRA')?.toString() || null;
 
     // 1) CANCELLED FLOW (no token_ws)
@@ -33,7 +32,7 @@ export async function POST(request) {
 
           await supabase
             .from('tickets')
-            .update({ status: 'active' })
+            .update({ status: 'active', hold_expires_at: null })
             .eq('id', order.ticket_id)
             .eq('status', 'held');
 
@@ -67,7 +66,7 @@ export async function POST(request) {
     failRedirect.searchParams.set('provider', 'webpay');
 
     // 3) Commit transaction with Webpay
-    const tx = new WebpayPlus.Transaction();
+    const tx = getWebpayTransaction();
     const commit = await tx.commit(tokenWs);
 
     const ok = commit?.status === 'AUTHORIZED' && commit?.response_code === 0;
@@ -87,7 +86,7 @@ export async function POST(request) {
 
       await supabase
         .from('tickets')
-        .update({ status: 'sold' })
+        .update({ status: 'sold', hold_expires_at: null })
         .eq('id', order.ticket_id);
 
       return NextResponse.redirect(okRedirect);
@@ -105,7 +104,7 @@ export async function POST(request) {
 
     await supabase
       .from('tickets')
-      .update({ status: 'active' })
+      .update({ status: 'active', hold_expires_at: null })
       .eq('id', order.ticket_id)
       .eq('status', 'held');
 
@@ -115,5 +114,4 @@ export async function POST(request) {
     return NextResponse.redirect(new URL('/checkout?payment=failed&provider=webpay', siteUrl));
   }
 }
-
 
