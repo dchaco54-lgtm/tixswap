@@ -2,15 +2,28 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getWebpayPlusTransaction } from '@/lib/webpay';
-import { calculateFees } from '@/lib/fees';
+import { getWebpayTransaction } from '@/lib/webpay';
+import { getFees } from '@/lib/fees';
 
-function safeJsonParse(str) {
-  try {
-    return JSON.parse(str);
-  } catch {
-    return null;
-  }
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+// Webpay: buyOrder máx 26 chars. Mantengámoslo corto y simple.
+function makeBuyOrder() {
+  // Ej: TS + base36(timestamp) + base36(random)
+  const ts = Date.now().toString(36);
+  const rnd = Math.floor(Math.random() * 1e6).toString(36);
+  return (`TS${ts}${rnd}`).toUpperCase().slice(0, 26);
+}
+
+function makeSessionId() {
+  const raw = crypto.randomUUID().replace(/-/g, '');
+  return `S${raw.slice(0, 20)}`; // <= 21 chars
+}
+
+function normalizeBaseUrl(url) {
+  if (!url) return '';
+  return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
 export async function POST(req) {
@@ -19,13 +32,17 @@ export async function POST(req) {
     const { ticketId, buyerId } = body || {};
 
     if (!ticketId) {
-      return NextResponse.json({ error: 'ticketId es requerido' }, { status: 400 });
+      return NextResponse.json({ error: 'ticketId requerido' }, { status: 400 });
     }
 
-    // Autenticación via Bearer token (porque tu sesión está en localStorage, no cookies)
+    // Usuario logueado (token desde el cliente)
+    // OJO: este proyecto usa supabase-js en el browser (localStorage), no cookies.
+    // Por eso acá validamos con Authorization: Bearer <access_token>
     const admin = supabaseAdmin();
     const authHeader = req.headers.get('authorization') || '';
-    const accessToken = authHeader.startsWith('Bearer ') ? authHeader.slice('Bearer '.length) : null;
+    const accessToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : null;
 
     if (!accessToken) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
@@ -33,25 +50,19 @@ export async function POST(req) {
 
     const { data: userData, error: userError } = await admin.auth.getUser(accessToken);
     const user = userData?.user;
-
     if (userError || !user) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    // Si el frontend manda buyerId, lo validamos (anti-spoof)
+    // Defensa extra: si el frontend envía buyerId, debe coincidir
     if (buyerId && buyerId !== user.id) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    // 1) Traer ticket + evento
+    // Ticket
     const { data: ticket, error: ticketError } = await admin
       .from('tickets')
-      .select(
-        `
-        id, status, price, seller_id, event_id,
-        events:event_id ( id, title, starts_at )
-      `
-      )
+      .select('id, status, price, seller_id')
       .eq('id', ticketId)
       .single();
 
@@ -63,18 +74,22 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Ticket no disponible' }, { status: 409 });
     }
 
-    const event = ticket.events;
-    const ticketPrice = Number(ticket.price || 0);
+    if (ticket.seller_id === user.id) {
+      return NextResponse.json({ error: 'No puedes comprar tu propio ticket' }, { status: 400 });
+    }
 
-    // 2) Calcular fees
-    const fees = calculateFees(ticketPrice);
-    const amount = Math.round(fees.totalDue);
+    // Fees (2.5% con mínimo $1.200)
+    const amount = Number(ticket.price);
+    const { feeAmount, totalAmount } = getFees(amount, {
+      buyerRate: 0.025,
+      buyerMin: 1200,
+    });
 
-    // 3) Crear orderId
-    const orderId = crypto.randomUUID();
+    const buyOrder = makeBuyOrder();
+    const sessionId = makeSessionId();
 
-    // 4) Reservar ticket (race-safe) y crear orden
-    // 4.1: HOLD ticket (solo si aún está active)
+    // 1) Reservar ticket (race-safe)
+    // Nota: en PostgREST un UPDATE que afecta 0 filas NO lanza error, por eso validamos el retorno.
     const { data: heldRows, error: holdError } = await admin
       .from('tickets')
       .update({ status: 'held' })
@@ -82,75 +97,65 @@ export async function POST(req) {
       .eq('status', 'active')
       .select('id');
 
-    if (holdError || !heldRows?.length) {
-      return NextResponse.json({ error: 'No se pudo reservar el ticket' }, { status: 409 });
+    if (holdError || !heldRows || heldRows.length === 0) {
+      return NextResponse.json(
+        { error: 'No se pudo reservar el ticket (puede que ya lo hayan tomado)' },
+        { status: 409 }
+      );
     }
 
-    // 4.2: Crear orden
-    const { error: orderError } = await admin.from('orders').insert({
-      id: orderId,
-      ticket_id: ticketId,
-      buyer_id: user.id,
-      seller_id: ticket.seller_id,
-      amount,
-      platform_fee: Math.round(fees.platformFee),
-      status: 'pending',
-      payment_method: 'webpay',
-    });
+    // 2) Crear orden
+    const { data: order, error: orderError } = await admin
+      .from('orders')
+      .insert({
+        ticket_id: ticketId,
+        user_id: user.id, // comprador
+        seller_id: ticket.seller_id,
+        buy_order: buyOrder,
+        session_id: sessionId,
+        amount,
+        fee: feeAmount,
+        total_amount: totalAmount,
+        payment_state: 'created',
+        payment_status: 'pending',
+      })
+      .select('id')
+      .single();
 
-    if (orderError) {
+    if (orderError || !order) {
       // rollback hold
       await admin.from('tickets').update({ status: 'active' }).eq('id', ticketId).eq('status', 'held');
       return NextResponse.json({ error: 'No se pudo crear la orden' }, { status: 500 });
     }
 
-    // 5) Iniciar Webpay
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || '';
-    const returnUrl = `${baseUrl}/api/payments/webpay/return?orderId=${orderId}`;
+    // 3) Crear sesión en Webpay
+    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
+    const returnUrl = `${baseUrl}/api/payments/webpay/return`;
 
-    const buyOrder = orderId;
-    const sessionId = user.id;
-
+    let result;
     try {
-      const webpay = getWebpayPlusTransaction();
-      const response = await webpay.create(buyOrder, sessionId, amount, returnUrl);
-
-      const token = response?.token;
-      const url = response?.url;
-
-      if (!token || !url) {
-        throw new Error('Respuesta inválida de Webpay');
-      }
-
-      await admin
-        .from('orders')
-        .update({
-          payment_provider: 'webpay',
-          payment_token: token,
-          payment_status: 'initiated',
-        })
-        .eq('id', orderId);
-
-      return NextResponse.json({ token, url, orderId });
+      const transaction = getWebpayTransaction();
+      result = await transaction.create(buyOrder, sessionId, totalAmount, returnUrl);
     } catch (e) {
-      // Rollback: marcar orden como failed y liberar ticket
-      const msg = typeof e?.message === 'string' ? e.message : 'Error Webpay';
-
-      await admin
-        .from('orders')
-        .update({
-          payment_state: 'failed',
-          payment_status: 'failed',
-          error_message: msg,
-        })
-        .eq('id', orderId);
-
+      // rollback hold + orden
       await admin.from('tickets').update({ status: 'active' }).eq('id', ticketId).eq('status', 'held');
-
-      return NextResponse.json({ error: msg }, { status: 500 });
+      await admin.from('orders').update({ payment_state: 'failed', payment_status: 'failed' }).eq('id', order.id);
+      throw e;
     }
-  } catch (e) {
-    const msg = typeof e?.message === 'string' ? e.message : 'Error interno';
-    return NextResponse.json({ error: msg }, { status: 500 });
+
+    // 4) Persistir token/url en la orden
+    await admin
+      .from('orders')
+      .update({
+        webpay_token: result.token,
+        payment_process_url: result.url,
+        payment_state: 'session_created',
+      })
+      .eq('id', order.id);
+
+    return NextResponse.json({ token: result.token, url: result.url }, { status: 200 });
+  } catch (err) {
+    console.error('Webpay create-session error:', err);
+    return NextResponse.json({ error: 'Error interno' }, { status: 500 });
   }
 }
