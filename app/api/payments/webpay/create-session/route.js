@@ -1,174 +1,175 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
+
 import { getWebpayTransaction } from '@/lib/webpay';
+import { calculateFees } from '@/lib/fees';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// Fuerza runtime Node (Transbank SDK usa Node APIs)
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
 
-function getBaseUrl() {
-  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL;
-  if (fromEnv) return fromEnv.replace(/\/$/, '');
+async function insertOrderWithFallback(sb, orderData) {
+  let payload = { ...orderData };
+  const required = new Set(['ticket_id', 'buyer_id', 'seller_id', 'status', 'buy_order', 'session_id']);
 
-  const vercelUrl = process.env.VERCEL_URL;
-  if (vercelUrl) return `https://${vercelUrl}`;
+  // Try to gracefully handle schema mismatches by removing unknown columns.
+  // This helps when the DB schema is evolving across deployments.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { error } = await sb.from('orders').insert(payload);
+    if (!error) return { ok: true };
 
-  return 'http://localhost:3000';
+    const msg = String(error.message || '');
+    // Postgres error format: column "X" of relation "orders" does not exist
+    let m = msg.match(/column\s+"([^"]+)"\s+of\s+relation\s+"orders"\s+does\s+not\s+exist/i);
+    if (!m) {
+      // PostgREST schema cache format: Could not find the 'X' column of 'orders' in the schema cache
+      m = msg.match(/Could not find the '([^']+)' column of 'orders'/i);
+    }
+
+    const missingColumn = m?.[1];
+    if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
+      // If the DB is missing a required column, the integration cannot work.
+      if (required.has(missingColumn)) {
+        return { ok: false, error };
+      }
+
+      delete payload[missingColumn];
+      continue;
+    }
+
+    return { ok: false, error };
+  }
+
+  return { ok: false, error: { message: 'No se pudo crear la orden (schema mismatch)' } };
 }
 
-function jsonError(message, details, status = 500) {
-  return new NextResponse(JSON.stringify({ error: message, details }), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
+function jsonError(message, status = 400, extra = {}) {
+  // Never leak secrets. Keep responses clean for the UI.
+  return NextResponse.json({ error: message, ...extra }, { status });
 }
 
-// Comisión TixSwap: 2.5% con mínimo $1.200
-function calcFeeCLP(subtotalCLP) {
-  const pct = Math.round(subtotalCLP * 0.025);
-  return Math.max(pct, 1200);
+function getBaseUrl(req) {
+  const origin = req.headers.get('origin');
+  const fromEnv =
+    process.env.NEXT_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
+  return origin || fromEnv || 'http://localhost:3000';
+}
+
+function toInt(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.round(n);
 }
 
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
-    const { ticketId, buyerId } = body || {};
+    const ticketId = body?.ticketId;
+    const buyerId = body?.buyerId;
 
-    if (!ticketId || !buyerId) {
-      return jsonError('Solicitud inválida', 'Faltan ticketId o buyerId', 400);
-    }
+    if (!ticketId) return jsonError('ticketId es requerido', 400);
+    if (!buyerId) return jsonError('buyerId es requerido', 400);
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !serviceRoleKey) {
+    // Admin client (service role). This file uses lib/supabaseAdmin which supports
+    // multiple env var names (SUPABASE_URL, NEXT_PUBLIC_SUPABASE_URL, etc.).
+    let sb;
+    try {
+      sb = supabaseAdmin();
+    } catch (e) {
       return jsonError(
-        'Configuración faltante',
-        'NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY no configurados',
+        'Falta configurar Supabase (service role) en el servidor. Revisa SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SERVICE_KEY.',
         500
       );
     }
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
-
-    // 1) Obtener ticket
-    const { data: ticket, error: ticketErr } = await supabase
+    // 1) Fetch ticket (must be active)
+    const { data: ticket, error: ticketErr } = await sb
       .from('tickets')
-      .select('id,status,price,event_id,seller_id')
+      .select('id, price, price_clp, status, seller_id')
       .eq('id', ticketId)
       .single();
 
-    if (ticketErr) return jsonError('No se pudo obtener ticket', ticketErr.message, 500);
-    if (!ticket) return jsonError('Ticket no encontrado', 'No existe ticket con ese id', 404);
+    if (ticketErr) return jsonError(`Error al obtener ticket: ${ticketErr.message}`, 500);
+    if (!ticket) return jsonError('Ticket no encontrado', 404);
 
-    // Solo se puede comprar si está activo
     if (ticket.status !== 'active') {
-      return jsonError('Ticket no disponible', `Estado actual: ${ticket.status}`, 409);
+      return jsonError('Este ticket ya no está disponible.', 409);
     }
 
-    // 2) Marcar ticket como "held" (reservado) antes de iniciar Webpay
-    const { error: holdErr } = await supabase
+    const price = toInt(ticket.price ?? ticket.price_clp, 0);
+    if (price <= 0) return jsonError('El precio del ticket es inválido', 400);
+
+    // 2) Compute fees (buyer pays total)
+    const { platformFee, total } = calculateFees(price);
+    const amountToPay = toInt(total, price);
+
+    // 3) Create order / hold ticket
+    const buyOrder = randomUUID().replace(/-/g, '').slice(0, 26);
+    const sessionId = buyerId; // keep it simple for now
+
+    // Hold for 10 minutes
+    const holdExpiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    const { error: holdErr } = await sb
       .from('tickets')
-      .update({ status: 'held' })
+      .update({ status: 'held', hold_expires_at: holdExpiresAt })
       .eq('id', ticketId)
       .eq('status', 'active');
 
-    if (holdErr) return jsonError('No se pudo reservar el ticket', holdErr.message, 500);
+    if (holdErr) return jsonError(`No se pudo reservar el ticket: ${holdErr.message}`, 500);
 
-    // 3) Crear Order en BD (columnas reales del esquema actual)
-    const subtotal = Number(ticket.price || 0);
-    const fee = calcFeeCLP(subtotal);
-    const total = subtotal + fee;
+    // Create order row (used later by /api/payments/webpay/return)
+    // Keep this payload minimal to avoid breaking if your DB schema changes.
+    // (You can add more columns later, once confirmed in Supabase.)
+    const orderData = {
+      ticket_id: ticketId,
+      buyer_id: buyerId,
+      seller_id: ticket.seller_id,
+      status: 'pending',
+      buy_order: buyOrder,
+      session_id: sessionId,
+      total_amount: amountToPay, // older schema compatibility
+      total_clp: amountToPay, // newer schema compatibility
+      payment_provider: 'webpay',
+    };
 
-    // Webpay: buy_order máx 26 chars
-    const buyOrder = randomUUID().replace(/-/g, '').slice(0, 26);
-    const sessionId = randomUUID();
-
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .insert({
-        buyer_id: buyerId,
-        seller_id: ticket.seller_id,
-        event_id: ticket.event_id,
-        ticket_id: ticket.id,
-
-        amount: subtotal,
-        amount_clp: subtotal,
-        fee_clp: fee,
-        total_amount: total,
-        total_clp: total,
-
-        currency: 'CLP',
-        status: 'created',
-        payment_state: 'pending',
-        payment_method: 'webpay',
-
-        payment_request_id: buyOrder,
-      })
-      .select('*')
-      .single();
-
-    if (orderErr) {
-      // rollback: devuelve ticket a active si falló crear orden
-      await supabase.from('tickets').update({ status: 'active' }).eq('id', ticketId);
-      return jsonError('No se pudo crear la orden', orderErr.message, 500);
+    const insertRes = await insertOrderWithFallback(sb, orderData);
+    if (!insertRes.ok) {
+      // revert hold
+      await sb.from('tickets').update({ status: 'active', hold_expires_at: null }).eq('id', ticketId);
+      return jsonError(`No se pudo crear la orden: ${insertRes.error?.message || 'Error desconocido'}`, 500);
     }
 
-    // 4) Crear transacción Webpay
-    const baseUrl = getBaseUrl();
-    const returnUrl = `${baseUrl}/api/payments/webpay/return?orderId=${order.id}`;
-
+    // 4) Create Webpay session (Integration)
     const tx = getWebpayTransaction();
+    const baseUrl = getBaseUrl(req);
+    const returnUrl = `${baseUrl}/api/payments/webpay/return`;
 
     let createResult;
     try {
-      createResult = await Promise.race([
-        tx.create(buyOrder, sessionId, total, returnUrl),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout al crear transacción Webpay')), 20000)
-        ),
-      ]);
-    } catch (err) {
-      await supabase
-        .from('orders')
-        .update({
-          status: 'failed',
-          payment_state: 'failed',
-          payment_payload: { error: String(err?.message || err) },
-        })
-        .eq('id', order.id);
-
-      await supabase.from('tickets').update({ status: 'active' }).eq('id', ticketId);
-
-      return jsonError('Error al iniciar Webpay', err?.message || String(err), 502);
+      createResult = await tx.create(buyOrder, sessionId, amountToPay, returnUrl);
+    } catch (e) {
+      // revert hold + order
+      await sb.from('orders').delete().eq('buy_order', buyOrder);
+      await sb.from('tickets').update({ status: 'active', hold_expires_at: null }).eq('id', ticketId);
+      return jsonError(`Webpay: no se pudo iniciar la transacción (${e?.message || 'error'}).`, 502);
     }
 
-    // 5) Guardar datos de Webpay en la orden
-    const { error: updErr } = await supabase
-      .from('orders')
-      .update({
-        payment_provider: 'webpay',
-        payment_state: 'initiated',
-        status: 'initiated',
-        webpay_token: createResult?.token,
-        payment_process_url: createResult?.url,
-        payment_payload: createResult,
-      })
-      .eq('id', order.id);
-
-    if (updErr) {
-      console.error('Order update after webpay create failed:', updErr);
+    const token = createResult?.token;
+    const url = createResult?.url;
+    if (!token || !url) {
+      await sb.from('orders').delete().eq('buy_order', buyOrder);
+      await sb.from('tickets').update({ status: 'active', hold_expires_at: null }).eq('id', ticketId);
+      return jsonError('Webpay: respuesta inválida al crear la transacción.', 502);
     }
 
-    return NextResponse.json({
-      orderId: order.id,
-      url: createResult.url,
-      token: createResult.token,
-    });
+    // Store token for later lookups
+    await sb.from('orders').update({ token_ws: token }).eq('buy_order', buyOrder);
+
+    return NextResponse.json({ token, url });
   } catch (err) {
-    console.error('create-session fatal:', err);
-    return jsonError('Error interno', err?.message || String(err), 500);
+    console.error('[webpay/create-session] Unhandled error:', err);
+    return jsonError('Error interno al iniciar el pago.', 500);
   }
 }
