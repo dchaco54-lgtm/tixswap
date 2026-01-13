@@ -82,17 +82,22 @@ export default function CheckoutPage() {
     setError(null);
 
     try {
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr) throw authErr;
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) throw sessionErr;
 
-      const buyerId = authData?.user?.id;
-      if (!buyerId) {
+      const buyerId = sessionData?.session?.user?.id;
+      const accessToken = sessionData?.session?.access_token;
+
+      if (!buyerId || !accessToken) {
         throw new Error('Debes iniciar sesión para comprar.');
       }
 
       const res = await fetch('/api/payments/webpay/create-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ ticketId, buyerId }),
       });
 
@@ -296,6 +301,8 @@ export default function CheckoutPage() {
     </div>
   );
 }
+
+
 
 
 
