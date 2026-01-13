@@ -260,9 +260,9 @@ export default function CheckoutPage() {
                 <span>{formatPrice(fees?.ticketPrice ?? ticket?.price)}</span>
               </div>
               <div className="flex justify-between">
-                <span>Cargo TixSwap (2,5% · mínimo $1.200)</span>
-                <span>{formatPrice(fees?.platformFee ?? 0)}</span>
-              </div>
+  <span>Cargo TixSwap</span>
+  <span>{formatPrice(fees?.platformFee ?? 0)}</span>
+</div>
               <div className="border-t pt-3 flex justify-between text-lg font-semibold">
                 <span>Total a pagar</span>
                 <span>{formatPrice(fees?.totalDue ?? 0)}</span>
