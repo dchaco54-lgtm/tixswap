@@ -1,125 +1,150 @@
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { supabaseAdmin as getAdmin } from "@/lib/supabaseAdmin";
+import { NextResponse } from 'next/server';
+import { supabaseServiceOptional } from '@/lib/supabaseServiceOptional';
+import { supabaseReadServer } from '@/lib/supabaseReadServer';
+import { calculateFees } from '@/lib/fees';
 
-function pickFirst(...vals) {
-  for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== "") return v;
-  return null;
+function getSupabase() {
+  // Prefer service role (avoids RLS issues), fallback to authenticated/anon server client
+  return supabaseServiceOptional() ?? supabaseReadServer();
 }
 
-async function getSellerRating(admin, sellerId) {
-  if (!sellerId) return { rating_avg: null, rating_count: 0 };
+async function getSellerWithRatings(supabase, sellerId, fallbackName) {
+  // Seller basic info
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, full_name, tier')
+    .eq('id', sellerId)
+    .maybeSingle();
 
-  const { data, error } = await admin
-    .from("ratings")
-    .select("stars")
-    .eq("target_id", sellerId)
-    .eq("role", "seller");
+  const name = profile?.full_name || fallbackName || 'Vendedor';
 
-  if (error || !data) return { rating_avg: null, rating_count: 0 };
+  // Ratings list (no embedded join assumptions)
+  const { data: ratings, error: rErr } = await supabase
+    .from('ratings')
+    .select('stars, comment, created_at, rater_id')
+    .eq('target_id', sellerId)
+    .order('created_at', { ascending: false })
+    .limit(10);
 
-  const rating_count = data.length;
+  if (rErr) {
+    return {
+      id: sellerId,
+      name,
+      tier: profile?.tier ?? null,
+      rating_avg: null,
+      rating_count: 0,
+      recent_ratings: [],
+    };
+  }
+
+  const safeRatings = (ratings || []).filter((r) => r && r.stars != null);
+
+  const rating_count = safeRatings.length;
   const rating_avg =
     rating_count > 0
-      ? data.reduce((acc, r) => acc + (Number(r.stars) || 0), 0) / rating_count
+      ? safeRatings.reduce((acc, r) => acc + Number(r.stars || 0), 0) / rating_count
       : null;
 
-  return { rating_avg, rating_count };
+  // Fetch rater names (separate query, robust)
+  const raterIds = [...new Set(safeRatings.map((r) => r.rater_id).filter(Boolean))];
+  let raterMap = {};
+  if (raterIds.length) {
+    const { data: raters } = await supabase
+      .from('profiles')
+      .select('id, full_name')
+      .in('id', raterIds);
+
+    (raters || []).forEach((p) => {
+      raterMap[p.id] = p.full_name || 'Usuario';
+    });
+  }
+
+  const recent_ratings = safeRatings.map((r) => ({
+    stars: Number(r.stars || 0),
+    comment: r.comment || '',
+    created_at: r.created_at,
+    rater_id: r.rater_id,
+    rater_name: raterMap[r.rater_id] || 'Usuario',
+  }));
+
+  return {
+    id: sellerId,
+    name,
+    tier: profile?.tier ?? null,
+    rating_avg,
+    rating_count,
+    recent_ratings,
+  };
 }
 
-export async function GET(req) {
+export async function POST(req) {
   try {
-    const url = new URL(req.url);
-    const ticketId = url.searchParams.get("ticketId");
+    const { ticketId } = await req.json();
 
     if (!ticketId) {
-      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
+      return NextResponse.json({ error: 'ticketId es requerido' }, { status: 400 });
     }
 
-    const supabase = createRouteHandlerClient({ cookies });
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser();
+    const supabase = getSupabase();
 
-    if (userErr || !user) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    // 1) Ticket (sin embeds)
+    const { data: ticket, error: tErr } = await supabase
+      .from('tickets')
+      .select(
+        'id, title, description, sector, row_label, seat_label, price, status, event_id, seller_id, seller_name'
+      )
+      .eq('id', ticketId)
+      .maybeSingle();
+
+    if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
+    if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 });
+
+    if (ticket.status !== 'active') {
+      return NextResponse.json({ error: 'Ticket no disponible' }, { status: 409 });
     }
 
-    const admin = getAdmin();
+    // 2) Evento (sin embeds)
+    const { data: event, error: eErr } = await supabase
+      .from('events')
+      .select('id, title, date, time, venue, city, image_url')
+      .eq('id', ticket.event_id)
+      .maybeSingle();
 
-    const { data: ticket, error: tErr } = await admin
-      .from("tickets")
-      .select("*")
-      .eq("id", ticketId)
-      .single();
+    if (eErr) return NextResponse.json({ error: eErr.message }, { status: 500 });
 
-    if (tErr || !ticket) {
-      return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-    }
-
-    const { data: event, error: eErr } = await admin
-      .from("events")
-      .select("*")
-      .eq("id", ticket.event_id)
-      .single();
-
-    if (eErr || !event) {
-      return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
-    }
-
-    let seller = null;
-    if (ticket.seller_id) {
-      const { data: sellerRow } = await admin
-        .from("profiles")
-        .select("id,full_name,email")
-        .eq("id", ticket.seller_id)
-        .maybeSingle();
-
-      const rating = await getSellerRating(admin, ticket.seller_id);
-
-      seller = {
-        id: ticket.seller_id,
-        username: pickFirst(sellerRow?.full_name, ticket.seller_name, sellerRow?.email, ticket.seller_email),
-        rating_avg: rating.rating_avg,
-        rating_count: rating.rating_count,
-        reputation: rating.rating_avg
-      };
-    }
-
-    const base = Number(ticket.price || 0);
-    const service_fee = Math.round(base * 0.05);
-    const total_clp = base + service_fee;
-
-    const ticketOut = {
-      ...ticket,
-      section: ticket.sector ?? null,
-      row: ticket.row_label ?? null,
-      seat: ticket.seat_label ?? null,
-      notes: ticket.description ?? null
-    };
-
-    const eventOut = {
-      ...event,
-      name: event.title ?? event.name ?? null,
-      date: event.starts_at ?? event.date ?? null
-    };
-
-    return NextResponse.json(
-      {
-        ticket: ticketOut,
-        event: eventOut,
-        seller,
-        amount_clp: base,
-        service_fee,
-        total_clp
-      },
-      { status: 200 }
+    // 3) Seller + ratings
+    const seller = await getSellerWithRatings(
+      supabase,
+      ticket.seller_id,
+      ticket.seller_name
     );
+
+    // 4) Fees (2.5% con mínimo 1200)
+    const fees = calculateFees(Number(ticket.price || 0));
+
+    return NextResponse.json({
+      ticket: {
+        id: ticket.id,
+        title: ticket.title,
+        description: ticket.description,
+        sector: ticket.sector,
+        row_label: ticket.row_label,
+        seat_label: ticket.seat_label,
+        price: Number(ticket.price || 0),
+      },
+      event: event || null,
+      seller,
+      fees,
+      totals: {
+        subtotal: Number(ticket.price || 0),
+        fee: fees.platformFee,
+        total: Number(ticket.price || 0) + fees.platformFee,
+      },
+    });
   } catch (e) {
-    console.error("[api/checkout/preview] exception:", e);
-    return NextResponse.json({ error: "Error al obtener resumen" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || 'Error inesperado en preview' },
+      { status: 500 }
+    );
   }
 }
-
