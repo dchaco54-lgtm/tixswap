@@ -2,46 +2,54 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';
+import { formatPrice } from '@/lib/fees';
 
-function formatCLP(value) {
-  const n = Number(value ?? 0);
-  return new Intl.NumberFormat('es-CL', {
-    style: 'currency',
-    currency: 'CLP',
-    maximumFractionDigits: 0,
-  }).format(n);
-}
-
-function Stars({ value }) {
-  const v = Number(value);
-  if (!Number.isFinite(v)) return <span className="text-gray-500">—</span>;
-
-  const rounded = Math.round(v * 10) / 10; // 4.2
-  return (
-    <span className="inline-flex items-center gap-2">
-      <span className="text-yellow-500">★</span>
-      <span className="font-medium">{rounded}</span>
-    </span>
-  );
+function formatDateTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString('es-CL', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 }
 
 export default function CheckoutPage() {
-  const { ticketId } = useParams();
   const router = useRouter();
+  const { ticketId } = useParams();
 
-  const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [showReviews, setShowReviews] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [error, setError] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [showSellerComments, setShowSellerComments] = useState(false);
+
+  const ticket = preview?.ticket;
+  const event = preview?.event;
+  const fees = preview?.fees;
+  const seller = preview?.seller;
+  const sellerStats = preview?.sellerStats;
+  const sellerRatings = preview?.sellerRatings || [];
+
+  const eventDateLabel = useMemo(() => formatDateTime(event?.starts_at), [event?.starts_at]);
 
   useEffect(() => {
-    let alive = true;
+    let cancelled = false;
 
-    async function load() {
+    async function loadPreview() {
+      setLoading(true);
+      setError(null);
+
       try {
-        setLoading(true);
-        setError('');
-
         const res = await fetch('/api/checkout/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -51,225 +59,237 @@ export default function CheckoutPage() {
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          throw new Error(data?.error || 'No se pudo cargar el resumen');
+          throw new Error(data?.error || 'No pudimos cargar el checkout');
         }
 
-        if (alive) setPreview(data);
+        if (!cancelled) setPreview(data);
       } catch (e) {
-        if (alive) setError(e?.message || 'Error al obtener resumen');
+        if (!cancelled) setError(e.message || 'Error interno');
       } finally {
-        if (alive) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    if (ticketId) load();
+    if (ticketId) loadPreview();
+
     return () => {
-      alive = false;
+      cancelled = true;
     };
   }, [ticketId]);
 
-  const breakdown = useMemo(() => {
-    if (!preview) return null;
-    const subtotal = Number(preview?.totals?.subtotal ?? 0);
-    const fee = Number(preview?.fees?.platformFee ?? 0);
-    const total = Number(preview?.totals?.total ?? subtotal + fee);
+  async function startWebpayPayment() {
+    setPaying(true);
+    setError(null);
 
-    return { subtotal, fee, total };
-  }, [preview]);
-
-  async function startPayment() {
     try {
-      setError('');
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr) throw authErr;
+
+      const buyerId = authData?.user?.id;
+      if (!buyerId) {
+        throw new Error('Debes iniciar sesión para comprar.');
+      }
+
       const res = await fetch('/api/payments/webpay/create-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketId }),
+        body: JSON.stringify({ ticketId, buyerId }),
       });
 
       const data = await res.json().catch(() => ({}));
 
-      if (!res.ok) throw new Error(data?.error || 'No se pudo iniciar el pago');
-
-      if (data?.url) {
-        window.location.href = data.url;
-        return;
+      if (!res.ok) {
+        throw new Error(data?.error || 'No pudimos iniciar el pago');
       }
 
-      throw new Error('Respuesta inválida del pago');
+      const { url, token } = data;
+      if (!url || !token) {
+        throw new Error('Respuesta inválida de Webpay');
+      }
+
+      // Webpay Plus espera un POST con token_ws al URL entregado.
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = url;
+
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'token_ws';
+      input.value = token;
+
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
     } catch (e) {
-      setError(e?.message || 'Error al iniciar pago');
+      setError(e.message || 'Error interno');
+      setPaying(false);
     }
   }
 
-  return (
-    <div className="mx-auto max-w-3xl px-4 py-10">
-      <h1 className="text-3xl font-bold mb-2">Checkout</h1>
-      <p className="text-gray-600 mb-8">Revisa el resumen y elige tu medio de pago.</p>
-
-      <div className="mb-6">
-        <button
-          className="text-blue-600 hover:underline"
-          onClick={() => router.back()}
-        >
-          Volver
-        </button>
+  if (loading) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-10">
+        <h1 className="text-3xl font-bold mb-2">Checkout</h1>
+        <p className="text-gray-600">Cargando resumen…</p>
       </div>
+    );
+  }
 
-      {loading && (
-        <div className="rounded-lg border bg-white p-6 text-gray-600">
-          Cargando resumen...
-        </div>
-      )}
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-10">
+      <h1 className="text-4xl font-bold mb-2">Checkout</h1>
+      <p className="text-gray-600 mb-6">Revisa el resumen y elige tu medio de pago.</p>
 
-      {!loading && error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 mb-6">
+      <button onClick={() => router.back()} className="text-blue-600 hover:underline mb-6">
+        Volver
+      </button>
+
+      {error && (
+        <div className="border border-red-200 bg-red-50 text-red-700 rounded-lg p-4 mb-6">
           {error}
         </div>
       )}
 
-      {!loading && !error && preview && (
+      {!preview ? (
+        <div className="border rounded-lg p-6 text-gray-600">No hay información para mostrar.</div>
+      ) : (
         <div className="space-y-6">
-          {/* Ticket + Evento */}
-          <div className="rounded-xl border bg-white p-6">
-            <h2 className="text-xl font-semibold mb-4">Detalle del ticket</h2>
-
-            <div className="space-y-2">
-              <div className="font-semibold text-lg">
-                {preview?.ticket?.title || 'Ticket'}
-              </div>
-
-              {preview?.event?.title && (
-                <div className="text-gray-700">
-                  <span className="font-medium">{preview.event.title}</span>
-                  {preview?.event?.venue ? ` · ${preview.event.venue}` : ''}
-                  {preview?.event?.city ? ` · ${preview.event.city}` : ''}
-                </div>
-              )}
-
-              <div className="text-gray-700">
-                {preview?.ticket?.sector ? (
-                  <span>
-                    <span className="font-medium">Sección:</span>{' '}
-                    {preview.ticket.sector}
-                  </span>
-                ) : (
-                  <span className="text-gray-500">Sección: —</span>
-                )}
-                {preview?.ticket?.row_label ? (
-                  <span> · <span className="font-medium">Fila:</span> {preview.ticket.row_label}</span>
-                ) : null}
-                {preview?.ticket?.seat_label ? (
-                  <span> · <span className="font-medium">Asiento:</span> {preview.ticket.seat_label}</span>
-                ) : null}
-              </div>
-
-              {preview?.ticket?.description ? (
-                <div className="text-gray-600">{preview.ticket.description}</div>
+          {/* Evento */}
+          <div className="border rounded-xl p-6">
+            <div className="flex gap-4 items-start">
+              {event?.image_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={event.image_url}
+                  alt={event?.title || 'Evento'}
+                  className="w-24 h-24 rounded-lg object-cover flex-shrink-0"
+                />
               ) : null}
 
-              <div className="pt-3 text-2xl font-bold">
-                {formatCLP(preview?.ticket?.price)}
+              <div className="flex-1">
+                <div className="text-xl font-semibold">{event?.title || 'Evento'}</div>
+                {eventDateLabel ? (
+                  <div className="text-gray-600 mt-1">{eventDateLabel}</div>
+                ) : null}
+                <div className="text-gray-600 mt-1">
+                  {[event?.venue, event?.city].filter(Boolean).join(', ')}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Vendedor + reputación */}
-          <div className="rounded-xl border bg-white p-6">
-            <h2 className="text-xl font-semibold mb-4">Vendedor</h2>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Ticket */}
+          <div className="border rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="font-semibold">{preview?.seller?.name || 'Vendedor'}</div>
-                {preview?.seller?.tier ? (
-                  <div className="text-gray-600 text-sm">Tier: {preview.seller.tier}</div>
-                ) : (
-                  <div className="text-gray-500 text-sm">Tier: —</div>
-                )}
+                <div className="text-lg font-semibold">Tu entrada</div>
+                <div className="text-gray-700 mt-2 space-y-1">
+                  {ticket?.section ? <div>Sección: <b>{ticket.section}</b></div> : null}
+                  {ticket?.row ? <div>Fila: <b>{ticket.row}</b></div> : null}
+                  {ticket?.seat ? <div>Asiento: <b>{ticket.seat}</b></div> : null}
+                  {ticket?.original_price ? (
+                    <div className="text-gray-600">Precio original: <b>{formatPrice(ticket.original_price)}</b></div>
+                  ) : null}
+                  {ticket?.notes ? (
+                    <div className="text-gray-600 mt-2">
+                      <span className="font-medium">Notas:</span> {ticket.notes}
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               <div className="text-right">
-                <div className="text-sm text-gray-600">Reputación</div>
-                <div className="text-lg">
-                  <Stars value={preview?.seller?.rating_avg} />{' '}
-                  <span className="text-gray-600 text-sm">
-                    ({preview?.seller?.rating_count ?? 0})
-                  </span>
-                </div>
+                <div className="text-sm text-gray-500">Precio</div>
+                <div className="text-2xl font-bold">{formatPrice(ticket?.price)}</div>
               </div>
             </div>
-
-            {!!preview?.seller?.recent_ratings?.length && (
-              <div className="mt-4">
-                <button
-                  onClick={() => setShowReviews((v) => !v)}
-                  className="text-blue-600 hover:underline"
-                >
-                  {showReviews ? 'Ocultar comentarios' : 'Ver comentarios'}
-                </button>
-
-                {showReviews && (
-                  <div className="mt-4 space-y-3">
-                    {preview.seller.recent_ratings.map((r, idx) => (
-                      <div key={idx} className="rounded-lg border p-3">
-                        <div className="flex items-center justify-between">
-                          <div className="font-medium">{r.rater_name || 'Usuario'}</div>
-                          <div className="text-yellow-500">★ {r.stars}</div>
-                        </div>
-                        {r.comment ? (
-                          <div className="text-gray-700 mt-1">{r.comment}</div>
-                        ) : (
-                          <div className="text-gray-500 mt-1">Sin comentario</div>
-                        )}
-                        {r.created_at ? (
-                          <div className="text-xs text-gray-500 mt-2">
-                            {new Date(r.created_at).toLocaleDateString('es-CL')}
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
-          {/* Resumen de pago */}
-          <div className="rounded-xl border bg-white p-6">
-            <h2 className="text-xl font-semibold mb-4">Resumen</h2>
+          {/* Vendedor */}
+          <div className="border rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-lg font-semibold">Vendedor</div>
+                <div className="text-gray-700 mt-2">
+                  {seller?.full_name || seller?.email || 'Usuario'}
+                </div>
 
-            <div className="space-y-2 text-gray-800">
-              <div className="flex items-center justify-between">
+                <div className="text-gray-600 mt-1">
+                  {sellerStats?.totalRatings ? (
+                    <>
+                      ⭐ {sellerStats.averageStars} · {sellerStats.totalRatings}{' '}
+                      {sellerStats.totalRatings === 1 ? 'comentario' : 'comentarios'}
+                    </>
+                  ) : (
+                    'Aún sin comentarios'
+                  )}
+                </div>
+              </div>
+
+              {sellerRatings.length > 0 ? (
+                <button
+                  onClick={() => setShowSellerComments((v) => !v)}
+                  className="text-blue-600 hover:underline"
+                >
+                  {showSellerComments ? 'Ocultar comentarios' : 'Ver comentarios'}
+                </button>
+              ) : null}
+            </div>
+
+            {showSellerComments ? (
+              <div className="mt-4 space-y-3">
+                {sellerRatings.map((r) => (
+                  <div key={r.id} className="border rounded-lg p-3">
+                    <div className="text-sm text-gray-600">
+                      <b>{r.rater?.full_name || 'Usuario'}</b> · ⭐ {r.stars}
+                    </div>
+                    {r.comment ? <div className="mt-1">{r.comment}</div> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {/* Resumen */}
+          <div className="border rounded-xl p-6">
+            <div className="text-lg font-semibold mb-4">Resumen</div>
+
+            <div className="space-y-2 text-gray-700">
+              <div className="flex justify-between">
                 <span>Entrada</span>
-                <span>{formatCLP(breakdown.subtotal)}</span>
+                <span>{formatPrice(fees?.ticketPrice ?? ticket?.price)}</span>
               </div>
-
-              <div className="flex items-center justify-between">
-                <span>
-                  Comisión TixSwap{' '}
-                  <span className="text-gray-500 text-sm">
-                    (2,5% · mínimo {formatCLP(1200)})
-                  </span>
-                </span>
-                <span>{formatCLP(breakdown.fee)}</span>
+              <div className="flex justify-between">
+                <span>Cargo TixSwap (2,5% · mínimo $1.200)</span>
+                <span>{formatPrice(fees?.platformFee ?? 0)}</span>
               </div>
-
-              <div className="border-t pt-3 flex items-center justify-between font-bold text-lg">
-                <span>Total</span>
-                <span>{formatCLP(breakdown.total)}</span>
+              <div className="border-t pt-3 flex justify-between text-lg font-semibold">
+                <span>Total a pagar</span>
+                <span>{formatPrice(fees?.totalDue ?? 0)}</span>
               </div>
             </div>
 
-            <div className="mt-5 text-sm text-gray-600">
-              El pago se procesa por <span className="font-medium">Webpay</span>. Ahí eliges
-              débito/crédito (y lo que Transbank tenga disponible).
-            </div>
+            <div className="mt-6">
+              <div className="text-sm text-gray-600 mb-2">Medio de pago</div>
+              <div className="border rounded-lg p-4 flex items-center justify-between">
+                <div>
+                  <div className="font-medium">Webpay</div>
+                  <div className="text-sm text-gray-600">Tarjetas de débito y crédito</div>
+                </div>
 
-            <button
-              onClick={startPayment}
-              className="mt-6 w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
-            >
-              Pagar con Webpay
-            </button>
+                <button
+                  onClick={startWebpayPayment}
+                  disabled={paying}
+                  className="bg-blue-600 text-white px-5 py-2 rounded-lg disabled:opacity-60"
+                >
+                  {paying ? 'Iniciando…' : 'Pagar con Webpay'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-xs text-gray-500">
+            Al pagar, se reservará la entrada por unos minutos mientras finalizas el proceso.
           </div>
         </div>
       )}
