@@ -1,172 +1,156 @@
-import { NextResponse } from "next/server";
-import { createSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { getFees } from "@/lib/fees";
+import { NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { calculateFees } from '@/lib/fees';
 
-// Endpoint que alimenta /checkout/[ticketId]
-// Importante: en la BD NO existe events.date / events.time.
-// El evento usa starts_at (timestamp). Aquí lo normalizamos para el front.
+function normalizeEventStartsAt(eventRow) {
+  const startsAt = eventRow?.starts_at ?? eventRow?.startsAt ?? null;
+  if (startsAt) return startsAt;
 
-function splitLocation(location) {
-  if (!location) return { venue: "", city: "" };
-  const parts = location.split(",").map((s) => s.trim());
-  if (parts.length === 1) return { venue: parts[0], city: "" };
-  return { venue: parts[0], city: parts.slice(1).join(", ") };
-}
+  const date = eventRow?.date ?? null;
+  const time = eventRow?.time ?? null;
+  if (!date) return null;
 
-function formatEventDateTime(startsAt) {
-  if (!startsAt) return { date: "", time: "" };
-  const d = new Date(startsAt);
-  const date = new Intl.DateTimeFormat("es-CL", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  }).format(d);
-  const time = new Intl.DateTimeFormat("es-CL", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(d);
-  return { date, time };
-}
-
-async function buildPreview(ticketId) {
-  const supabase = createSupabaseAdmin();
-
-  // 1) Ticket + evento
-  const { data: ticket, error: tErr } = await supabase
-    .from("tickets")
-    .select(
-      `
-      id,
-      title,
-      price,
-      currency,
-      sector,
-      row_label,
-      seat_label,
-      description,
-      seller_id,
-      event_id,
-      events (
-        id,
-        name,
-        location,
-        starts_at,
-        image_url
-      )
-    `
-    )
-    .eq("id", ticketId)
-    .single();
-
-  if (tErr || !ticket) {
-    return { error: tErr?.message || "Ticket no encontrado" };
-  }
-
-  const ev = ticket.events;
-  const { venue, city } = splitLocation(ev?.location);
-  const { date, time } = formatEventDateTime(ev?.starts_at);
-
-  const ticketPrice = Number(ticket.price) || 0;
-
-  // 2) Fee TixSwap: 2.5% mínimo $1.200
-  const feeCalc = getFees(ticketPrice, { buyerRate: 0.025, buyerMin: 1200 });
-
-  const fees = {
-    platformFee: feeCalc.buyerFee,
-    tixswapFee: feeCalc.buyerFee,
-  };
-
-  const totals = {
-    subtotal: ticketPrice,
-    total: feeCalc.total,
-    ticketPrice: ticketPrice,
-  };
-
-  // 3) Vendedor
-  const { data: sellerProfile } = await supabase
-    .from("profiles")
-    .select("id, full_name, tier")
-    .eq("id", ticket.seller_id)
-    .single();
-
-  // 4) Ratings del vendedor
-  const { data: ratings } = await supabase
-    .from("ratings")
-    .select("stars, comment, created_at, rater_id")
-    .eq("target_id", ticket.seller_id)
-    .eq("role", "seller")
-    .order("created_at", { ascending: false })
-    .limit(5);
-
-  let avg = 0;
-  let count = 0;
-
-  if (ratings?.length) {
-    count = ratings.length;
-    avg = ratings.reduce((acc, r) => acc + (r.stars || 0), 0) / count;
-  }
-
-  const preview = {
-    ticket: {
-      id: ticket.id,
-      title: ticket.title,
-      price: ticket.price,
-      currency: ticket.currency,
-      sector: ticket.sector,
-      row_label: ticket.row_label,
-      seat_label: ticket.seat_label,
-      description: ticket.description,
-    },
-    event: {
-      id: ev?.id,
-      title: ev?.name,
-      venue,
-      city,
-      date,
-      time,
-      image_url: ev?.image_url,
-      starts_at: ev?.starts_at,
-    },
-    seller: {
-      id: sellerProfile?.id || ticket.seller_id,
-      name: sellerProfile?.full_name || "Vendedor",
-      tier: sellerProfile?.tier || "basic",
-      rating_avg: avg,
-      rating_count: count,
-      recent_ratings: ratings || [],
-    },
-    fees,
-    totals,
-    buyerRole: "basic",
-  };
-
-  return { preview };
+  const hhmm = (time && typeof time === 'string') ? time : '00:00';
+  try {
+    const d = new Date(`${date}T${hhmm}:00`);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  } catch (_) {}
+  return null;
 }
 
 export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}));
-    const ticketId = body.ticketId;
+    const ticketId = body?.ticketId;
 
     if (!ticketId) {
+      return NextResponse.json({ error: 'Falta ticketId' }, { status: 400 });
+    }
+
+    const sb = supabaseAdmin();
+
+    const { data: ticket, error: ticketErr } = await sb
+      .from('tickets')
+      .select('*')
+      .eq('id', ticketId)
+      .single();
+
+    if (ticketErr || !ticket) {
+      return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 });
+    }
+
+    const allowedStatuses = new Set(['active', 'held']);
+    if (ticket.status && !allowedStatuses.has(String(ticket.status).toLowerCase())) {
       return NextResponse.json(
-        { ok: false, error: "ticketId requerido" },
-        { status: 400 }
+        { error: `Ticket no disponible (estado: ${ticket.status})` },
+        { status: 409 }
       );
     }
 
-    const { preview, error } = await buildPreview(ticketId);
-    if (error) {
-      return NextResponse.json({ ok: false, error }, { status: 404 });
+    const { data: event, error: eventErr } = await sb
+      .from('events')
+      .select('*')
+      .eq('id', ticket.event_id)
+      .single();
+
+    if (eventErr || !event) {
+      return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, preview });
+    const sellerId = ticket.seller_id ?? ticket.owner_id ?? ticket.user_id ?? null;
+
+    let seller = null;
+    if (sellerId) {
+      const { data: sellerRow } = await sb
+        .from('profiles')
+        .select('id, full_name, email')
+        .eq('id', sellerId)
+        .single();
+      seller = sellerRow ?? null;
+    }
+
+    let sellerRatings = [];
+    let sellerStats = { averageStars: null, totalRatings: 0 };
+
+    if (sellerId) {
+      const { data: ratings } = await sb
+        .from('ratings')
+        .select('id, rater_id, stars, comment, created_at')
+        .eq('target_id', sellerId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      const safeRatings = Array.isArray(ratings) ? ratings : [];
+      const total = safeRatings.length;
+
+      if (total > 0) {
+        const sum = safeRatings.reduce((acc, r) => acc + (Number(r.stars) || 0), 0);
+        sellerStats = {
+          averageStars: Math.round((sum / total) * 10) / 10,
+          totalRatings: total,
+        };
+      }
+
+      const raterIds = [...new Set(safeRatings.map((r) => r.rater_id).filter(Boolean))];
+      let ratersById = {};
+      if (raterIds.length > 0) {
+        const { data: raters } = await sb
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', raterIds);
+
+        ratersById = (raters || []).reduce((acc, p) => {
+          acc[p.id] = p;
+          return acc;
+        }, {});
+      }
+
+      sellerRatings = safeRatings.map((r) => ({
+        id: r.id,
+        stars: r.stars,
+        comment: r.comment,
+        created_at: r.created_at,
+        rater: ratersById[r.rater_id] ?? { id: r.rater_id, full_name: 'Usuario', email: null },
+      }));
+    }
+
+    const price = Number(ticket.price ?? ticket.price_clp ?? 0);
+    const fees = calculateFees(price);
+
+    const eventTitle = event.title || event.name || 'Evento';
+    const eventStartsAt = normalizeEventStartsAt(event);
+
+    return NextResponse.json({
+      ticket: {
+        id: ticket.id,
+        event_id: ticket.event_id,
+        seller_id: sellerId,
+        section: ticket.section,
+        row: ticket.row,
+        seat: ticket.seat,
+        notes: ticket.notes,
+        original_price: ticket.original_price,
+        price,
+        currency: 'CLP',
+        status: ticket.status,
+      },
+      event: {
+        id: event.id,
+        title: eventTitle,
+        venue: event.venue,
+        city: event.city,
+        country: event.country,
+        starts_at: eventStartsAt,
+        image_url: event.image_url ?? null,
+      },
+      seller,
+      sellerStats,
+      sellerRatings,
+      fees,
+    });
   } catch (err) {
-    console.error("checkout/preview error:", err);
-    return NextResponse.json(
-      { ok: false, error: "Error interno" },
-      { status: 500 }
-    );
+    console.error('checkout/preview error', err);
+    return NextResponse.json({ error: 'Error interno' }, { status: 500 });
   }
 }
+
