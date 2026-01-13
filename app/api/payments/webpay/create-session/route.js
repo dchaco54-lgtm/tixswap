@@ -1,155 +1,173 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { createClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
 import { getWebpayTransaction } from '@/lib/webpay';
 
-function timeout(ms, message) {
-  return new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms));
-}
+// Fuerza runtime Node (Transbank SDK usa Node APIs)
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 function getBaseUrl() {
-  const raw =
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '') ||
-    'https://www.tixswap.cl';
-  return raw.replace(/\/+$/, '');
+  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL;
+  if (fromEnv) return fromEnv.replace(/\/$/, '');
+
+  const vercelUrl = process.env.VERCEL_URL;
+  if (vercelUrl) return `https://${vercelUrl}`;
+
+  return 'http://localhost:3000';
+}
+
+function jsonError(message, details, status = 500) {
+  return new NextResponse(JSON.stringify({ error: message, details }), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+// Comisión TixSwap: 2.5% con mínimo $1.200
+function calcFeeCLP(subtotalCLP) {
+  const pct = Math.round(subtotalCLP * 0.025);
+  return Math.max(pct, 1200);
 }
 
 export async function POST(req) {
-  let sb = null;
-  let ticketId = null;
-  let ticketHeld = false;
-  let orderId = null;
-
   try {
     const body = await req.json().catch(() => ({}));
-    ticketId = body?.ticketId;
-    const buyerId = body?.buyerId;
+    const { ticketId, buyerId } = body || {};
 
     if (!ticketId || !buyerId) {
-      return NextResponse.json({ error: 'Faltan parámetros' }, { status: 400 });
+      return jsonError('Solicitud inválida', 'Faltan ticketId o buyerId', 400);
     }
 
-    sb = supabaseAdmin();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    // Get ticket + fees (re-validate on server)
-    const { data: ticket, error: ticketErr } = await sb
+    if (!supabaseUrl || !serviceRoleKey) {
+      return jsonError(
+        'Configuración faltante',
+        'NEXT_PUBLIC_SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY no configurados',
+        500
+      );
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+    // 1) Obtener ticket
+    const { data: ticket, error: ticketErr } = await supabase
       .from('tickets')
-      .select('id, price, status')
+      .select('id,status,price,event_id,seller_id')
       .eq('id', ticketId)
       .single();
 
-    if (ticketErr || !ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 });
-    if (ticket.status !== 'active') return NextResponse.json({ error: 'Ticket no disponible' }, { status: 409 });
+    if (ticketErr) return jsonError('No se pudo obtener ticket', ticketErr.message, 500);
+    if (!ticket) return jsonError('Ticket no encontrado', 'No existe ticket con ese id', 404);
 
-    const platformFee = Math.max(Math.round(ticket.price * 0.025), 1200);
-    const totalDue = ticket.price + platformFee;
+    // Solo se puede comprar si está activo
+    if (ticket.status !== 'active') {
+      return jsonError('Ticket no disponible', `Estado actual: ${ticket.status}`, 409);
+    }
 
-    // Hold ticket (best effort: fallback if hold_expires_at column doesn't exist)
-    const holdMinutes = Number(process.env.CHECKOUT_HOLD_MINUTES || 10);
-    const holdUntil = new Date(Date.now() + holdMinutes * 60 * 1000).toISOString();
-
-    let { error: holdErr } = await sb
+    // 2) Marcar ticket como "held" (reservado) antes de iniciar Webpay
+    const { error: holdErr } = await supabase
       .from('tickets')
-      .update({ status: 'held', hold_expires_at: holdUntil })
+      .update({ status: 'held' })
       .eq('id', ticketId)
       .eq('status', 'active');
 
-    if (holdErr && /hold_expires_at/i.test(holdErr.message || '')) {
-      ({ error: holdErr } = await sb
-        .from('tickets')
-        .update({ status: 'held' })
-        .eq('id', ticketId)
-        .eq('status', 'active'));
-    }
+    if (holdErr) return jsonError('No se pudo reservar el ticket', holdErr.message, 500);
 
-    if (holdErr) {
-      console.error('Failed to hold ticket:', holdErr);
-      return NextResponse.json({ error: 'No se pudo reservar la entrada' }, { status: 409 });
-    }
-    ticketHeld = true;
+    // 3) Crear Order en BD (columnas reales del esquema actual)
+    const subtotal = Number(ticket.price || 0);
+    const fee = calcFeeCLP(subtotal);
+    const total = subtotal + fee;
 
-    // Create order
-    const { data: order, error: orderErr } = await sb
+    const buyOrder = uuidv4().replace(/-/g, '').slice(0, 26); // Webpay: máx 26
+    const sessionId = uuidv4();
+
+    const { data: order, error: orderErr } = await supabase
       .from('orders')
       .insert({
         buyer_id: buyerId,
-        ticket_id: ticketId,
-        amount: ticket.price,
-        service_fee: platformFee,
-        total_amount: totalDue,
+        seller_id: ticket.seller_id,
+        event_id: ticket.event_id,
+        ticket_id: ticket.id,
+
+        amount: subtotal,
+        amount_clp: subtotal,
+        fee_clp: fee,
+        total_amount: total,
+        total_clp: total,
+
         currency: 'CLP',
-        status: 'pending',
-        payment_state: 'initiated',
+        status: 'created',
+        payment_state: 'pending',
         payment_method: 'webpay',
+
+        payment_request_id: buyOrder,
       })
-      .select()
+      .select('*')
       .single();
 
-    if (orderErr || !order) {
-      // rollback hold (best effort)
-      let { error: releaseErr } = await sb
-        .from('tickets')
-        .update({ status: 'active', hold_expires_at: null })
-        .eq('id', ticketId);
-
-      if (releaseErr && /hold_expires_at/i.test(releaseErr.message || '')) {
-        await sb.from('tickets').update({ status: 'active' }).eq('id', ticketId);
-      }
-
-      return NextResponse.json({ error: 'No se pudo crear la orden' }, { status: 500 });
+    if (orderErr) {
+      // rollback: devuelve ticket a active si falló crear orden
+      await supabase.from('tickets').update({ status: 'active' }).eq('id', ticketId);
+      return jsonError('No se pudo crear la orden', orderErr.message, 500);
     }
 
-    orderId = order.id;
+    // 4) Crear transacción Webpay
+    const baseUrl = getBaseUrl();
+    const returnUrl = `${baseUrl}/api/payments/webpay/return?orderId=${order.id}`;
 
-    // Create Webpay transaction
-    const transaction = getWebpayTransaction();
-    const returnUrl = `${getBaseUrl()}/api/payments/webpay/return?orderId=${orderId}`;
+    const tx = getWebpayTransaction();
 
-    const resp = await Promise.race([
-      transaction.create(`TSW-${orderId}`, `SID-${orderId}`, totalDue, returnUrl),
-      timeout(15000, 'Transbank no respondió a tiempo'),
-    ]);
+    let createResult;
+    try {
+      createResult = await Promise.race([
+        tx.create(buyOrder, sessionId, total, returnUrl),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout al crear transacción Webpay')), 20000)
+        ),
+      ]);
+    } catch (err) {
+      await supabase
+        .from('orders')
+        .update({
+          status: 'failed',
+          payment_state: 'failed',
+          payment_payload: { error: String(err?.message || err) },
+        })
+        .eq('id', order.id);
 
-    // Save Webpay token/url
-    const { error: updErr } = await sb
+      await supabase.from('tickets').update({ status: 'active' }).eq('id', ticketId);
+
+      return jsonError('Error al iniciar Webpay', err?.message || String(err), 502);
+    }
+
+    // 5) Guardar datos de Webpay en la orden
+    const { error: updErr } = await supabase
       .from('orders')
       .update({
-        payment_request_id: resp.token,
-        webpay_token: resp.token,
-        webpay_url: resp.url,
+        payment_provider: 'webpay',
+        payment_state: 'initiated',
+        status: 'initiated',
+        webpay_token: createResult?.token,
+        payment_process_url: createResult?.url,
+        payment_payload: createResult,
       })
-      .eq('id', orderId);
+      .eq('id', order.id);
 
-    if (updErr) console.error('Order update error:', updErr);
-
-    return NextResponse.json({ url: resp.url, token: resp.token, orderId });
-  } catch (err) {
-    console.error('webpay/create-session error', err);
-
-    // Best-effort rollback (avoid leaving the ticket stuck in "held")
-    try {
-      if (sb && ticketId && ticketHeld) {
-        let { error: releaseErr } = await sb
-          .from('tickets')
-          .update({ status: 'active', hold_expires_at: null })
-          .eq('id', ticketId);
-
-        if (releaseErr && /hold_expires_at/i.test(releaseErr.message || '')) {
-          await sb.from('tickets').update({ status: 'active' }).eq('id', ticketId);
-        }
-      }
-      if (sb && orderId) {
-        await sb.from('orders').delete().eq('id', orderId);
-      }
-    } catch (rollbackErr) {
-      console.error('Rollback error (create-session):', rollbackErr);
+    if (updErr) {
+      console.error('Order update after webpay create failed:', updErr);
     }
 
-    const message = err?.message || 'Error interno';
-    const status = /no respondió a tiempo/i.test(message) ? 504 : 500;
-
-    return NextResponse.json({ error: message }, { status });
+    return NextResponse.json({
+      orderId: order.id,
+      url: createResult.url,
+      token: createResult.token,
+    });
+  } catch (err) {
+    console.error('create-session fatal:', err);
+    return jsonError('Error interno', err?.message || String(err), 500);
   }
 }
-
