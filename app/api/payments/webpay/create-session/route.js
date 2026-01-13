@@ -1,142 +1,110 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { WebpayPlus } from 'transbank-sdk';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getWebpayTransaction } from '@/lib/webpay';
 import { calculateFees } from '@/lib/fees';
 
-const BUYABLE_STATUSES = new Set(['active', 'available']);
+function getBaseUrl(req) {
+  // Works for production + Vercel preview deployments (so return URL points to the right host)
+  const proto = req.headers.get('x-forwarded-proto') || 'https';
+  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
+  if (host) return `${proto}://${host}`;
 
-export async function POST(req) {
-  const supabase = createRouteHandlerClient({ cookies });
-  const admin = supabaseAdmin();
+  const env = process.env.NEXT_PUBLIC_SITE_URL;
+  if (env) return env.replace(/\/$/, '');
 
-  let ticketId;
-  let returnUrl;
-  let heldTicket = null;
-  let createdOrder = null;
+  return 'http://localhost:3000';
+}
 
+export async function POST(request) {
   try {
-    const body = await req.json();
-    ticketId = body?.ticketId;
-    returnUrl = body?.returnUrl;
+    const body = await request.json();
+    const { ticketId } = body || {};
 
     if (!ticketId) {
-      return NextResponse.json({ error: 'ticketId is required' }, { status: 400 });
-    }
-    if (!returnUrl) {
-      return NextResponse.json({ error: 'returnUrl is required' }, { status: 400 });
+      return NextResponse.json({ error: 'ticketId es requerido' }, { status: 400 });
     }
 
-    const { data: userData, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !userData?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const user = userData.user;
+    const supabase = supabaseAdmin();
 
-    // 1) Load ticket + validate buyable
-    const { data: ticket, error: ticketErr } = await admin
+    // Fetch ticket
+    const { data: ticket, error: tErr } = await supabase
       .from('tickets')
-      .select('id, event_id, price, status')
+      .select('id, price, status, seller_id, event_id')
       .eq('id', ticketId)
-      .single();
+      .maybeSingle();
 
-    if (ticketErr || !ticket) {
-      return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
+    if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
+    if (!ticket) return NextResponse.json({ error: 'Ticket no encontrado' }, { status: 404 });
+
+    if (ticket.status !== 'active') {
+      return NextResponse.json({ error: 'Ticket no disponible' }, { status: 409 });
     }
 
-    if (!BUYABLE_STATUSES.has(ticket.status)) {
-      return NextResponse.json(
-        { error: `Ticket not available (current status: ${ticket.status})` },
-        { status: 409 }
-      );
-    }
+    const price = Number(ticket.price || 0);
+    const fees = calculateFees(price);
+    const total = price + fees.platformFee;
 
-    // 2) HOLD ticket (atomic-ish)
-    const { data: holdRes, error: holdErr } = await admin
-      .from('tickets')
-      .update({ status: 'held' })
-      .eq('id', ticketId)
-      .in('status', Array.from(BUYABLE_STATUSES))
-      .select('id, status')
-      .single();
-
-    if (holdErr || !holdRes) {
-      return NextResponse.json(
-        { error: 'Could not reserve ticket (maybe someone took it)' },
-        { status: 409 }
-      );
-    }
-    heldTicket = holdRes;
-
-    // 3) Create order
-    const fees = calculateFees(ticket.price);
-    const buyOrder = `TSW-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const sessionId = user.id;
-
-    const { data: order, error: orderErr } = await admin
+    // Create order
+    const { data: order, error: oErr } = await supabase
       .from('orders')
       .insert({
-        ticket_id: ticketId,
-        buyer_id: user.id,
-        event_id: ticket.event_id,
+        ticket_id: ticket.id,
+        buyer_id: null,
+        seller_id: ticket.seller_id,
+        amount: price,
+        fee: fees.platformFee,
+        total_amount: total,
         status: 'pending_payment',
-        total_amount: ticket.price,
-        fees_clp: fees.fee,
-        total_clp: fees.total,
-        payment_provider: 'webpay',
         payment_state: 'created',
-        buy_order: buyOrder,
-        session_id: sessionId,
       })
       .select('*')
       .single();
 
-    if (orderErr || !order) {
-      // rollback hold
-      await admin.from('tickets').update({ status: 'active' }).eq('id', ticketId).eq('status', 'held');
-      return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
+    if (oErr) return NextResponse.json({ error: oErr.message }, { status: 500 });
+
+    // Hold ticket
+    const { error: holdErr } = await supabase
+      .from('tickets')
+      .update({ status: 'held' })
+      .eq('id', ticket.id)
+      .eq('status', 'active');
+
+    if (holdErr) {
+      // rollback order
+      await supabase.from('orders').delete().eq('id', order.id);
+      return NextResponse.json({ error: holdErr.message }, { status: 500 });
     }
-    createdOrder = order;
 
-    // 4) Create Webpay transaction
-    const tx = getWebpayTransaction();
-    const response = await tx.create(buyOrder, sessionId, fees.total, returnUrl);
+    // Webpay config
+    const env = (process.env.WEBPAY_ENV || 'integration').toLowerCase();
+    if (env === 'production') {
+      WebpayPlus.configureForProduction(
+        process.env.WEBPAY_COMMERCE_CODE,
+        process.env.WEBPAY_API_KEY
+      );
+    } else {
+      WebpayPlus.configureForIntegration(process.env.WEBPAY_COMMERCE_CODE);
+    }
 
-    // 5) Persist token/url
-    const { error: updErr } = await admin
+    const buyOrder = `TS-${order.id}`;
+    const sessionId = `SID-${order.id}`;
+    const returnUrl = `${getBaseUrl(request)}/api/payments/webpay/return?orderId=${order.id}`;
+
+    const tx = new WebpayPlus.Transaction();
+    const response = await tx.create(buyOrder, sessionId, total, returnUrl);
+
+    // Save token/url
+    await supabase
       .from('orders')
       .update({
-        payment_request_id: response.token,
+        payment_state: 'initiated',
         webpay_token: response.token,
-        payment_process_url: response.url,
-        payment_payload: response,
+        webpay_url: response.url,
       })
       .eq('id', order.id);
 
-    if (updErr) {
-      // rollback hold + mark order failed
-      await admin.from('orders').update({ status: 'payment_failed', payment_state: 'error' }).eq('id', order.id);
-      await admin.from('tickets').update({ status: 'active' }).eq('id', ticketId).eq('status', 'held');
-      return NextResponse.json({ error: 'Failed to persist webpay session' }, { status: 500 });
-    }
-
-    return NextResponse.json({ url: response.url, token: response.token });
+    return NextResponse.json({ ok: true, orderId: order.id, token: response.token, url: response.url });
   } catch (e) {
-    console.error('Webpay create-session error:', e);
-
-    // rollback if needed
-    try {
-      if (createdOrder?.id) {
-        await admin.from('orders').update({ status: 'payment_failed', payment_state: 'error' }).eq('id', createdOrder.id);
-      }
-      if (ticketId && heldTicket?.id) {
-        await admin.from('tickets').update({ status: 'active' }).eq('id', ticketId).eq('status', 'held');
-      }
-    } catch (rollbackErr) {
-      console.error('Rollback error:', rollbackErr);
-    }
-
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: e?.message || 'Error creando sesión' }, { status: 500 });
   }
 }
