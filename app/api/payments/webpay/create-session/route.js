@@ -6,56 +6,112 @@ import { getWebpayTransaction } from '@/lib/webpay';
 // NOTA: Evitamos depender de helpers externos (ej: getFees) porque en prod puede quedar
 // desfasado con el repo (y explota con "... is not a function"). Calculamos el fee acá.
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+// Webpay: buyOrder máx 26 chars. Mantengámoslo corto y simple.
+function makeBuyOrder() {
+  // Ej: TS + base36(timestamp) + base36(random)
+  const ts = Date.now().toString(36);
+  const rnd = Math.floor(Math.random() * 1e6).toString(36);
+  return (`TS${ts}${rnd}`).toUpperCase().slice(0, 26);
+}
+
+function makeSessionId() {
+  const raw = crypto.randomUUID().replace(/-/g, '');
+  return `S${raw.slice(0, 20)}`; // <= 21 chars
+}
+
 function normalizeBaseUrl(url) {
   if (!url) return '';
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
-/**
- * Fee comprador: 2.5% con mínimo $1.200 (CLP)
- * Retorna { feeAmount, totalAmount }
- */
-function calcPlatformFee(amount) {
-  const a = Math.round(Number(amount) || 0);
-  const pct = Math.round(a * 0.025);
-  const feeAmount = Math.max(pct, 1200);
-  return { feeAmount, totalAmount: a + feeAmount };
+function calcPlatformFee(ticketPrice) {
+  const price = Math.round(Number(ticketPrice) || 0);
+  // Fee por plataforma: 2.5% con mínimo $1.200 (ajusta si tu negocio cambia esta regla)
+  const pct = Math.round(price * 0.025);
+  const fee = Math.max(pct, 1200);
+  return { feeAmount: fee, totalAmount: price + fee };
 }
+
+// Fallback para validar el access_token sin depender de admin.auth (en algunos builds queda undefined)
+async function getUserViaSupabaseRest(accessToken) {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const apiKey =
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !apiKey || !accessToken) return null;
+
+    const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        apikey: apiKey,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      // Importante: evita cache raro en serverless
+      cache: 'no-store',
+    });
+
+    if (!res.ok) return null;
+    const user = await res.json().catch(() => null);
+    return user && user.id ? user : null;
+  } catch {
+    return null;
+  }
+}
+
 
 export async function POST(req) {
   try {
-    const authHeader = req.headers.get('authorization') || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
-    if (!token) {
-      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-    }
-
-    // Validar token del usuario en Supabase
-    const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
-    if (userError || !userData?.user) {
-      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-    }
-    const userId = userData.user.id;
-
     const body = await req.json();
     const { ticketId, buyerId } = body || {};
 
-    if (!ticketId || !buyerId) {
-      return NextResponse.json({ error: 'Faltan datos' }, { status: 400 });
+    if (!ticketId) {
+      return NextResponse.json({ error: 'ticketId requerido' }, { status: 400 });
     }
 
-    // Seguridad básica: buyerId debe coincidir con el user logeado
-    if (buyerId !== userId) {
+    // Usuario logueado (token desde el cliente)
+    // OJO: este proyecto usa supabase-js en el browser (localStorage), no cookies.
+    // Por eso acá validamos con Authorization: Bearer <access_token>
+    const admin = supabaseAdmin();
+    const authHeader = req.headers.get('authorization') || '';
+    const accessToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice('Bearer '.length).trim()
+      : null;
+
+    if (!accessToken) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
     }
 
-    const admin = supabaseAdmin;
+    let user = null;
 
-    // 1) Buscar ticket + validar estado
+    // Intento 1: supabase-js (service role)
+    if (admin?.auth?.getUser) {
+      const { data: userData, error: userError } = await admin.auth.getUser(accessToken);
+      if (!userError) user = userData?.user ?? null;
+    }
+
+    // Intento 2 (fallback): endpoint REST /auth/v1/user
+    if (!user) {
+      user = await getUserViaSupabaseRest(accessToken);
+    }
+
+    if (!user) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
+    // Defensa extra: si el frontend envía buyerId, debe coincidir
+    if (buyerId && buyerId !== user.id) {
+      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
+    }
+
+    // Ticket
     const { data: ticket, error: ticketError } = await admin
       .from('tickets')
-      .select('id, price, status, event_id, seller_id')
+      .select('id, status, price, seller_id')
       .eq('id', ticketId)
       .single();
 
@@ -67,41 +123,47 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Ticket no disponible' }, { status: 409 });
     }
 
-    // 2) Bloquear ticket (hold) para evitar doble compra
-    const { error: holdError } = await admin
-      .from('tickets')
-      .update({ status: 'held' })
-      .eq('id', ticketId)
-      .eq('status', 'active');
-
-    if (holdError) {
-      return NextResponse.json({ error: 'No se pudo reservar el ticket' }, { status: 409 });
+    if (ticket.seller_id === user.id) {
+      return NextResponse.json({ error: 'No puedes comprar tu propio ticket' }, { status: 400 });
     }
 
     // Fees (2.5% con mínimo $1.200)
     const amount = Number(ticket.price);
     const { feeAmount, totalAmount } = calcPlatformFee(amount);
 
-    // Crear buyOrder y sessionId (Webpay)
-    const buyOrder = `TS-${ticketId.slice(0, 8)}-${Date.now()}`;
-    const sessionId = crypto.randomUUID();
+    const buyOrder = makeBuyOrder();
+    const sessionId = makeSessionId();
 
-    // Crear orden en BD
+    // 1) Reservar ticket (race-safe)
+    // Nota: en PostgREST un UPDATE que afecta 0 filas NO lanza error, por eso validamos el retorno.
+    const { data: heldRows, error: holdError } = await admin
+      .from('tickets')
+      .update({ status: 'held' })
+      .eq('id', ticketId)
+      .eq('status', 'active')
+      .select('id');
+
+    if (holdError || !heldRows || heldRows.length === 0) {
+      return NextResponse.json(
+        { error: 'No se pudo reservar el ticket (puede que ya lo hayan tomado)' },
+        { status: 409 }
+      );
+    }
+
+    // 2) Crear orden
     const { data: order, error: orderError } = await admin
       .from('orders')
       .insert({
         ticket_id: ticketId,
-        buyer_id: buyerId,
+        user_id: user.id, // comprador
         seller_id: ticket.seller_id,
-        event_id: ticket.event_id,
-        ticket_price: amount,
-        platform_fee: feeAmount,
-        total_amount: totalAmount,
-        payment_provider: 'webpay',
-        payment_state: 'initiated',
-        payment_status: 'pending',
         buy_order: buyOrder,
         session_id: sessionId,
+        amount,
+        fee: feeAmount,
+        total_amount: totalAmount,
+        payment_state: 'created',
+        payment_status: 'pending',
       })
       .select('id')
       .single();
