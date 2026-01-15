@@ -1,7 +1,7 @@
 // app/dashboard/purchases/page.jsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -26,7 +26,7 @@ function formatDateCL(value) {
   }).format(d);
 }
 
-export default function PurchasesPage() {
+function PurchasesContent() {
   const searchParams = useSearchParams();
   const paymentStatus = searchParams.get("payment");
   const orderId = searchParams.get("order");
@@ -292,3 +292,10 @@ export default function PurchasesPage() {
   );
 }
 
+export default function PurchasesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center">Cargando...</div>}>
+      <PurchasesContent />
+    </Suspense>
+  );
+}
