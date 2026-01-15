@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 function formatCLP(value) {
@@ -26,6 +27,10 @@ function formatDateCL(value) {
 }
 
 export default function PurchasesPage() {
+  const searchParams = useSearchParams();
+  const paymentStatus = searchParams.get("payment");
+  const orderId = searchParams.get("order");
+  
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -35,17 +40,33 @@ export default function PurchasesPage() {
       setLoading(true);
       setError("");
 
-      const res = await fetch("/api/orders/my", { cache: "no-store" });
+      const res = await fetch("/api/orders/my", { 
+        cache: "no-store",
+        credentials: "include" // Asegurar que envía cookies
+      });
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        // Si viene de Webpay con éxito pero no tiene sesión, no es crítico
+        if (paymentStatus === "success") {
+          setError("");
+          setOrders([]);
+          setLoading(false);
+          return;
+        }
         throw new Error(json?.error || "No se pudieron cargar las compras.");
       }
 
       setOrders(Array.isArray(json.orders) ? json.orders : []);
     } catch (e) {
       console.error(e);
-      setError(e?.message || "No se pudieron cargar las compras.");
+      // Si viene de pago exitoso, no mostramos error
+      if (paymentStatus === "success") {
+        setError("");
+        setOrders([]);
+      } else {
+        setError(e?.message || "No se pudieron cargar las compras.");
+      }
     } finally {
       setLoading(false);
     }
@@ -135,6 +156,53 @@ export default function PurchasesPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-8">
+        {/* Mensaje de éxito de pago */}
+        {paymentStatus === "success" && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <h2 className="text-lg font-semibold text-green-800 mb-2">
+              ✅ ¡Pago exitoso!
+            </h2>
+            <p className="text-green-700 mb-3">
+              Tu compra se procesó correctamente. Recibirás un email con los detalles.
+            </p>
+            {orderId && (
+              <p className="text-sm text-green-600">
+                ID de orden: {orderId}
+              </p>
+            )}
+            <div className="mt-4">
+              <Link 
+                href="/login" 
+                className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Iniciar sesión para ver tus compras
+              </Link>
+            </div>
+          </div>
+        )}
+
+        {paymentStatus === "canceled" && (
+          <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <h2 className="text-lg font-semibold text-yellow-800">
+              ⚠️ Pago cancelado
+            </h2>
+            <p className="text-yellow-700">
+              Cancelaste el pago en Webpay. El ticket fue liberado.
+            </p>
+          </div>
+        )}
+
+        {paymentStatus === "failed" && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <h2 className="text-lg font-semibold text-red-800">
+              ❌ Pago rechazado
+            </h2>
+            <p className="text-red-700">
+              El pago fue rechazado por Webpay. Intenta nuevamente.
+            </p>
+          </div>
+        )}
+
         {loading ? (
           <div className="text-gray-600">Cargando compras...</div>
         ) : error ? (
