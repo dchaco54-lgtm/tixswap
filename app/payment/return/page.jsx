@@ -1,14 +1,11 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-
-// app/payment/return/page.jsx
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
-export default function PaymentReturnPage() {
+function PaymentReturnContent() {
   const router = useRouter();
   const sp = useSearchParams();
   const orderId = sp.get("orderId");
@@ -91,6 +88,14 @@ export default function PaymentReturnPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function PaymentReturnPage() {
+  return (
+    <Suspense fallback={<div className="max-w-xl mx-auto px-4 py-16">Cargando...</div>}>
+      <PaymentReturnContent />
+    </Suspense>
   );
 }
 

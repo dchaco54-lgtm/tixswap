@@ -1,8 +1,6 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import WalletSection from "./WalletSection";
@@ -212,7 +210,7 @@ function MiniBarChart({ items }) {
 /* =========================
    Page
 ========================= */
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -1015,6 +1013,14 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Cargando...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }
 

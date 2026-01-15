@@ -1,13 +1,10 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-
-// app/checkout/success/page.jsx
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function CheckoutSuccessPage() {
+function CheckoutSuccessContent() {
   const router = useRouter();
   const sp = useSearchParams();
   const orderId = sp.get("orderId");
@@ -38,5 +35,13 @@ export default function CheckoutSuccessPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function CheckoutSuccessPage() {
+  return (
+    <Suspense fallback={<div className="max-w-xl mx-auto px-4 py-16">Cargando...</div>}>
+      <CheckoutSuccessContent />
+    </Suspense>
   );
 }
