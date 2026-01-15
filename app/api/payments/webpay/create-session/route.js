@@ -233,8 +233,10 @@ export async function POST(req) {
       })
       .eq('id', order.id);
 
+    console.log('[Webpay] Respuesta exitosa:', { token: result.token?.slice(0, 8) + '...' });
     return NextResponse.json({ token: result.token, url: result.url }, { status: 200 });
-      console.log('[Webpay] Webpay commit error:', err.message, err);
-    return NextResponse.json({ error: 'Error interno' }, { status: 500 });
+  } catch (err) {
+    console.error('[Webpay] Error en create-session:', err.message, err);
+    return NextResponse.json({ error: 'Error interno: ' + err.message }, { status: 500 });
   }
 }
