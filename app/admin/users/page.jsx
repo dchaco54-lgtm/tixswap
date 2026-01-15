@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 import { ROLE_OPTIONS, normalizeRole, roleCommissionLabel } from "@/lib/roles";
 
 export default function AdminUsersPage() {

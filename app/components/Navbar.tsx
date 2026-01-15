@@ -50,7 +50,7 @@ export default function Navbar() {
             Iniciar sesión
           </Link>
           <Link
-            href="/signup"
+            href="/register"
             className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
           >
             Crear cuenta

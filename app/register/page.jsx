@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
-import { formatRut, isValidRut } from "../lib/rutUtils";
+import { supabase } from "@/lib/supabaseClient";
+import { formatRut, isValidRut } from "@/lib/rutUtils";
 
 export default function RegisterPage() {
   const router = useRouter();

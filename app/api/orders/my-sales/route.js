@@ -1,4 +1,6 @@
 // app/api/orders/my-sales/route.js
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ROLE_DEFS, ROLE_ORDER, normalizeRole } from "@/lib/roles";

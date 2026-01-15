@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import supabase from "../../lib/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 function formatDateCL(value) {
   if (!value) return "";

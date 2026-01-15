@@ -1,4 +1,6 @@
 // app/api/orders/my/route.js
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
