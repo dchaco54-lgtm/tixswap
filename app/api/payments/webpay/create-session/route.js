@@ -180,13 +180,16 @@ export async function POST(req) {
 
     let result;
     try {
+      console.log('[Webpay] Iniciando transacción:', { buyOrder, sessionId, totalAmount, returnUrl });
       const transaction = getWebpayTransaction();
       result = await transaction.create(buyOrder, sessionId, totalAmount, returnUrl);
+      console.log('[Webpay] Transacción creada exitosamente:', { token: result.token?.slice(0, 8) + '...' });
     } catch (e) {
+      console.error('[Webpay] Error creando transacción:', e.message, e);
       // rollback hold + orden
       await admin.from('tickets').update({ status: 'active' }).eq('id', ticketId).eq('status', 'held');
       await admin.from('orders').update({ payment_state: 'failed', payment_status: 'failed' }).eq('id', order.id);
-      throw e;
+      throw new Error(`Webpay error: ${e.message}`);
     }
 
     // 4) Persistir token/url en la orden
