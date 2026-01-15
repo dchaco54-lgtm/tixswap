@@ -183,13 +183,17 @@ export async function POST(req) {
         ticket_id: ticketId,
         user_id: user.id, // comprador
         seller_id: ticket.seller_id,
+        buyer_id: user.id,
         buy_order: buyOrder,
         session_id: sessionId,
-        amount,
-        fee: feeAmount,
-        total_amount: totalAmount,
+        amount_clp: amount,
+        fee_clp: feeAmount,
+        total_clp: totalAmount,
         payment_state: 'created',
-        payment_status: 'pending',
+        status: 'pending',
+        payment_provider: 'webpay',
+        payment_method: 'webpay',
+        currency: 'CLP',
       })
       .select('id')
       .single();
