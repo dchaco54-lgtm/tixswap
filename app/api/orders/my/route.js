@@ -14,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
  */
 export async function GET() {
   try {
+    console.log('[Orders/My] Iniciando...');
     const cookieStore = cookies();
     const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
 
@@ -22,7 +23,10 @@ export async function GET() {
       error: userError,
     } = await supabaseUser.auth.getUser();
 
+    console.log('[Orders/My] User:', { hasUser: !!user, userId: user?.id, error: userError?.message });
+
     if (userError || !user) {
+      console.log('[Orders/My] Unauthorized - no user');
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -35,12 +39,19 @@ export async function GET() {
 
     const client = admin || supabaseUser;
 
+    console.log('[Orders/My] Usando:', admin ? 'admin client' : 'user client');
+
     // 1) orders del buyer
     const { data: orders, error: ordersError } = await client
       .from("orders")
       .select("*")
       .eq("buyer_id", user.id)
       .order("created_at", { ascending: false });
+
+    console.log('[Orders/My] Query result:', { 
+      ordersCount: orders?.length || 0, 
+      error: ordersError?.message || ordersError?.code 
+    });
 
     if (ordersError) {
       console.error("orders/my ordersError:", ordersError);
