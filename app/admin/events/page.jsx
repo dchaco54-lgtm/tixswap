@@ -668,7 +668,7 @@ export default function AdminEventsPage() {
         {/* Modal de edición de advertencias */}
         {editingEvent && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl">
+            <div className="bg-white rounded-2xl max-w-4xl w-full p-8 shadow-xl">
               <h3 className="text-xl font-bold mb-4">
                 Editar advertencias: {editingEvent.title}
               </h3>
@@ -681,7 +681,7 @@ export default function AdminEventsPage() {
                   value={editForm.warnings}
                   onChange={(e) => setEditForm({ warnings: e.target.value })}
                   placeholder="Ej: IMPORTANTE: Las entradas NO son renominables. Asegúrate que el nombre coincida con tu documento de identidad."
-                  className="w-full p-3 border border-slate-300 rounded-lg font-mono text-sm h-40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full p-4 border border-slate-300 rounded-lg font-mono text-base h-64 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-xs text-slate-500 mt-2">
                   Soporta saltos de línea. Esto se mostrará en la página del evento con icono de advertencia.
