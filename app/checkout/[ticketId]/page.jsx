@@ -47,14 +47,14 @@ export default function CheckoutPage() {
   useEffect(() => {
     async function checkAuth() {
       try {
-        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        const { data: { user }, error: userErr } = await supabase.auth.getUser();
         
-        if (sessionErr) {
-          console.error('Error obteniendo sesión:', sessionErr);
+        if (userErr) {
+          console.error('Error obteniendo usuario:', userErr);
         }
         
-        if (!session) {
-          // No hay sesión, redirigir a login
+        if (!user) {
+          // No hay usuario, redirigir a login
           const currentPath = `/checkout/${ticketId}`;
           router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
           return;
@@ -121,18 +121,47 @@ export default function CheckoutPage() {
     try {
       // Verificar sesión antes de intentar el pago
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr) throw sessionErr;
+      
+      if (sessionErr) {
+        console.error('Error obteniendo sesión:', sessionErr);
+      }
 
       const buyerId = sessionData?.session?.user?.id;
       const accessToken = sessionData?.session?.access_token;
 
       if (!buyerId || !accessToken) {
-        // Sesión expirada, redirigir a login
-        const currentPath = `/checkout/${ticketId}`;
-        router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
-        return;
+        // Sesión no disponible, intentar refrescar
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          // Realmente no hay sesión, redirigir a login
+          const currentPath = `/checkout/${ticketId}`;
+          router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
+          return;
+        }
+        
+        // Si getUser() funciona, obtener session de nuevo
+        const { data: newSession } = await supabase.auth.getSession();
+        const newBuyerId = newSession?.session?.user?.id;
+        const newAccessToken = newSession?.session?.access_token;
+        
+        if (!newBuyerId || !newAccessToken) {
+          throw new Error('No se pudo obtener la sesión para procesar el pago.');
+        }
+        
+        // Usar la nueva sesión
+        return await processPayment(ticketId, newBuyerId, newAccessToken);
       }
 
+      await processPayment(ticketId, buyerId, accessToken);
+    } catch (e) {
+      setError(e.message || 'Error interno');
+      setPaying(false);
+    }
+  }
+
+  async function processPayment(ticketId, buyerId, accessToken) {
+    try {
       const res = await fetch('/api/payments/webpay/create-session', {
         method: 'POST',
         headers: {
@@ -167,8 +196,7 @@ export default function CheckoutPage() {
       document.body.appendChild(form);
       form.submit();
     } catch (e) {
-      setError(e.message || 'Error interno');
-      setPaying(false);
+      throw e; // Re-throw para que startWebpayPayment lo maneje
     }
   }
 

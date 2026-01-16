@@ -65,14 +65,14 @@ export default function SellPage() {
   useEffect(() => {
     async function checkAuth() {
       try {
-        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        const { data: { user }, error: userErr } = await supabase.auth.getUser();
         
-        if (sessionErr) {
-          console.error('Error obteniendo sesión:', sessionErr);
+        if (userErr) {
+          console.error('Error obteniendo usuario:', userErr);
         }
         
-        if (!session) {
-          // No hay sesión, redirigir a login
+        if (!user) {
+          // No hay usuario, redirigir a login
           router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
           return;
         }
