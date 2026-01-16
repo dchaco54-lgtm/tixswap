@@ -72,13 +72,16 @@ export async function POST(request) {
       return NextResponse.json({ error: insertErr.message }, { status: 500 });
     }
 
-    // ✅ Revalidar la página del evento para que se actualice automáticamente
+    // ✅ Revalidar la página del evento usando On-Demand Revalidation
     try {
-      revalidatePath(`/events/${eventId}`);
-      console.log('[Publish] Página del evento revalidada:', `/events/${eventId}`);
+      // Revalidate the specific event page
+      await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'https://tixswap.cl'}/api/revalidate?path=/events/${eventId}&secret=${process.env.REVALIDATE_SECRET || 'dev-secret'}`, {
+        method: 'POST'
+      });
+      console.log('[Publish] Página revalidada:', `/events/${eventId}`);
     } catch (revalErr) {
-      console.warn('[Publish] Error revalidando página:', revalErr);
-      // No bloqueamos si falla la revalidación
+      console.warn('[Publish] Error revalidando:', revalErr);
+      // No bloqueamos si falla
     }
 
     return NextResponse.json({ ok: true, ticket: created });

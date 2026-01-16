@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = 'force-dynamic';
 export const runtime = "nodejs";
+export const revalidate = 0;
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -18,15 +19,6 @@ function getSupabaseAdmin() {
   return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
-async function columnExists(supabase, table, column) {
-  try {
-    const { error } = await supabase.from(table).select(column).limit(1);
-    return !error;
-  } catch {
-    return false;
-  }
-}
-
 export async function GET(_req, { params }) {
   try {
     const id = params?.id;
@@ -34,32 +26,17 @@ export async function GET(_req, { params }) {
 
     const supabase = getSupabaseAdmin();
 
-    let q = supabase
+    // Query simple y directo: solo tickets activos
+    const { data, error } = await supabase
       .from("tickets")
       .select("*")
       .eq("event_id", id)
+      .eq("status", "active")
       .order("created_at", { ascending: false });
-
-    // ✅ Status robusto: soporta el enum del repo (active/held/sold)
-    // y además variantes típicas si alguna vez guardaste en español.
-    if (await columnExists(supabase, "tickets", "status")) {
-      const visible = [
-        "active", "available", "held",
-        "ACTIVE", "AVAILABLE", "HELD",
-        "Active", "Available", "Held",
-        "activo", "disponible", "reservado",
-        "ACTIVO", "DISPONIBLE", "RESERVADO",
-        "Activo", "Disponible", "Reservado",
-      ];
-      q = q.in("status", visible);
-    }
-
-    const { data, error } = await q;
 
     console.log('[API Tickets] Query result:', { 
       eventId: id, 
       ticketCount: data?.length,
-      tickets: data,
       error: error?.message 
     });
 
@@ -69,9 +46,8 @@ export async function GET(_req, { params }) {
         { 
           status: 500,
           headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-            'Pragma': 'no-cache',
-            'Expires': '0'
+            'Cache-Control': 'no-store, must-revalidate, max-age=0',
+            'CDN-Cache-Control': 'no-store'
           }
         }
       );
@@ -82,11 +58,8 @@ export async function GET(_req, { params }) {
       { 
         status: 200,
         headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          'CDN-Cache-Control': 'no-cache',
-          'Vercel-CDN-Cache-Control': 'no-cache'
+          'Cache-Control': 'no-store, must-revalidate, max-age=0',
+          'CDN-Cache-Control': 'no-store'
         }
       }
     );

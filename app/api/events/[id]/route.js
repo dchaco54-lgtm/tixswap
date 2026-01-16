@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 export const runtime = "nodejs";
 
 function getSupabaseAdmin() {
@@ -49,11 +50,8 @@ export async function GET(_req, { params }) {
       { event: data },
       {
         headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-          'Pragma': 'no-cache',
-          'Expires': '0',
-          'CDN-Cache-Control': 'no-cache',
-          'Vercel-CDN-Cache-Control': 'no-cache'
+          'Cache-Control': 'no-store, must-revalidate, max-age=0',
+          'CDN-Cache-Control': 'no-store'
         }
       }
     );
