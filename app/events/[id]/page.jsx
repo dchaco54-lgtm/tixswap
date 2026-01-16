@@ -48,6 +48,7 @@ export default function EventDetailPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [mounted, setMounted] = useState(false);
+  const [renderKey, setRenderKey] = useState(0);
 
   // Asegurar que solo renderice en el cliente
   useEffect(() => {
@@ -93,6 +94,7 @@ export default function EventDetailPage() {
 
         const list = Array.isArray(tJson.tickets) ? tJson.tickets : [];
         setTickets(list);
+        setRenderKey(Date.now()); // Forzar re-render completo
 
         // 3) Vendedores (best-effort, si falla no bloquea)
         const sellerIds = Array.from(
@@ -123,6 +125,12 @@ export default function EventDetailPage() {
 
   useEffect(() => {
     if (!id) return;
+    
+    // Limpiar todo antes de cargar
+    setEvent(null);
+    setTickets([]);
+    setSellerMap({});
+    
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -210,9 +218,9 @@ export default function EventDetailPage() {
       )}
 
       {!loading && !errorMsg && tickets.length > 0 && (
-        <div className="grid md:grid-cols-2 gap-6" key={`tickets-${Date.now()}`}>
+        <div className="grid md:grid-cols-2 gap-6" key={renderKey}>
           {tickets.map((t) => (
-            <TicketCard key={`${t.id}-${t.price}-${Date.now()}`} ticket={t} seller={sellerMap[t.seller_id]} />
+            <TicketCard key={t.id} ticket={t} seller={sellerMap[t.seller_id]} />
           ))}
         </div>
       )}
