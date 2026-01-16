@@ -9,9 +9,9 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const { eventId, sector, fila, asiento, price, userId, userEmail } = body || {};
-    
+
     console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento, userId });
-    
+
     if (!eventId || !price) {
       return NextResponse.json(
         { error: 'Faltan datos: eventId y price son requeridos.' },
@@ -35,6 +35,8 @@ export async function POST(request) {
     }
 
     const user = authUser.user;
+
+    // seller profile
     const sellerId = user.id;
 
     // Obtener perfil del usuario con su rol
@@ -75,22 +77,33 @@ export async function POST(request) {
       seller_name: profile?.full_name || user.email || 'Vendedor',
       seller_email: profile?.email || user.email || null,
       price: originalPrice,
-      original_price: originalPrice, // ✅ Guardar precio original
-      platform_fee: platformFee,     // ✅ Guardar comisión calculada
+      original_price: originalPrice,
+      platform_fee: platformFee,
       status: 'active',
-      sale_type: 'fixed', // Tipo de venta fijo (vs subasta, etc)
+      sale_type: 'fixed',
+
+      // ✅ Estas columnas EXISTEN en tu schema -> insert directo (sin columnExists)
+      sector: sector || null,
+      row_label: fila || null,
+      seat_label: asiento || null,
+    };
+
     const { data: created, error: insertErr } = await supabase
       .from('tickets')
       .insert(insertPayload)
       .select('*')
       .single();
+
     if (insertErr) {
       return NextResponse.json({ error: insertErr.message }, { status: 500 });
     }
 
-    // ✅ Revalidar la página del evento directamente
+    // ✅ Revalidar la página del evento usando On-Demand Revalidation
     try {
-      revalidatePath(`/events/${eventId}`, 'page');
+      // Revalidate the specific event page
+      await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'https://tixswap.cl'}/api/revalidate?path=/events/${eventId}&secret=${process.env.REVALIDATE_SECRET || 'dev-secret'}`, {
+        method: 'POST'
+      });
       console.log('[Publish] Página revalidada:', `/events/${eventId}`);
     } catch (revalErr) {
       console.warn('[Publish] Error revalidando:', revalErr);
@@ -102,3 +115,4 @@ export async function POST(request) {
     return NextResponse.json({ error: e?.message || 'Error inesperado' }, { status: 500 });
   }
 }
+
