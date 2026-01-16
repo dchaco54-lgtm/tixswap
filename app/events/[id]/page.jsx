@@ -129,12 +129,12 @@ export default function EventDetailPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-4">
-      <button 
-        onClick={() => window.history.back()} 
-        className="text-blue-600 hover:underline text-sm mb-3"
+      <Link 
+        href="/events" 
+        className="text-blue-600 hover:underline text-sm mb-3 inline-block"
       >
         ← Volver a eventos
-      </button>
+      </Link>
 
       {/* Card del evento con imagen incluida */}
       <div className="rounded-2xl border bg-white overflow-hidden shadow-sm">
