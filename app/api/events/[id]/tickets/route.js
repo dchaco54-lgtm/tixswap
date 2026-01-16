@@ -56,6 +56,13 @@ export async function GET(_req, { params }) {
 
     const { data, error } = await q;
 
+    console.log('[API Tickets] Query result:', { 
+      eventId: id, 
+      ticketCount: data?.length,
+      tickets: data,
+      error: error?.message 
+    });
+
     if (error) {
       return NextResponse.json(
         { error: error.message, hint: error.hint, details: error.details, code: error.code },

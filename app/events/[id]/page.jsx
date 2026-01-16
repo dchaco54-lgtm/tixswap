@@ -73,6 +73,14 @@ export default function EventDetailPage() {
           headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
         });
         const tJson = await tRes.json().catch(() => ({}));
+        
+        console.log('[EventDetail] Tickets response:', { 
+          ok: tRes.ok, 
+          status: tRes.status, 
+          ticketCount: tJson?.tickets?.length,
+          tickets: tJson?.tickets 
+        });
+        
         if (!tRes.ok) {
           throw new Error(tJson?.details || tJson?.error || "No pudimos cargar las entradas en este momento.");
         }
