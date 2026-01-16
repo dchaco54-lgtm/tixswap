@@ -14,16 +14,15 @@ export async function POST(request) {
       );
     }
 
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+    const supabase = createRouteHandlerClient({ cookies });
 
-    const { data: auth, error: authErr } = await supabase.auth.getUser();
-    if (authErr || !auth?.user) {
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !user) {
       return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
     }
 
     // seller profile
-    const sellerId = auth.user.id;
+    const sellerId = user.id;
 
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
@@ -38,8 +37,8 @@ export async function POST(request) {
     const insertPayload = {
       event_id: eventId,
       seller_id: sellerId,
-      seller_name: profile?.full_name || auth.user.email || 'Vendedor',
-      seller_email: profile?.email || auth.user.email || null,
+      seller_name: profile?.full_name || user.email || 'Vendedor',
+      seller_email: profile?.email || user.email || null,
       price: Number(price),
       status: 'active',
 
