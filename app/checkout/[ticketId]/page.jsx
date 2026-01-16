@@ -94,12 +94,12 @@ export default function CheckoutPage() {
 
     async function loadPreview() {
       // No cargar preview si aún estamos verificando auth
-      if (checki && !checkingAuth) loadPreview();
+      if (checkingAuth) return;
+      
+      setLoading(true);
+      setError(null);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [ticketId, checkingAuth
+      try {
         const res = await fetch('/api/checkout/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -120,12 +120,12 @@ export default function CheckoutPage() {
       }
     }
 
-    if (ticketId) loadPreview();
+    if (ticketId && !checkingAuth) loadPreview();
 
     return () => {
       cancelled = true;
     };
-  }, [ticketId]);
+  }, [ticketId, checkingAuth]);
 
   async function startWebpayPayment() {
     setPaying(true);
