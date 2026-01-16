@@ -53,8 +53,14 @@ export default function EventDetailPage() {
         setLoading(true);
         setErrorMsg("");
 
+        // Cache busting: agregar timestamp para forzar request fresco
+        const timestamp = Date.now();
+
         // 1) Evento (server API)
-        const evRes = await fetch(`/api/events/${id}`, { cache: "no-store" });
+        const evRes = await fetch(`/api/events/${id}?t=${timestamp}`, { 
+          cache: "no-store",
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+        });
         const evJson = await evRes.json().catch(() => ({}));
         if (!evRes.ok) {
           throw new Error(evJson?.details || evJson?.error || "No pudimos cargar el evento.");
@@ -62,7 +68,10 @@ export default function EventDetailPage() {
         setEvent(evJson.event || null);
 
         // 2) Tickets (server API)
-        const tRes = await fetch(`/api/events/${id}/tickets`, { cache: "no-store" });
+        const tRes = await fetch(`/api/events/${id}/tickets?t=${timestamp}`, { 
+          cache: "no-store",
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+        });
         const tJson = await tRes.json().catch(() => ({}));
         if (!tRes.ok) {
           throw new Error(tJson?.details || tJson?.error || "No pudimos cargar las entradas en este momento.");
