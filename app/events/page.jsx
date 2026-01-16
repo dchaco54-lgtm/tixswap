@@ -59,6 +59,16 @@ export default function EventsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
+      {/* Botón volver al inicio */}
+      <div className="mb-6">
+        <Link 
+          href="/" 
+          className="inline-flex items-center text-blue-600 hover:text-blue-700"
+        >
+          ← Volver al inicio
+        </Link>
+      </div>
+
       <h1 className="text-3xl font-bold mb-6">Eventos</h1>
 
       {loading && (
@@ -82,17 +92,33 @@ export default function EventsPage() {
             const date = ev?.starts_at ? formatDateCL(ev.starts_at) : "";
             const city = ev?.city || "";
             const venue = ev?.venue || "";
+            const imageUrl = ev?.image_url || ev?.poster_url || ev?.cover_image || null;
+            
             return (
               <Link
                 key={ev.id}
                 href={`/events/${ev.id}`}
-                className="block p-5 rounded-2xl border bg-white hover:shadow-md transition"
+                className="block rounded-2xl border bg-white hover:shadow-md transition overflow-hidden"
               >
-                <div className="text-xl font-semibold">{title}</div>
-                <div className="text-gray-600 mt-1">
-                  {date ? `${date}` : ""}
-                  {date && (city || venue) ? " · " : ""}
-                  {[venue, city].filter(Boolean).join(", ")}
+                {/* Imagen del evento */}
+                {imageUrl && (
+                  <div className="aspect-video w-full bg-gray-100">
+                    <img 
+                      src={imageUrl} 
+                      alt={title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+                
+                {/* Contenido */}
+                <div className="p-5">
+                  <div className="text-xl font-semibold">{title}</div>
+                  <div className="text-gray-600 mt-1">
+                    {date ? `${date}` : ""}
+                    {date && (city || venue) ? " · " : ""}
+                    {[venue, city].filter(Boolean).join(", ")}
+                  </div>
                 </div>
               </Link>
             );
