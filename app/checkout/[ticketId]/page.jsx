@@ -32,6 +32,7 @@ export default function CheckoutPage() {
   const [error, setError] = useState(null);
   const [preview, setPreview] = useState(null);
   const [showSellerComments, setShowSellerComments] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   const ticket = preview?.ticket;
   const event = preview?.event;
@@ -42,14 +43,63 @@ export default function CheckoutPage() {
 
   const eventDateLabel = useMemo(() => formatDateTime(event?.starts_at), [event?.starts_at]);
 
+  // Verificar autenticación al cargar la página
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        
+        if (sessionErr || !session) {
+          // No hay sesión, redirigir a login
+          const currentPath = `/checkout/${ticketId}`;
+          router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
+          return;
+        }
+        
+        setCheckingAuth(false);
+      } catch (err) {
+        console.error('Error verificando sesión:', err);
+        router.replace(`/login?redirectTo=${encodeURIComponent(`/checkout/${ticketId}`)}`);
+      }
+    }
+
+    checkAuth();
+  }, [router, ticketId]);
+
+  // Verificar autenticación al cargar la página
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        
+        if (sessionErr || !session) {
+          // No hay sesión, redirigir a login
+          const currentPath = `/checkout/${ticketId}`;
+          router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
+          return;
+        }
+        
+        setCheckingAuth(false);
+      } catch (err) {
+        console.error('Error verificando sesión:', err);
+        router.replace(`/login?redirectTo=${encodeURIComponent(`/checkout/${ticketId}`)}`);
+      }
+    }
+
+    checkAuth();
+  }, [router, ticketId]);
+
   useEffect(() => {
     let cancelled = false;
 
     async function loadPreview() {
-      setLoading(true);
-      setError(null);
+      // No cargar preview si aún estamos verificando auth
+      if (checki && !checkingAuth) loadPreview();
 
-      try {
+    return () => {
+      cancelled = true;
+    };
+  }, [ticketId, checkingAuth
         const res = await fetch('/api/checkout/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -82,6 +132,7 @@ export default function CheckoutPage() {
     setError(null);
 
     try {
+      // Verificar sesión antes de intentar el pago
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
       if (sessionErr) throw sessionErr;
 
@@ -89,7 +140,10 @@ export default function CheckoutPage() {
       const accessToken = sessionData?.session?.access_token;
 
       if (!buyerId || !accessToken) {
-        throw new Error('Debes iniciar sesión para comprar.');
+        // Sesión expirada, redirigir a login
+        const currentPath = `/checkout/${ticketId}`;
+        router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
+        return;
       }
 
       const res = await fetch('/api/payments/webpay/create-session', {
@@ -127,6 +181,16 @@ export default function CheckoutPage() {
       form.submit();
     } catch (e) {
       setError(e.message || 'Error interno');
+  // Mostrar cargando mientras verifica autenticación
+  if (checkingAuth) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-10">
+        <h1 className="text-3xl font-bold mb-2">Checkout</h1>
+        <p className="text-gray-600">Verificando sesión…</p>
+      </div>
+    );
+  }
+
       setPaying(false);
     }
   }
