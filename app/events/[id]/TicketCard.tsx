@@ -21,32 +21,33 @@ interface TicketCardProps {
 
 export default function TicketCard({ ticket, seller }: TicketCardProps) {
   const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const supabase = createClientComponentClient();
 
   useEffect(() => {
+    // Verificar sesión inicial
     supabase.auth.getSession().then(({ data }) => {
       setSession(data?.session);
-      setLoading(false);
+      setIsCheckingAuth(false);
     });
 
-    // Suscribirse a cambios de auth
+    // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      setLoading(false);
+      setIsCheckingAuth(false);
     });
 
     return () => subscription.unsubscribe();
   }, [supabase]);
 
   const handleBuyClick = (e: React.MouseEvent) => {
-    // No hacer nada si todavía está cargando
-    if (loading) {
+    // Si aún estamos verificando, no hacer nada
+    if (isCheckingAuth) {
       e.preventDefault();
       return;
     }
 
-    // Solo redirigir si definitivamente no hay sesión
+    // Si no hay sesión, redirigir a login
     if (!session) {
       e.preventDefault();
       window.location.href = '/login?redirect=/checkout/' + ticket.id;
@@ -77,13 +78,9 @@ export default function TicketCard({ ticket, seller }: TicketCardProps) {
           <Link
             href={`/checkout/${ticket.id}`}
             onClick={handleBuyClick}
-            className={`inline-block mt-3 px-4 py-2 rounded-xl text-white transition-colors ${
-              loading 
-                ? 'bg-gray-400 cursor-wait' 
-                : 'bg-blue-600 hover:bg-blue-700'
-            }`}
+            className="inline-block mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors"
           >
-            {loading ? 'Cargando...' : 'Comprar'}
+            Comprar
           </Link>
         </div>
       </div>
