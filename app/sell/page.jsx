@@ -34,6 +34,7 @@ export default function SellPage() {
 
   const steps = ["Detalles", "Archivo", "Confirmar"];
   const [currentStep] = useState(0);
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   const [events, setEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(true);
@@ -59,6 +60,28 @@ export default function SellPage() {
 
   // Tipo de venta en cards (se mantiene)
   const [saleType, setSaleType] = useState("fixed");
+
+  // Verificar autenticación al cargar la página
+  useEffect(() => {
+    async function checkAuth() {
+      try {
+        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
+        
+        if (sessionErr || !session) {
+          // No hay sesión, redirigir a login
+          router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
+          return;
+        }
+        
+        setCheckingAuth(false);
+      } catch (err) {
+        console.error('Error verificando sesión:', err);
+        router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
+      }
+    }
+
+    checkAuth();
+  }, [router]);
 
   useEffect(() => {
     let alive = true;
@@ -197,6 +220,19 @@ export default function SellPage() {
 
   const canContinueNormal = !!selectedEvent && description.trim().length >= 6;
   const canContinueRequest = requestedEventName.trim().length >= 3 && description.trim().length >= 6;
+
+  // Mostrar cargando mientras verifica autenticación
+  if (checkingAuth) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
+        <div className="mx-auto max-w-5xl">
+          <div className="tix-card p-8 text-center">
+            <p className="text-gray-600">Verificando sesión…</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
