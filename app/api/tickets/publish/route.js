@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function POST(request) {
@@ -69,6 +70,15 @@ export async function POST(request) {
 
     if (insertErr) {
       return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    }
+
+    // ✅ Revalidar la página del evento para que se actualice automáticamente
+    try {
+      revalidatePath(`/events/${eventId}`);
+      console.log('[Publish] Página del evento revalidada:', `/events/${eventId}`);
+    } catch (revalErr) {
+      console.warn('[Publish] Error revalidando página:', revalErr);
+      // No bloqueamos si falla la revalidación
     }
 
     return NextResponse.json({ ok: true, ticket: created });
