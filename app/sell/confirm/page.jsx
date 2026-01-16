@@ -82,6 +82,14 @@ export default function SellConfirmPage() {
       setOriginalPrice(parsed?.originalPrice ? String(parsed.originalPrice) : "");
       setEventQuery(parsed?.event_title || "");
 
+      // Establecer evento seleccionado desde el draft
+      if (parsed?.event_id) {
+        setSelectedEvent({
+          id: parsed.event_id,
+          title: parsed.event_title || "Evento",
+        });
+      }
+
       // si en el draft había saleType (para futuro), lo tomo
       if (parsed?.saleType) setSaleType(parsed.saleType);
       if (parsed?.autoEmergencyAuction) setAutoEmergencyAuction(!!parsed.autoEmergencyAuction);
@@ -116,9 +124,14 @@ export default function SellConfirmPage() {
       setEvents(normalized);
       setEventsLoading(false);
 
-      const found = normalized.find((x) => String(x.id) === String(draft?.event_id));
-      if (found) setSelectedEvent(found);
-      else if (draft?.event_id) setSelectedEvent({ id: draft.event_id, title: draft.event_title || "Evento" });
+      // Solo actualizar el evento seleccionado si encontramos más info en los eventos cargados
+      if (draft?.event_id) {
+        const found = normalized.find((x) => String(x.id) === String(draft.event_id));
+        if (found) {
+          setSelectedEvent(found);
+          setEventQuery(found.title);
+        }
+      }
     }
 
     loadEvents();
