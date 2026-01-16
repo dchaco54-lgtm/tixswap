@@ -144,7 +144,7 @@ export default function EventDetailPage() {
             <img 
               src={imageUrl} 
               alt={title}
-              className="w-full h-48 md:h-64 object-cover"
+              className="w-full h-32 md:h-40 object-cover"
             />
           </div>
         )}
