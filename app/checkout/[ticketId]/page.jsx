@@ -162,7 +162,7 @@ export default function CheckoutPage() {
     }
   }
 
-  // Mostrar cargando mientras verifica autenticación
+  // Verificar autenticación antes de mostrar contenido
   if (checkingAuth) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-10">
