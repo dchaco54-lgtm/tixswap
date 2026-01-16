@@ -153,6 +153,21 @@ export default function EventDetailPage() {
 }
 
 function TicketCard({ ticket, seller }) {
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data?.session);
+    });
+  }, []);
+
+  const handleBuyClick = (e) => {
+    if (!session) {
+      e.preventDefault();
+      window.location.href = '/login?redirect=/checkout/' + ticket.id;
+    }
+  };
+
   const price =
     ticket?.price ||
     ticket?.price_clp ||
@@ -184,6 +199,7 @@ function TicketCard({ ticket, seller }) {
           <div className="text-xl font-bold">{price ? formatCLP(price) : "-"}</div>
           <Link
             href={`/checkout/${ticket.id}`}
+            onClick={handleBuyClick}
             className="inline-block mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700"
           >
             Comprar

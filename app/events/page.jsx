@@ -24,14 +24,7 @@ export default function EventsPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Mantengo tu guard de sesión (si quieres que sea público, se saca)
-  useEffect(() => {
-    const checkSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!data?.session) router.push("/login");
-    };
-    checkSession();
-  }, [router]);
+  // Página pública - SIN guard de sesión
 
   useEffect(() => {
     const load = async () => {
@@ -39,8 +32,11 @@ export default function EventsPage() {
         setLoading(true);
         setErrorMsg("");
 
+        console.log('[Events] Cargando eventos...');
         const res = await fetch("/api/events", { cache: "no-store" });
         const json = await res.json().catch(() => ({}));
+
+        console.log('[Events] Response:', { ok: res.ok, status: res.status, eventsCount: json?.events?.length });
 
         if (!res.ok) {
           throw new Error(json?.details || json?.error || "No se pudieron cargar los eventos.");
@@ -48,7 +44,7 @@ export default function EventsPage() {
 
         setEvents(Array.isArray(json.events) ? json.events : []);
       } catch (e) {
-        console.error(e);
+        console.error('[Events] Error:', e);
         setErrorMsg(e?.message || "No se pudieron cargar los eventos.");
         setEvents([]);
       } finally {

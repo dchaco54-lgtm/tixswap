@@ -1,8 +1,31 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
 export default function Navbar() {
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data?.session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSellClick = (e) => {
+    if (!session) {
+      e.preventDefault();
+      window.location.href = '/login?redirect=/sell';
+    }
+  };
+
   return (
     <header className="w-full bg-white border-b border-gray-200">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
@@ -28,6 +51,7 @@ export default function Navbar() {
           {/* VENDER -> va a /sell */}
           <Link
             href="/sell"
+            onClick={handleSellClick}
             className="text-gray-700 hover:text-blue-600 underline-offset-4"
           >
             Vender
