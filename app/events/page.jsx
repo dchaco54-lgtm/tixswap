@@ -23,6 +23,7 @@ export default function EventsPage() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Página pública - SIN guard de sesión
 
@@ -55,7 +56,48 @@ export default function EventsPage() {
     load();
   }, []);
 
-  const hasEvents = useMemo(() => events.length > 0, [events]);
+  // Filtrar eventos: solo futuros/hoy + ordenar por fecha
+  const activeEvents = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // Filtrar solo eventos que NO han pasado (fecha >= hoy)
+    const futureEvents = events.filter((ev) => {
+      if (!ev?.starts_at) return true; // Si no tiene fecha, lo mostramos
+      
+      const eventDate = new Date(ev.starts_at);
+      const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate());
+      
+      // Mantener si es hoy o futuro
+      return eventDay >= today;
+    });
+    
+    // Ordenar por fecha: más próximo primero
+    return futureEvents.sort((a, b) => {
+      const dateA = a?.starts_at ? new Date(a.starts_at).getTime() : Infinity;
+      const dateB = b?.starts_at ? new Date(b.starts_at).getTime() : Infinity;
+      return dateA - dateB;
+    });
+  }, [events]);
+
+  // Filtrar eventos basado en búsqueda
+  const filteredEvents = useMemo(() => {
+    if (!searchQuery.trim()) return activeEvents;
+    
+    const query = searchQuery.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    
+    return activeEvents.filter((ev) => {
+      const searchText = [
+        ev?.title || ev?.name || "",
+        ev?.venue || "",
+        ev?.city || "",
+      ].join(" ").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      
+      return searchText.includes(query);
+    });
+  }, [activeEvents, searchQuery]);
+
+  const hasEvents = useMemo(() => filteredEvents.length > 0, [filteredEvents]);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
@@ -71,6 +113,22 @@ export default function EventsPage() {
 
       <h1 className="text-3xl font-bold mb-6">Eventos</h1>
 
+      {/* Buscador */}
+      <div className="mb-8">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Busca eventos, artistas, lugares..."
+          className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {searchQuery && (
+          <div className="mt-2 text-sm text-gray-600">
+            {filteredEvents.length} {filteredEvents.length === 1 ? 'evento encontrado' : 'eventos encontrados'}
+          </div>
+        )}
+      </div>
+
       {loading && (
         <div className="text-gray-600">Cargando eventos...</div>
       )}
@@ -82,12 +140,14 @@ export default function EventsPage() {
       )}
 
       {!loading && !errorMsg && !hasEvents && (
-        <div className="text-gray-600">No hay eventos disponibles.</div>
+        <div className="text-gray-600">
+          {searchQuery ? 'No se encontraron eventos con ese criterio.' : 'No hay eventos disponibles.'}
+        </div>
       )}
 
       {!loading && !errorMsg && hasEvents && (
         <div className="grid md:grid-cols-2 gap-6">
-          {events.map((ev) => {
+          {filteredEvents.map((ev) => {
             const title = ev?.title || ev?.name || "Evento";
             const date = ev?.starts_at ? formatDateCL(ev.starts_at) : "";
             const city = ev?.city || "";
