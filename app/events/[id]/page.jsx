@@ -138,13 +138,13 @@ export default function EventDetailPage() {
 
       {/* Card del evento con imagen incluida */}
       <div className="rounded-2xl border bg-white overflow-hidden shadow-sm">
-        {/* Imagen del evento */}
+        {/* Imagen del evento tipo banner */}
         {imageUrl && (
           <div className="w-full">
             <img 
               src={imageUrl} 
               alt={title}
-              className="w-full h-32 md:h-40 object-cover"
+              className="w-full h-20 md:h-24 object-cover"
             />
           </div>
         )}
