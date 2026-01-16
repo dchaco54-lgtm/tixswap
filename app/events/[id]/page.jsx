@@ -116,16 +116,44 @@ export default function EventDetailPage() {
       .join(" · ");
   }, [event]);
 
+  const imageUrl = event?.image_url || event?.poster_url || event?.cover_image || null;
+  const warnings = event?.warnings || event?.recommendations || event?.alerts || null;
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
       <Link href="/events" className="text-blue-600 hover:underline">
         ← Volver a eventos
       </Link>
 
+      {/* Imagen del evento */}
+      {imageUrl && (
+        <div className="mt-6 rounded-2xl overflow-hidden">
+          <img 
+            src={imageUrl} 
+            alt={title}
+            className="w-full h-auto max-h-96 object-cover"
+          />
+        </div>
+      )}
+
+      {/* Información del evento */}
       <div className="mt-6 p-6 rounded-2xl border bg-white">
         <h1 className="text-3xl font-bold">{title}</h1>
         {subtitle && <div className="text-gray-600 mt-2">{subtitle}</div>}
       </div>
+
+      {/* Advertencias/Recomendaciones (solo si existen) */}
+      {warnings && (
+        <div className="mt-6 p-5 rounded-xl bg-amber-50 border-l-4 border-amber-500">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div>
+              <h3 className="font-semibold text-amber-900 mb-2">Información importante</h3>
+              <div className="text-amber-800 whitespace-pre-line">{warnings}</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <h2 className="text-2xl font-semibold mt-10 mb-4">Entradas disponibles</h2>
 
