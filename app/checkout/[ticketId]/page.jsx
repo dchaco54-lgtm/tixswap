@@ -78,66 +78,41 @@ export default function CheckoutPage() {
   }, [ticketId]);
 
   async function startWebpayPayment() {
-    setPaying(true);
     setError(null);
+    setPaying(true);
 
-    try {
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      
-      if (sessionErr || !sessionData?.session) {
-        setError('Debes iniciar sesión para comprar.');
-        setPaying(false);
-        return;
-      }
+    const { data: sessionRes } = await supabase.auth.getSession();
+    const token = sessionRes?.session?.access_token;
 
-      const buyerId = sessionData.session.user.id;
-      const accessToken = sessionData.session.access_token;
+    if (!token) {
+      router.replace(`/login?redirectTo=${encodeURIComponent(`/checkout/${ticketId}`)}`);
+      return;
+    }
 
-      await processPayment(ticketId, buyerId, accessToken);
-    } catch (e) {
-      setError(e.message || 'Error interno');
+    const r = await fetch("/api/payments/webpay/create-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ticketId }),
+    });
+
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      setError(j?.error || "No se pudo iniciar Webpay.");
       setPaying(false);
+      return;
     }
-  }
 
-  async function processPayment(ticketId, buyerId, accessToken) {
-    try {
-      const res = await fetch('/api/payments/webpay/create-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ ticketId, buyerId }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(data?.error || 'No pudimos iniciar el pago');
-      }
-
-      const { url, token } = data;
-      if (!url || !token) {
-        throw new Error('Respuesta inválida de Webpay');
-      }
-
-      // Webpay Plus espera un POST con token_ws al URL entregado.
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = url;
-
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'token_ws';
-      input.value = token;
-
-      form.appendChild(input);
-      document.body.appendChild(form);
-      form.submit();
-    } catch (e) {
-      throw e; // Re-throw para que startWebpayPayment lo maneje
-    }
+    const { url, token: tokenWs } = j;
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = url;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "token_ws";
+    input.value = tokenWs;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
   }
 
   if (loading) {
