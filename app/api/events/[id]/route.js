@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic = 'force-dynamic';
 export const runtime = "nodejs";
 
 function getSupabaseAdmin() {
@@ -44,7 +45,18 @@ export async function GET(_req, { params }) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ event: data });
+    return NextResponse.json(
+      { event: data },
+      {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'CDN-Cache-Control': 'no-cache',
+          'Vercel-CDN-Cache-Control': 'no-cache'
+        }
+      }
+    );
   } catch (e) {
     return NextResponse.json(
       { error: "Server error", details: e?.message ?? String(e) },

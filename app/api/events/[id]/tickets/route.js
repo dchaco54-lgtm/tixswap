@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+export const dynamic = 'force-dynamic';
 export const runtime = "nodejs";
 
 function getSupabaseAdmin() {
@@ -55,14 +56,40 @@ export async function GET(_req, { params }) {
 
     const { data, error } = await q;
 
+    console.log('[API Tickets] Query result:', { 
+      eventId: id, 
+      ticketCount: data?.length,
+      tickets: data,
+      error: error?.message 
+    });
+
     if (error) {
       return NextResponse.json(
         { error: error.message, hint: error.hint, details: error.details, code: error.code },
-        { status: 500 }
+        { 
+          status: 500,
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        }
       );
     }
 
-    return NextResponse.json({ tickets: data || [] }, { status: 200 });
+    return NextResponse.json(
+      { tickets: data || [] }, 
+      { 
+        status: 200,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0',
+          'CDN-Cache-Control': 'no-cache',
+          'Vercel-CDN-Cache-Control': 'no-cache'
+        }
+      }
+    );
   } catch (err) {
     return NextResponse.json({ error: err?.message || "Unexpected error" }, { status: 500 });
   }

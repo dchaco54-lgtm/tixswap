@@ -55,8 +55,19 @@ export default function EventDetailPage() {
         setLoading(true);
         setErrorMsg("");
 
+        // Cache busting: timestamp + headers anti-caché
+        const timestamp = Date.now();
+        const cacheHeaders = {
+          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        };
+
         // 1) Evento (server API)
-        const evRes = await fetch(`/api/events/${id}`, { cache: "no-store" });
+        const evRes = await fetch(`/api/events/${id}?_t=${timestamp}`, { 
+          cache: "no-store",
+          headers: cacheHeaders
+        });
         const evJson = await evRes.json().catch(() => ({}));
         if (!evRes.ok) {
           throw new Error(evJson?.details || evJson?.error || "No pudimos cargar el evento.");
@@ -64,7 +75,10 @@ export default function EventDetailPage() {
         setEvent(evJson.event || null);
 
         // 2) Tickets (server API)
-        const tRes = await fetch(`/api/events/${id}/tickets`, { cache: "no-store" });
+        const tRes = await fetch(`/api/events/${id}/tickets?_t=${timestamp}`, { 
+          cache: "no-store",
+          headers: cacheHeaders
+        });
         const tJson = await tRes.json().catch(() => ({}));
         if (!tRes.ok) {
           throw new Error(tJson?.details || tJson?.error || "No pudimos cargar las entradas en este momento.");
