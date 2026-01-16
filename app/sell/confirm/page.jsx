@@ -180,6 +180,17 @@ export default function SellConfirmPage() {
 
     setPublishing(true);
     try {
+      // Verificar sesión antes de enviar
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      console.log('[Confirm] Session check:', { hasSession: !!session, error: sessionError?.message });
+      
+      if (!session) {
+        setError("No hay sesión activa. Por favor inicia sesión de nuevo.");
+        router.push(`/login?redirectTo=${encodeURIComponent("/sell/confirm")}`);
+        return;
+      }
+
       const payload = {
         eventId: selectedEvent?.id, // camelCase como espera el API
         price: Number(String(price).replace(/[^\d]/g, "")),
@@ -190,12 +201,14 @@ export default function SellConfirmPage() {
         asiento: draft?.asiento || null,
       };
 
+      console.log('[Confirm] Enviando payload:', payload);
+
       const res = await fetch("/api/tickets/publish", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "same-origin", // Enviar cookies de sesión
+        credentials: "include", // Cambiar a include para asegurar cookies
         body: JSON.stringify(payload),
       });
 
