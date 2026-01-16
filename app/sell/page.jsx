@@ -67,7 +67,11 @@ export default function SellPage() {
       try {
         const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
         
-        if (sessionErr || !session) {
+        if (sessionErr) {
+          console.error('Error obteniendo sesión:', sessionErr);
+        }
+        
+        if (!session) {
           // No hay sesión, redirigir a login
           router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
           return;
@@ -76,7 +80,12 @@ export default function SellPage() {
         setCheckingAuth(false);
       } catch (err) {
         console.error('Error verificando sesión:', err);
-        router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
+        // Solo redirigir si hay un error crítico, no por timeout
+        if (err.message && !err.message.includes('timeout')) {
+          router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
+        } else {
+          setCheckingAuth(false);
+        }
       }
     }
 
