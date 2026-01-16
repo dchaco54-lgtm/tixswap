@@ -49,25 +49,22 @@ export default function CheckoutPage() {
     
     async function checkAuth() {
       try {
-        // Esperar un momento para asegurar que Supabase esté inicializado
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        const { data: { user }, error: userErr } = await supabase.auth.getUser();
+        // Hacer exactamente lo mismo que el Header para consistencia
+        const { data } = await supabase.auth.getUser();
         
         if (!mounted) return;
         
-        if (userErr) {
-          console.error('Error obteniendo usuario:', userErr);
-          // Si hay error de red o servidor, NO redirigir, intentar continuar
-          setCheckingAuth(false);
-          return;
-        }
+        const user = data?.user || null;
         
         if (!user) {
-          // Solo aquí, si definitivamente no hay usuario, redirigir
-          console.log('No hay usuario autenticado, redirigiendo a login');
-          const currentPath = `/checkout/${ticketId}`;
-          router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
+          // Solo redirigir si definitivamente no hay usuario después de esperar
+          setTimeout(() => {
+            if (mounted) {
+              console.log('No hay usuario autenticado, redirigiendo a login');
+              const currentPath = `/checkout/${ticketId}`;
+              router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
+            }
+          }, 500);
           return;
         }
         
@@ -75,8 +72,8 @@ export default function CheckoutPage() {
         setCheckingAuth(false);
       } catch (err) {
         if (!mounted) return;
-        console.error('Error crítico verificando sesión:', err);
-        // En caso de error crítico, dar el beneficio de la duda
+        console.error('Error verificando sesión:', err);
+        // En caso de error, dar beneficio de la duda
         setCheckingAuth(false);
       }
     }

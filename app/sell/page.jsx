@@ -63,33 +63,40 @@ export default function SellPage() {
 
   // Verificar autenticación al cargar la página
   useEffect(() => {
+    let mounted = true;
+    
     async function checkAuth() {
       try {
-        const { data: { user }, error: userErr } = await supabase.auth.getUser();
+        // Hacer exactamente lo mismo que el Header para consistencia
+        const { data } = await supabase.auth.getUser();
         
-        if (userErr) {
-          console.error('Error obteniendo usuario:', userErr);
-        }
+        if (!mounted) return;
+        
+        const user = data?.user || null;
         
         if (!user) {
-          // No hay usuario, redirigir a login
-          router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
+          // Solo redirigir si definitivamente no hay usuario después de esperar
+          setTimeout(() => {
+            if (mounted) {
+              router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
+            }
+          }, 500);
           return;
         }
         
         setCheckingAuth(false);
       } catch (err) {
+        if (!mounted) return;
         console.error('Error verificando sesión:', err);
-        // Solo redirigir si hay un error crítico, no por timeout
-        if (err.message && !err.message.includes('timeout')) {
-          router.replace(`/login?redirectTo=${encodeURIComponent('/sell')}`);
-        } else {
-          setCheckingAuth(false);
-        }
+        setCheckingAuth(false);
       }
     }
 
     checkAuth();
+    
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   useEffect(() => {
