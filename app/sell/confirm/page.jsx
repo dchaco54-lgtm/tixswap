@@ -180,14 +180,6 @@ export default function SellConfirmPage() {
 
     setPublishing(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token;
-
-      if (!token) {
-        router.replace(`/login?redirectTo=${encodeURIComponent("/sell/confirm")}`);
-        return;
-      }
-
       const payload = {
         eventId: selectedEvent?.id, // camelCase como espera el API
         price: Number(String(price).replace(/[^\d]/g, "")),
@@ -202,8 +194,8 @@ export default function SellConfirmPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
+        credentials: "same-origin", // Enviar cookies de sesión
         body: JSON.stringify(payload),
       });
 
