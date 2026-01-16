@@ -189,22 +189,13 @@ export default function SellConfirmPage() {
       }
 
       const payload = {
-        event_id: selectedEvent?.id,
+        eventId: selectedEvent?.id, // camelCase como espera el API
         price: Number(String(price).replace(/[^\d]/g, "")),
-        originalPrice: originalPrice ? Number(String(originalPrice).replace(/[^\d]/g, "")) : null,
-
-        // tipo venta (por ahora fixed)
-        saleType: saleType || "fixed",
-        autoEmergencyAuction: autoEmergencyAuction || false,
-
+        
         // paso 1
-        description: draft?.description || null,
         sector: draft?.sector || null,
         fila: draft?.fila || null,
         asiento: draft?.asiento || null,
-
-        // paso 2
-        ticketUpload: draft?.ticketUpload || null,
       };
 
       const res = await fetch("/api/tickets/publish", {
