@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 function formatDateCL(value) {
@@ -39,7 +39,6 @@ function formatCLP(value) {
 
 export default function EventDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const id = params?.id;
 
   const [event, setEvent] = useState(null);
@@ -47,27 +46,17 @@ export default function EventDetailPage() {
   const [sellerMap, setSellerMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-  const [mounted, setMounted] = useState(false);
-  const [renderKey, setRenderKey] = useState(0);
 
-  // Asegurar que solo renderice en el cliente
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    if (!id) return;
 
-  const loadData = async () => {
+    const load = async () => {
       try {
         setLoading(true);
         setErrorMsg("");
 
-        // Cache busting: agregar timestamp para forzar request fresco
-        const timestamp = Date.now();
-
         // 1) Evento (server API)
-        const evRes = await fetch(`/api/events/${id}?t=${timestamp}`, { 
-          cache: "no-store",
-          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-        });
+        const evRes = await fetch(`/api/events/${id}`, { cache: "no-store" });
         const evJson = await evRes.json().catch(() => ({}));
         if (!evRes.ok) {
           throw new Error(evJson?.details || evJson?.error || "No pudimos cargar el evento.");
@@ -75,26 +64,14 @@ export default function EventDetailPage() {
         setEvent(evJson.event || null);
 
         // 2) Tickets (server API)
-        const tRes = await fetch(`/api/events/${id}/tickets?t=${timestamp}`, { 
-          cache: "no-store",
-          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-        });
+        const tRes = await fetch(`/api/events/${id}/tickets`, { cache: "no-store" });
         const tJson = await tRes.json().catch(() => ({}));
-        
-        console.log('[EventDetail] Tickets response:', { 
-          ok: tRes.ok, 
-          status: tRes.status, 
-          ticketCount: tJson?.tickets?.length,
-          tickets: tJson?.tickets 
-        });
-        
         if (!tRes.ok) {
           throw new Error(tJson?.details || tJson?.error || "No pudimos cargar las entradas en este momento.");
         }
 
         const list = Array.isArray(tJson.tickets) ? tJson.tickets : [];
         setTickets(list);
-        setRenderKey(Date.now()); // Forzar re-render completo
 
         // 3) Vendedores (best-effort, si falla no bloquea)
         const sellerIds = Array.from(
@@ -121,18 +98,9 @@ export default function EventDetailPage() {
       } finally {
         setLoading(false);
       }
-  };
+    };
 
-  useEffect(() => {
-    if (!id) return;
-    
-    // Limpiar todo antes de cargar
-    setEvent(null);
-    setTickets([]);
-    setSellerMap({});
-    
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    load();
   }, [id]);
 
   const title = useMemo(() => {
@@ -158,11 +126,6 @@ export default function EventDetailPage() {
 📄 Siempre pide el PDF de la entrada al vendedor`;
 
   const displayWarnings = warnings || defaultWarnings;
-
-  // No renderizar nada hasta que esté montado en el cliente
-  if (!mounted) {
-    return <div className="max-w-5xl mx-auto px-4 py-4">Cargando...</div>;
-  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-4">
@@ -218,7 +181,7 @@ export default function EventDetailPage() {
       )}
 
       {!loading && !errorMsg && tickets.length > 0 && (
-        <div className="grid md:grid-cols-2 gap-6" key={renderKey}>
+        <div className="grid md:grid-cols-2 gap-6">
           {tickets.map((t) => (
             <TicketCard key={t.id} ticket={t} seller={sellerMap[t.seller_id]} />
           ))}

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export const dynamic = 'force-dynamic';
 export const runtime = "nodejs";
 
 function getSupabaseAdmin() {
@@ -55,13 +54,6 @@ export async function GET(_req, { params }) {
     }
 
     const { data, error } = await q;
-
-    console.log('[API Tickets] Query result:', { 
-      eventId: id, 
-      ticketCount: data?.length,
-      tickets: data,
-      error: error?.message 
-    });
 
     if (error) {
       return NextResponse.json(
