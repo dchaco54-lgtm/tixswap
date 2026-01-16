@@ -1,8 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 function formatCLP(value: number | null) {
   const n = Number(value);
@@ -20,39 +18,6 @@ interface TicketCardProps {
 }
 
 export default function TicketCard({ ticket, seller }: TicketCardProps) {
-  const [session, setSession] = useState<any>(null);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const supabase = createClientComponentClient();
-
-  useEffect(() => {
-    // Verificar sesión inicial
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data?.session);
-      setIsCheckingAuth(false);
-    });
-
-    // Escuchar cambios de autenticación
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setIsCheckingAuth(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, [supabase]);
-
-  const handleBuyClick = (e: React.MouseEvent) => {
-    // Si aún estamos verificando, no hacer nada
-    if (isCheckingAuth) {
-      e.preventDefault();
-      return;
-    }
-
-    // Si no hay sesión, redirigir a login
-    if (!session) {
-      e.preventDefault();
-      window.location.href = '/login?redirect=/checkout/' + ticket.id;
-    }
-  };
 
   const price = ticket.price || ticket.price_clp || ticket.amount || null;
   const section = ticket.section || ticket.sector || "";
@@ -77,7 +42,6 @@ export default function TicketCard({ ticket, seller }: TicketCardProps) {
           <div className="text-xl font-bold">{price ? formatCLP(price) : "-"}</div>
           <Link
             href={`/checkout/${ticket.id}`}
-            onClick={handleBuyClick}
             className="inline-block mt-3 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors"
           >
             Comprar
