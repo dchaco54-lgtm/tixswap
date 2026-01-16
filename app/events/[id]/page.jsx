@@ -128,14 +128,17 @@ export default function EventDetailPage() {
   const displayWarnings = warnings || defaultWarnings;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10">
-      <Link href="/events" className="text-blue-600 hover:underline">
+    <div className="max-w-5xl mx-auto px-4 py-6 md:py-10">
+      <button 
+        onClick={() => window.history.back()} 
+        className="text-blue-600 hover:underline text-sm mb-4"
+      >
         ← Volver a eventos
-      </Link>
+      </button>
 
       {/* Imagen del evento */}
       {imageUrl && (
-        <div className="mt-6 rounded-2xl overflow-hidden">
+        <div className="rounded-2xl overflow-hidden">
           <img 
             src={imageUrl} 
             alt={title}
@@ -145,20 +148,19 @@ export default function EventDetailPage() {
       )}
 
       {/* Información del evento */}
-      <div className="mt-6 p-6 rounded-2xl border bg-white">
-        <h1 className="text-3xl font-bold">{title}</h1>
-        {subtitle && <div className="text-gray-600 mt-2">{subtitle}</div>}
+      <div className="mt-4 p-4 md:p-6 rounded-2xl border bg-white">
+        <h1 className="text-2xl md:text-3xl font-bold">{title}</h1>
+        {subtitle && <div className="text-gray-600 mt-2 text-sm md:text-base">{subtitle}</div>}
       </div>
 
-      {/* Advertencias/Recomendaciones - Siempre visible (genéricas o personalizadas) */}
-      <div className="mt-6 p-4 rounded-xl bg-blue-50 border border-blue-200">
-        <div className="flex items-start gap-3">
-          <span className="text-xl">🛡️</span>
-          <div className="flex-1">
-            <h3 className="font-semibold text-blue-900 mb-2">Compra segura en TixSwap</h3>
-            <div className="text-blue-800 text-sm whitespace-pre-line leading-relaxed">
+      {/* Advertencias/Recomendaciones - Compacto y discreto */}
+      <div className="mt-4 p-3 rounded-xl bg-blue-50 border border-blue-200">
+        <div className="flex items-start gap-2">
+          <span className="text-lg flex-shrink-0">🛡️</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-blue-900 leading-relaxed whitespace-pre-line">
               {displayWarnings}
-            </div>
+            </p>
           </div>
         </div>
       </div>
