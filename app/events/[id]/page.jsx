@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 function formatDateCL(value) {
@@ -39,6 +39,7 @@ function formatCLP(value) {
 
 export default function EventDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const id = params?.id;
 
   const [event, setEvent] = useState(null);
@@ -47,10 +48,7 @@ export default function EventDetailPage() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  useEffect(() => {
-    if (!id) return;
-
-    const load = async () => {
+  const loadData = async () => {
       try {
         setLoading(true);
         setErrorMsg("");
@@ -98,9 +96,12 @@ export default function EventDetailPage() {
       } finally {
         setLoading(false);
       }
-    };
+  };
 
-    load();
+  useEffect(() => {
+    if (!id) return;
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const title = useMemo(() => {
