@@ -32,7 +32,6 @@ export default function CheckoutPage() {
   const [error, setError] = useState(null);
   const [preview, setPreview] = useState(null);
   const [showSellerComments, setShowSellerComments] = useState(false);
-  const [checkingAuth, setCheckingAuth] = useState(true);
 
   const ticket = preview?.ticket;
   const event = preview?.event;
@@ -43,55 +42,10 @@ export default function CheckoutPage() {
 
   const eventDateLabel = useMemo(() => formatDateTime(event?.starts_at), [event?.starts_at]);
 
-  // Verificar autenticación al cargar la página
-  useEffect(() => {
-    let mounted = true;
-    
-    async function checkAuth() {
-      try {
-        // Hacer exactamente lo mismo que el Header para consistencia
-        const { data } = await supabase.auth.getUser();
-        
-        if (!mounted) return;
-        
-        const user = data?.user || null;
-        
-        if (!user) {
-          // Solo redirigir si definitivamente no hay usuario después de esperar
-          setTimeout(() => {
-            if (mounted) {
-              console.log('No hay usuario autenticado, redirigiendo a login');
-              const currentPath = `/checkout/${ticketId}`;
-              router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
-            }
-          }, 500);
-          return;
-        }
-        
-        console.log('Usuario autenticado:', user.email);
-        setCheckingAuth(false);
-      } catch (err) {
-        if (!mounted) return;
-        console.error('Error verificando sesión:', err);
-        // En caso de error, dar beneficio de la duda
-        setCheckingAuth(false);
-      }
-    }
-
-    checkAuth();
-    
-    return () => {
-      mounted = false;
-    };
-  }, [router, ticketId]);
-
   useEffect(() => {
     let cancelled = false;
 
     async function loadPreview() {
-      // No cargar preview si aún estamos verificando auth
-      if (checkingAuth) return;
-      
       setLoading(true);
       setError(null);
 
@@ -116,51 +70,28 @@ export default function CheckoutPage() {
       }
     }
 
-    if (ticketId && !checkingAuth) loadPreview();
+    if (ticketId) loadPreview();
 
     return () => {
       cancelled = true;
     };
-  }, [ticketId, checkingAuth]);
+  }, [ticketId]);
 
   async function startWebpayPayment() {
     setPaying(true);
     setError(null);
 
     try {
-      // Verificar sesión antes de intentar el pago
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
       
-      if (sessionErr) {
-        console.error('Error obteniendo sesión:', sessionErr);
+      if (sessionErr || !sessionData?.session) {
+        setError('Debes iniciar sesión para comprar.');
+        setPaying(false);
+        return;
       }
 
-      const buyerId = sessionData?.session?.user?.id;
-      const accessToken = sessionData?.session?.access_token;
-
-      if (!buyerId || !accessToken) {
-        // Sesión no disponible, intentar refrescar
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (!user) {
-          // Realmente no hay sesión, redirigir a login
-          const currentPath = `/checkout/${ticketId}`;
-          router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
-          return;
-        }
-        
-        // Si getUser() funciona, obtener session de nuevo
-        const { data: newSession } = await supabase.auth.getSession();
-        const newBuyerId = newSession?.session?.user?.id;
-        const newAccessToken = newSession?.session?.access_token;
-        
-        if (!newBuyerId || !newAccessToken) {
-          throw new Error('No se pudo obtener la sesión para procesar el pago.');
-        }
-        
-        // Usar la nueva sesión
-        return await processPayment(ticketId, newBuyerId, newAccessToken);
-      }
+      const buyerId = sessionData.session.user.id;
+      const accessToken = sessionData.session.access_token;
 
       await processPayment(ticketId, buyerId, accessToken);
     } catch (e) {
@@ -207,16 +138,6 @@ export default function CheckoutPage() {
     } catch (e) {
       throw e; // Re-throw para que startWebpayPayment lo maneje
     }
-  }
-
-  // Verificar autenticación antes de mostrar contenido
-  if (checkingAuth) {
-    return (
-      <div className="max-w-3xl mx-auto px-4 py-10">
-        <h1 className="text-3xl font-bold mb-2">Checkout</h1>
-        <p className="text-gray-600">Verificando sesión…</p>
-      </div>
-    );
   }
 
   if (loading) {
