@@ -229,8 +229,15 @@ export default function SellConfirmPage() {
         return;
       }
 
+      console.log('[Confirm] Respuesta exitosa:', data);
+
       localStorage.removeItem(DRAFT_KEY);
-      router.push(`/events/${data?.event_id || selectedEvent.id}`);
+      
+      // Redirigir al evento del ticket creado
+      const redirectEventId = data?.ticket?.event_id || selectedEvent.id;
+      console.log('[Confirm] Redirigiendo a evento:', redirectEventId);
+      
+      router.push(`/events/${redirectEventId}`);
     } catch (e) {
       setError(e?.message || "No se pudo publicar.");
     } finally {
