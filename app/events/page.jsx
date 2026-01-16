@@ -128,38 +128,41 @@ export default function EventDetailPage() {
   const displayWarnings = warnings || defaultWarnings;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10">
-      <Link href="/events" className="text-blue-600 hover:underline">
+    <div className="max-w-5xl mx-auto px-4 py-4">
+      <Link 
+        href="/events" 
+        className="text-blue-600 hover:underline text-sm mb-3 inline-block"
+      >
         ← Volver a eventos
       </Link>
 
-      {/* Imagen del evento */}
-      {imageUrl && (
-        <div className="mt-6 rounded-2xl overflow-hidden">
-          <img 
-            src={imageUrl} 
-            alt={title}
-            className="w-full h-auto max-h-64 object-cover"
-          />
+      {/* Card del evento con imagen incluida */}
+      <div className="rounded-2xl border bg-white overflow-hidden shadow-sm">
+        {/* Imagen del evento tipo banner */}
+        {imageUrl && (
+          <div className="w-full">
+            <img 
+              src={imageUrl} 
+              alt={title}
+              className="w-full h-20 md:h-24 object-cover"
+            />
+          </div>
+        )}
+        
+        {/* Información del evento */}
+        <div className="p-4">
+          <h1 className="text-xl md:text-2xl font-bold">{title}</h1>
+          {subtitle && <div className="text-gray-600 mt-1 text-sm">{subtitle}</div>}
         </div>
-      )}
-
-      {/* Información del evento */}
-      <div className="mt-6 p-6 rounded-2xl border bg-white">
-        <h1 className="text-3xl font-bold">{title}</h1>
-        {subtitle && <div className="text-gray-600 mt-2">{subtitle}</div>}
       </div>
 
-      {/* Advertencias/Recomendaciones - Siempre visible (genéricas o personalizadas) */}
-      <div className="mt-6 p-6 rounded-2xl bg-blue-50 border-2 border-blue-200 shadow-sm">
-        <div className="flex items-start gap-4">
-          <span className="text-3xl">🛡️</span>
-          <div className="flex-1">
-            <h3 className="font-bold text-blue-900 mb-3 text-lg">Compra segura en TixSwap</h3>
-            <div className="text-blue-800 text-base whitespace-pre-line leading-relaxed">
-              {displayWarnings}
-            </div>
-          </div>
+      {/* Advertencias/Recomendaciones - Compacto */}
+      <div className="mt-3 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
+        <div className="flex items-start gap-2">
+          <span className="text-base flex-shrink-0">🛡️</span>
+          <p className="text-xs text-blue-900 leading-snug whitespace-pre-line">
+            {displayWarnings}
+          </p>
         </div>
       </div>
 
@@ -245,3 +248,4 @@ function TicketCard({ ticket, seller }) {
     </div>
   );
 }
+
