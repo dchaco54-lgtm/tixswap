@@ -119,6 +119,14 @@ export default function EventDetailPage() {
   const imageUrl = event?.image_url || event?.poster_url || event?.cover_image || null;
   const warnings = event?.warnings || event?.recommendations || event?.alerts || null;
 
+  // Advertencias genéricas por defecto de TixSwap
+  const defaultWarnings = `🔒 No hagas transacciones fuera de la plataforma
+⚠️ Recuerda: no entregues tus datos personales antes de confirmar
+🛡️ Evita estafas - no compartas tus claves ni PIN
+📄 Siempre pide el PDF de la entrada al vendedor`;
+
+  const displayWarnings = warnings || defaultWarnings;
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
       <Link href="/events" className="text-blue-600 hover:underline">
@@ -131,7 +139,7 @@ export default function EventDetailPage() {
           <img 
             src={imageUrl} 
             alt={title}
-            className="w-full h-auto max-h-96 object-cover"
+            className="w-full h-auto max-h-64 object-cover"
           />
         </div>
       )}
@@ -142,18 +150,18 @@ export default function EventDetailPage() {
         {subtitle && <div className="text-gray-600 mt-2">{subtitle}</div>}
       </div>
 
-      {/* Advertencias/Recomendaciones (solo si existen) */}
-      {warnings && (
-        <div className="mt-6 p-5 rounded-xl bg-amber-50 border-l-4 border-amber-500">
-          <div className="flex items-start gap-3">
-            <span className="text-2xl">⚠️</span>
-            <div>
-              <h3 className="font-semibold text-amber-900 mb-2">Información importante</h3>
-              <div className="text-amber-800 whitespace-pre-line">{warnings}</div>
+      {/* Advertencias/Recomendaciones - Siempre visible (genéricas o personalizadas) */}
+      <div className="mt-6 p-4 rounded-xl bg-blue-50 border border-blue-200">
+        <div className="flex items-start gap-3">
+          <span className="text-xl">🛡️</span>
+          <div className="flex-1">
+            <h3 className="font-semibold text-blue-900 mb-2">Compra segura en TixSwap</h3>
+            <div className="text-blue-800 text-sm whitespace-pre-line leading-relaxed">
+              {displayWarnings}
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       <h2 className="text-2xl font-semibold mt-10 mb-4">Entradas disponibles</h2>
 
