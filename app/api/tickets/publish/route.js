@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
@@ -7,6 +9,8 @@ export async function POST(request) {
     const body = await request.json();
     const { eventId, sector, fila, asiento, price } = body || {};
 
+    console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento });
+
     if (!eventId || !price) {
       return NextResponse.json(
         { error: 'Faltan datos: eventId y price son requeridos.' },
@@ -14,9 +18,13 @@ export async function POST(request) {
       );
     }
 
-    const supabase = createRouteHandlerClient({ cookies });
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
     const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    
+    console.log('[Publish] Auth check:', { hasUser: !!user, userId: user?.id, error: authErr?.message });
+    
     if (authErr || !user) {
       return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
     }
