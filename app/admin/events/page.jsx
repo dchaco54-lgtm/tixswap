@@ -120,6 +120,31 @@ export default function AdminEventsPage() {
   const [editingEvent, setEditingEvent] = useState(null);
   const [editForm, setEditForm] = useState({ warnings: "" });
 
+  // Validar acceso admin
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data?.session) {
+        router.push("/login");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", data.session.user.id)
+        .single();
+
+      const role = profile?.role;
+      if (role && role !== "admin") {
+        router.push("/dashboard");
+      } else {
+        setUserRole(role || "user");
+      }
+    };
+    checkAuth();
+  }, [router]);
+
   // Crear 1 evento
   const [form, setForm] = useState({
     title: "",
@@ -348,8 +373,6 @@ export default function AdminEventsPage() {
   };
 
   const preview = useMemo(() => bulkRows.slice(0, 10), [bulkRows]);
-
-  if (userRole && userRole !== "admin") return null;
 
   return (
     <div className="min-h-screen bg-[#f4f7ff]">
