@@ -66,29 +66,6 @@ export default function CheckoutPage() {
     checkAuth();
   }, [router, ticketId]);
 
-  // Verificar autenticación al cargar la página
-  useEffect(() => {
-    async function checkAuth() {
-      try {
-        const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
-        
-        if (sessionErr || !session) {
-          // No hay sesión, redirigir a login
-          const currentPath = `/checkout/${ticketId}`;
-          router.replace(`/login?redirectTo=${encodeURIComponent(currentPath)}`);
-          return;
-        }
-        
-        setCheckingAuth(false);
-      } catch (err) {
-        console.error('Error verificando sesión:', err);
-        router.replace(`/login?redirectTo=${encodeURIComponent(`/checkout/${ticketId}`)}`);
-      }
-    }
-
-    checkAuth();
-  }, [router, ticketId]);
-
   useEffect(() => {
     let cancelled = false;
 
@@ -181,6 +158,10 @@ export default function CheckoutPage() {
       form.submit();
     } catch (e) {
       setError(e.message || 'Error interno');
+      setPaying(false);
+    }
+  }
+
   // Mostrar cargando mientras verifica autenticación
   if (checkingAuth) {
     return (
@@ -189,10 +170,6 @@ export default function CheckoutPage() {
         <p className="text-gray-600">Verificando sesión…</p>
       </div>
     );
-  }
-
-      setPaying(false);
-    }
   }
 
   if (loading) {
@@ -329,9 +306,9 @@ export default function CheckoutPage() {
                 <span>{formatPrice(fees?.ticketPrice ?? ticket?.price)}</span>
               </div>
               <div className="flex justify-between">
-  <span>Cargo TixSwap</span>
-  <span>{formatPrice(fees?.platformFee ?? 0)}</span>
-</div>
+                <span>Cargo TixSwap</span>
+                <span>{formatPrice(fees?.platformFee ?? 0)}</span>
+              </div>
               <div className="border-t pt-3 flex justify-between text-lg font-semibold">
                 <span>Total a pagar</span>
                 <span>{formatPrice(fees?.totalDue ?? 0)}</span>
