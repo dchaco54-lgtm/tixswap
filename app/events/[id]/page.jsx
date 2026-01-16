@@ -128,40 +128,41 @@ export default function EventDetailPage() {
   const displayWarnings = warnings || defaultWarnings;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 md:py-10">
+    <div className="max-w-5xl mx-auto px-4 py-4">
       <button 
         onClick={() => window.history.back()} 
-        className="text-blue-600 hover:underline text-sm mb-4"
+        className="text-blue-600 hover:underline text-sm mb-3"
       >
         ← Volver a eventos
       </button>
 
-      {/* Imagen del evento */}
-      {imageUrl && (
-        <div className="rounded-2xl overflow-hidden">
-          <img 
-            src={imageUrl} 
-            alt={title}
-            className="w-full h-auto max-h-64 object-cover"
-          />
+      {/* Card del evento con imagen incluida */}
+      <div className="rounded-2xl border bg-white overflow-hidden shadow-sm">
+        {/* Imagen del evento */}
+        {imageUrl && (
+          <div className="w-full">
+            <img 
+              src={imageUrl} 
+              alt={title}
+              className="w-full h-48 md:h-64 object-cover"
+            />
+          </div>
+        )}
+        
+        {/* Información del evento */}
+        <div className="p-4">
+          <h1 className="text-xl md:text-2xl font-bold">{title}</h1>
+          {subtitle && <div className="text-gray-600 mt-1 text-sm">{subtitle}</div>}
         </div>
-      )}
-
-      {/* Información del evento */}
-      <div className="mt-4 p-4 md:p-6 rounded-2xl border bg-white">
-        <h1 className="text-2xl md:text-3xl font-bold">{title}</h1>
-        {subtitle && <div className="text-gray-600 mt-2 text-sm md:text-base">{subtitle}</div>}
       </div>
 
-      {/* Advertencias/Recomendaciones - Compacto y discreto */}
-      <div className="mt-4 p-3 rounded-xl bg-blue-50 border border-blue-200">
+      {/* Advertencias/Recomendaciones - Compacto */}
+      <div className="mt-3 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
         <div className="flex items-start gap-2">
-          <span className="text-lg flex-shrink-0">🛡️</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-blue-900 leading-relaxed whitespace-pre-line">
-              {displayWarnings}
-            </p>
-          </div>
+          <span className="text-base flex-shrink-0">🛡️</span>
+          <p className="text-xs text-blue-900 leading-snug whitespace-pre-line">
+            {displayWarnings}
+          </p>
         </div>
       </div>
 
