@@ -237,7 +237,6 @@ export default function AdminEventsPage() {
       setErr(e?.message || "Error actualizando advertencias");
     }
   };
-  };
 
   const handleCreate = async (e) => {
     e.preventDefault();
