@@ -183,17 +183,19 @@ export default function SellConfirmPage() {
       // Verificar sesión antes de enviar
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      console.log('[Confirm] Session check:', { hasSession: !!session, error: sessionError?.message });
+      console.log('[Confirm] Session check:', { hasSession: !!session, userId: session?.user?.id, error: sessionError?.message });
       
-      if (!session) {
+      if (!session?.user) {
         setError("No hay sesión activa. Por favor inicia sesión de nuevo.");
         router.push(`/login?redirectTo=${encodeURIComponent("/sell/confirm")}`);
         return;
       }
 
       const payload = {
-        eventId: selectedEvent?.id, // camelCase como espera el API
+        eventId: selectedEvent?.id,
         price: Number(String(price).replace(/[^\d]/g, "")),
+        userId: session.user.id, // Enviar user ID en el payload
+        userEmail: session.user.email,
         
         // paso 1
         sector: draft?.sector || null,
@@ -208,7 +210,6 @@ export default function SellConfirmPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include", // Cambiar a include para asegurar cookies
         body: JSON.stringify(payload),
       });
 

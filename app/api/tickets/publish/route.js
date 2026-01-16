@@ -1,15 +1,14 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { eventId, sector, fila, asiento, price } = body || {};
+    const { eventId, sector, fila, asiento, price, userId, userEmail } = body || {};
 
-    console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento });
+    console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento, userId });
 
     if (!eventId || !price) {
       return NextResponse.json(
@@ -18,16 +17,22 @@ export async function POST(request) {
       );
     }
 
-    const cookieStore = cookies();
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
-
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
-    
-    console.log('[Publish] Auth check:', { hasUser: !!user, userId: user?.id, error: authErr?.message });
-    
-    if (authErr || !user) {
-      return NextResponse.json({ error: 'No autenticado' }, { status: 401 });
+    if (!userId) {
+      return NextResponse.json({ error: 'No autenticado - falta userId' }, { status: 401 });
     }
+
+    const supabase = supabaseAdmin();
+
+    // Verificar que el usuario existe
+    const { data: authUser, error: authErr } = await supabase.auth.admin.getUserById(userId);
+    
+    console.log('[Publish] Auth check:', { hasUser: !!authUser, userId: authUser?.user?.id, error: authErr?.message });
+    
+    if (authErr || !authUser?.user) {
+      return NextResponse.json({ error: 'Usuario no válido' }, { status: 401 });
+    }
+
+    const user = authUser.user;
 
     // seller profile
     const sellerId = user.id;
