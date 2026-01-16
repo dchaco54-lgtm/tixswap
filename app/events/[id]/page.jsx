@@ -199,9 +199,9 @@ export default function EventDetailPage() {
       )}
 
       {!loading && !errorMsg && tickets.length > 0 && (
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid md:grid-cols-2 gap-6" key={`tickets-${Date.now()}`}>
           {tickets.map((t) => (
-            <TicketCard key={t.id} ticket={t} seller={sellerMap[t.seller_id]} />
+            <TicketCard key={`${t.id}-${t.price}-${Date.now()}`} ticket={t} seller={sellerMap[t.seller_id]} />
           ))}
         </div>
       )}
