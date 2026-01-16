@@ -47,6 +47,12 @@ export default function EventDetailPage() {
   const [sellerMap, setSellerMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  // Asegurar que solo renderice en el cliente
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const loadData = async () => {
       try {
@@ -144,6 +150,11 @@ export default function EventDetailPage() {
 📄 Siempre pide el PDF de la entrada al vendedor`;
 
   const displayWarnings = warnings || defaultWarnings;
+
+  // No renderizar nada hasta que esté montado en el cliente
+  if (!mounted) {
+    return <div className="max-w-5xl mx-auto px-4 py-4">Cargando...</div>;
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-4">
