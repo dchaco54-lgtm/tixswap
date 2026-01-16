@@ -117,6 +117,8 @@ export default function AdminEventsPage() {
   const [userRole, setUserRole] = useState(null);
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [editForm, setEditForm] = useState({ warnings: "" });
 
   // Crear 1 evento
   const [form, setForm] = useState({
@@ -188,6 +190,30 @@ export default function AdminEventsPage() {
     }
   };
 
+  const openEditModal = (event) => {
+    setEditingEvent(event);
+    setEditForm({ warnings: event?.warnings || "" });
+  };
+
+  const handleUpdateWarnings = async () => {
+    if (!editingEvent) return;
+    try {
+      const { error } = await supabase
+        .from("events")
+        .update({ warnings: editForm.warnings.trim() || null })
+        .eq("id", editingEvent.id);
+      
+      if (error) throw error;
+      
+      setMsg("Advertencias actualizadas ✅");
+      setEditingEvent(null);
+      await loadEvents();
+    } catch (e) {
+      setErr(e?.message || "Error actualizando advertencias");
+    }
+  };
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
     setCreating(true);
@@ -206,6 +232,7 @@ export default function AdminEventsPage() {
         city: form.city.trim() || null,
         category: form.category.trim() || null,
         image_url: form.image_url.trim() || null,
+        warnings: null, // Se edita después en el modal
       };
 
       const { error } = await supabase.from("events").insert(payload);
@@ -575,6 +602,7 @@ export default function AdminEventsPage() {
                     <th className="text-left px-4 py-3">Recinto</th>
                     <th className="text-left px-4 py-3">Ciudad</th>
                     <th className="text-left px-4 py-3">Categoría</th>
+                    <th className="text-left px-4 py-3">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white">
@@ -598,12 +626,62 @@ export default function AdminEventsPage() {
                       <td className="px-4 py-3 text-slate-700">
                         {ev.category || "—"}
                       </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => openEditModal(ev)}
+                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        >
+                          Editar advertencias
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+        </div>
+
+        {/* Modal de edición de advertencias */}
+        {editingEvent && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-xl">
+              <h3 className="text-xl font-bold mb-4">
+                Editar advertencias: {editingEvent.title}
+              </h3>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-semibold mb-2">
+                  Advertencias/Recomendaciones (opcional)
+                </label>
+                <textarea
+                  value={editForm.warnings}
+                  onChange={(e) => setEditForm({ warnings: e.target.value })}
+                  placeholder="Ej: IMPORTANTE: Las entradas NO son renominables. Asegúrate que el nombre coincida con tu documento de identidad."
+                  className="w-full p-3 border border-slate-300 rounded-lg font-mono text-sm h-40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-slate-500 mt-2">
+                  Soporta saltos de línea. Esto se mostrará en la página del evento con icono de advertencia.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleUpdateWarnings}
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-semibold"
+                >
+                  Guardar
+                </button>
+                <button
+                  onClick={() => setEditingEvent(null)}
+                  className="flex-1 bg-slate-200 text-slate-800 px-4 py-2 rounded-lg hover:bg-slate-300 font-semibold"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         </div>
       </div>
     </div>
