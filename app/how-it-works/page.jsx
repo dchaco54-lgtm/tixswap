@@ -66,6 +66,10 @@ export default function HowItWorksPage() {
                 Para recibir pagos, el vendedor debe tener su <b>Wallet</b>{" "}
                 configurada (datos bancarios).
               </Bullet>
+              <Bullet>
+                El vendedor puede ver badges de verificación (email, teléfono, wallet)
+                que dan confianza a los compradores.
+              </Bullet>
             </ul>
           </Card>
 
@@ -73,8 +77,12 @@ export default function HowItWorksPage() {
             <ul className="space-y-2">
               <Bullet>El comprador paga dentro de TixSwap.</Bullet>
               <Bullet>
-                El pago queda protegido (retenido) hasta que se confirme que el
-                ticket funcionó.
+                El pago queda <b>en resguardo</b> (retenido) hasta que se confirme
+                que el ticket funcionó correctamente.
+              </Bullet>
+              <Bullet>
+                Los pagos se procesan mediante proveedores certificados (PSP). TixSwap
+                no almacena datos completos de tarjetas.
               </Bullet>
               <Bullet>
                 Si el ticket se usa sin problemas, el proceso avanza a la
@@ -83,21 +91,111 @@ export default function HowItWorksPage() {
             </ul>
           </Card>
 
-          <Card title="3) Validación de acceso (día del evento)">
+          <Card title="3) Día del evento / validación">
             <ul className="space-y-2">
               <Bullet>
-                Si el comprador entra correctamente, se marca la operación como
-                exitosa.
+                Si el comprador entra correctamente al evento, la operación se marca
+                como exitosa.
               </Bullet>
               <Bullet>
-                Si hay un problema real (QR inválido, ya usado, etc.), se abre
-                una disputa.
+                Si hay un problema real (QR inválido, ya usado, sector equivocado),
+                se abre una <b>disputa</b>.
+              </Bullet>
+              <Bullet>
+                <b>Tip:</b> si tienes problemas en puerta, junta evidencia al tiro
+                (video/foto/hora/contexto).
               </Bullet>
             </ul>
           </Card>
 
-          <Card title="4) Pago al vendedor">
+          <Card title="4) Pago al vendedor (48–72h post-evento)">
             <ul className="space-y-2">
+              <Bullet>
+                Una vez validada la operación, TixSwap libera el pago al vendedor
+                tras <b>48-72 horas</b> del evento.
+              </Bullet>
+              <Bullet>
+                Los fondos se transfieren a la cuenta bancaria registrada en la Wallet.
+              </Bullet>
+              <Bullet>
+                El tiempo puede variar por procesos bancarios o feriados.
+              </Bullet>
+              <Bullet>
+                Si hay una disputa activa, el pago se <b>retiene</b> hasta resolver.
+              </Bullet>
+            </ul>
+          </Card>
+
+          <Card title="5) Disputas con evidencia">
+            <ul className="space-y-2">
+              <Bullet>
+                Si el ticket no funcionó, el comprador debe reportarlo con evidencia
+                clara (video/foto/hora/contexto).
+              </Bullet>
+              <Bullet>
+                TixSwap congela el pago y pide evidencia a ambas partes.
+              </Bullet>
+              <Bullet>
+                Resolución estándar: <b>hasta 5 días hábiles</b> con evidencia completa.
+              </Bullet>
+              <Bullet>
+                Sin evidencia suficiente, el reclamo puede rechazarse. Con evidencia
+                adulterada, se puede sancionar la cuenta.
+              </Bullet>
+            </ul>
+          </Card>
+
+          <Card title="6) Seguridad y confianza">
+            <ul className="space-y-2">
+              <Bullet>
+                <b>Badges de verificación:</b> email, teléfono, wallet, ventas
+                completadas.
+              </Bullet>
+              <Bullet>
+                <b>Monitoreo anti-abuso:</b> patrones sospechosos, múltiples reclamos,
+                tickets duplicados.
+              </Bullet>
+              <Bullet>
+                <b>Política anti-estafa:</b> suspensión, retención, reportes cuando
+                corresponda.
+              </Bullet>
+              <Bullet>
+                <b>Más info:</b>{" "}
+                <Link href="/legal/security" className="text-blue-600 underline">
+                  página de seguridad
+                </Link>
+                .
+              </Bullet>
+            </ul>
+          </Card>
+        </div>
+
+        <div className="mt-12 flex flex-col sm:flex-row gap-3">
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            Volver al inicio
+          </Link>
+
+          <Link
+            href="/legal/security"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            Ver seguridad
+          </Link>
+
+          <Link
+            href="/disputes"
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            Ver disputas
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
               <Bullet>
                 Una vez validada la operación, TixSwap libera el pago al vendedor
                 (según sus datos de Wallet).
