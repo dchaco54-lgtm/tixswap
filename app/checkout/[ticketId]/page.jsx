@@ -252,6 +252,22 @@ export default function CheckoutPage() {
             ) : null}
           </div>
 
+          {/* Microcopy de confianza */}
+          <div className="rounded-xl border-2 border-blue-100 bg-blue-50 p-5">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">🔒</span>
+              <div className="flex-1">
+                <div className="font-semibold text-blue-900 mb-1">
+                  Compra protegida
+                </div>
+                <div className="text-sm text-blue-800">
+                  Tu pago queda en resguardo hasta que valides el acceso. Si hay problema,
+                  puedes abrir disputa con evidencia. Soporte incluido.
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Resumen */}
           <div className="border rounded-xl p-6">
             <div className="text-lg font-semibold mb-4">Resumen</div>
