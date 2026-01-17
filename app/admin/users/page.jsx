@@ -319,8 +319,7 @@ export default function AdminUsersPage() {
         </div>
 
         <p className="mt-4 text-[11px] text-gray-400">
-          Tip: roles y comisiones — Básico (3,5%), Pro (2,5%), Premium (1,5%), Elite (0,5%) y Ultra Premium (0%).
-          Ultra Premium es por invitación/manual.
+          Tip: roles solo para referencia visual. Tiers de segmentación: Free (fijado por admin), Básico, Pro, Premium, Elite.
         </p>
       </div>
 
