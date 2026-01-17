@@ -27,11 +27,28 @@ function normalizeBaseUrl(url) {
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
-function calcPlatformFee(ticketPrice) {
+// Comisiones por rol (debe coincidir con lib/roles.js)
+const ROLE_COMMISSIONS = {
+  'basic': 0.035,
+  'free': 0,
+  'pro': 0.025,
+  'premium': 0.015,
+  'elite': 0.005,
+  'ultra': 0,
+  'admin': 0,
+};
+
+function calcPlatformFee(ticketPrice, sellerRole = 'basic') {
   const price = Math.round(Number(ticketPrice) || 0);
-  // Fee por plataforma: 2.5% con mínimo $1.200 (regla estándar)
-  const pct = Math.round(price * 0.025);
-  const fee = Math.max(pct, 1200);
+  
+  // Normalizar rol
+  const role = String(sellerRole || 'basic').toLowerCase().trim();
+  const commission = ROLE_COMMISSIONS[role] !== undefined ? ROLE_COMMISSIONS[role] : ROLE_COMMISSIONS['basic'];
+  
+  // Calcular fee: porcentaje del precio
+  const fee = Math.round(price * commission);
+  
+  console.log('[Webpay] Fee calc:', { price, role, commission: (commission * 100).toFixed(1) + '%', fee });
   return { feeAmount: fee, totalAmount: price + fee };
 }
 
@@ -145,9 +162,20 @@ export async function POST(req) {
       return NextResponse.json({ error: 'No puedes comprar tu propio ticket' }, { status: 400 });
     }
 
-    // Fees (2.5% con mínimo $1.200)
+    // Obtener rol del vendedor para calcular fee
+    console.log('[Webpay] Buscando rol del vendedor:', ticket.seller_id);
+    const { data: sellerProfile, error: sellerError } = await admin
+      .from('profiles')
+      .select('role')
+      .eq('id', ticket.seller_id)
+      .single();
+
+    const sellerRole = sellerProfile?.role || 'basic';
+    console.log('[Webpay] Vendedor role:', sellerRole);
+
+    // Fees basados en el rol del vendedor
     const amount = Number(ticket.price);
-    const { feeAmount, totalAmount } = calcPlatformFee(amount);
+    const { feeAmount, totalAmount } = calcPlatformFee(amount, sellerRole);
 
     console.log('[Webpay] Fees calculados:', { amount, feeAmount, totalAmount });
 
