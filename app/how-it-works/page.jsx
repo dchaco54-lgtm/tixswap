@@ -196,21 +196,10 @@ export default function HowItWorksPage() {
     </div>
   );
 }
-              <Bullet>
-                Una vez validada la operación, TixSwap libera el pago al vendedor
-                (según sus datos de Wallet).
-              </Bullet>
-              <Bullet>
-                La comisión se descuenta automáticamente según el tipo de usuario
-                del vendedor.
-              </Bullet>
-            </ul>
-          </Card>
-        </div>
 
-        {/* =========================
-            TIPOS DE USUARIO
-           ========================= */}
+{/* =========================
+    TIPOS DE USUARIO
+   ========================= */}
         <div className="mt-12">
           <SectionTitle
             title="Tipos de usuario y comisiones"
