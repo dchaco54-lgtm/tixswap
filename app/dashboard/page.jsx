@@ -296,7 +296,7 @@ function DashboardContent() {
       { id: "soporte", label: "Soporte", href: "/dashboard/soporte" },
       { id: "tickets", label: "Mis tickets", href: "/dashboard/tickets" },
 
-      ...(isAdmin ? [{ id: "admin", label: "Admin", href: "/admin/events" }] : []),
+      ...(isAdmin ? [{ id: "admin", label: "Admin", href: "/admin" }] : []),
     ];
   }, [profile?.role]);
 
