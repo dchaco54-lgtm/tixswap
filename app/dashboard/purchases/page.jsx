@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { supabase } from "@/lib/supabaseClient";
 
 function formatCLP(value) {
   const n = Number(value ?? 0);
@@ -35,7 +36,17 @@ export default function PurchasesPage() {
       setLoading(true);
       setError("");
 
-      const res = await fetch("/api/orders/my", { cache: "no-store" });
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session?.access_token) {
+        throw new Error("Debes iniciar sesión");
+      }
+
+      const res = await fetch("/api/orders/my", { 
+        cache: "no-store",
+        headers: {
+          'Authorization': `Bearer ${session.session.access_token}`
+        }
+      });
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
