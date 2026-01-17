@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { calculateSellerFee, calculateSellerPayout, formatPrice } from "@/lib/fees";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1";
 
@@ -47,6 +48,7 @@ export default function SellConfirmPage() {
 
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
+  const [userRole, setUserRole] = useState("basic"); // Rol del usuario
 
   // cerrar dropdown al click afuera
   useEffect(() => {
@@ -60,42 +62,74 @@ export default function SellConfirmPage() {
 
   // cargar draft y validar que venga paso 2 listo
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) {
-        router.replace("/sell");
-        return;
-      }
-      const parsed = JSON.parse(raw);
+    let mounted = true;
 
-      if (!parsed?.event_id) {
-        router.replace("/sell");
-        return;
-      }
-      if (!parsed?.ticketUpload?.uploaded) {
-        router.replace("/sell/file");
-        return;
-      }
+    async function loadDraftAndProfile() {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) {
+          router.replace("/sell");
+          return;
+        }
+        const parsed = JSON.parse(raw);
 
-      setDraft(parsed);
-      setPrice(String(parsed?.price ?? ""));
-      setOriginalPrice(parsed?.originalPrice ? String(parsed.originalPrice) : "");
-      setEventQuery(parsed?.event_title || "");
+        if (!parsed?.event_id) {
+          router.replace("/sell");
+          return;
+        }
+        if (!parsed?.ticketUpload?.uploaded) {
+          router.replace("/sell/file");
+          return;
+        }
 
-      // Establecer evento seleccionado desde el draft
-      if (parsed?.event_id) {
-        setSelectedEvent({
-          id: parsed.event_id,
-          title: parsed.event_title || "Evento",
-        });
+        if (!mounted) return;
+
+        setDraft(parsed);
+        setPrice(String(parsed?.price ?? ""));
+        setOriginalPrice(parsed?.originalPrice ? String(parsed.originalPrice) : "");
+        setEventQuery(parsed?.event_title || "");
+
+        // Establecer evento seleccionado desde el draft
+        if (parsed?.event_id) {
+          setSelectedEvent({
+            id: parsed.event_id,
+            title: parsed.event_title || "Evento",
+          });
+        }
+
+        // si en el draft había saleType (para futuro), lo tomo
+        if (parsed?.saleType) setSaleType(parsed.saleType);
+        if (parsed?.autoEmergencyAuction) setAutoEmergencyAuction(!!parsed.autoEmergencyAuction);
+
+        // Obtener rol del usuario
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('id', user.id)
+              .maybeSingle();
+            
+            if (mounted && profile?.role) {
+              setUserRole(profile.role);
+            }
+          }
+        } catch (err) {
+          console.error('Error obteniendo rol del usuario:', err);
+        }
+      } catch {
+        if (mounted) {
+          router.replace("/sell");
+        }
       }
-
-      // si en el draft había saleType (para futuro), lo tomo
-      if (parsed?.saleType) setSaleType(parsed.saleType);
-      if (parsed?.autoEmergencyAuction) setAutoEmergencyAuction(!!parsed.autoEmergencyAuction);
-    } catch {
-      router.replace("/sell");
     }
+
+    loadDraftAndProfile();
+
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   // cargar eventos
@@ -364,6 +398,60 @@ export default function SellConfirmPage() {
                 />
               </div>
             </div>
+
+            {/* Resumen de comisiones */}
+            {price && Number(price) > 0 && (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <div className="text-sm font-semibold text-slate-900 mb-3">Resumen de tu venta</div>
+                
+                {(() => {
+                  const ticketPrice = Number(price);
+                  const sellerFee = calculateSellerFee(ticketPrice, userRole);
+                  const payout = calculateSellerPayout(ticketPrice, userRole);
+                  const isFreeOrAdmin = userRole === 'free' || userRole === 'admin';
+
+                  return (
+                    <>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-slate-600">Precio de venta</span>
+                        <span className="font-semibold text-slate-900">{formatPrice(ticketPrice)}</span>
+                      </div>
+                      
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-slate-600">Cargo por servicio</span>
+                        <span className={`font-semibold ${isFreeOrAdmin ? 'text-green-600' : 'text-slate-900'}`}>
+                          {isFreeOrAdmin ? (
+                            <span className="flex items-center gap-1">
+                              {formatPrice(0)}
+                              <span className="text-xs text-green-600 font-normal">(Cuenta {userRole.toUpperCase()})</span>
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1">
+                              {formatPrice(sellerFee)}
+                              <span className="text-xs text-slate-500 font-normal">(2.5% mín $1.200)</span>
+                            </span>
+                          )}
+                        </span>
+                      </div>
+
+                      <div className="pt-3 mt-3 border-t border-slate-300 flex justify-between">
+                        <span className="text-sm font-semibold text-slate-900">Tú recibes aprox.</span>
+                        <span className="text-lg font-bold text-green-600">{formatPrice(payout)}</span>
+                      </div>
+
+                      {payout === 0 && (
+                        <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                          <p className="text-xs text-amber-800">
+                            ⚠️ <strong>Atención:</strong> El cargo por servicio es igual o mayor al precio de venta.
+                            Considera aumentar el precio para recibir un monto positivo.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* Tipo de venta */}
             <div className="mt-8">
