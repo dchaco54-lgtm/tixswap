@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import TicketCard from "./TicketCard";
+import { getBulkSellerTrustSignals } from "@/lib/trustSignals";
 
 // ✅ Configuración crítica para evitar caché
 export const dynamic = 'force-dynamic';
@@ -65,7 +66,7 @@ async function getEventData(id: string) {
 
   if (ticketsError) {
     console.error("[EventPage] Error loading tickets:", ticketsError);
-    return { event, tickets: [], sellers: {} };
+    return { event, tickets: [], sellers: {}, trustSignals: {} };
   }
 
   // 3. Obtener vendedores
@@ -88,9 +89,12 @@ async function getEventData(id: string) {
     }
   }
 
+  // 4. Obtener trust signals de todos los vendedores
+  const trustSignals = await getBulkSellerTrustSignals(sellerIds);
+
   console.log(`[EventPage] Loaded ${tickets?.length || 0} tickets for event ${id}`);
 
-  return { event, tickets: tickets || [], sellers };
+  return { event, tickets: tickets || [], sellers, trustSignals };
 }
 
 export default async function EventDetailPage({ params }: { params: { id: string } }) {
@@ -100,7 +104,7 @@ export default async function EventDetailPage({ params }: { params: { id: string
     notFound();
   }
 
-  const { event, tickets, sellers } = data;
+  const { event, tickets, sellers, trustSignals } = data;
 
   const title = event.title || event.name || "Evento";
   const date = event.starts_at ? formatDateCL(event.starts_at) : "";
@@ -157,7 +161,12 @@ export default async function EventDetailPage({ params }: { params: { id: string
       {tickets.length > 0 && (
         <div className="grid md:grid-cols-2 gap-6">
           {tickets.map((ticket: any) => (
-            <TicketCard key={ticket.id} ticket={ticket} seller={sellers[ticket.seller_id]} />
+            <TicketCard 
+              key={ticket.id} 
+              ticket={ticket} 
+              seller={sellers[ticket.seller_id]}
+              trustSignals={trustSignals[ticket.seller_id]}
+            />
           ))}
         </div>
       )}
