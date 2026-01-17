@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import OrderChat from "@/app/components/OrderChat";
 
 function formatCLP(value) {
   const n = Number(value ?? 0);
@@ -40,6 +41,7 @@ export default function PurchaseDetailPage() {
   const [order, setOrder] = useState(null);
   const [error, setError] = useState(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   useEffect(() => {
     if (!orderId) return;
@@ -239,11 +241,10 @@ export default function PurchaseDetailPage() {
                     )}
                   </div>
                   <button
-                    disabled
-                    className="px-4 py-2 rounded-xl bg-gray-200 text-gray-500 font-semibold cursor-not-allowed"
-                    title="Sistema de chat en desarrollo"
+                    onClick={() => setChatOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                   >
-                    💬 Abrir Chat (próximamente)
+                    💬 Abrir Chat
                   </button>
                 </div>
               </div>
@@ -303,6 +304,9 @@ export default function PurchaseDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Chat modal */}
+      {chatOpen && <OrderChat orderId={orderId} onClose={() => setChatOpen(false)} />}
     </div>
   );
 }
