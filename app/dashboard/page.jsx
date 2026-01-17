@@ -16,6 +16,7 @@ import {
 } from "@/lib/profileActions";
 import { formatRutForDisplay, formatEmailForDisplay } from "@/lib/formatUtils";
 import { validateRut, formatRut, cleanRut } from "@/lib/rutUtils";
+import { TIERS, TIER_DEFS, TIER_ORDER, tierLabel, normalizeTier } from "@/lib/tiers";
 
 /* =========================
    Helpers
@@ -94,37 +95,50 @@ function safeText(v, fallback = "—") {
   return t ? t : fallback;
 }
 
-function getCategoryLabel(roleRaw) {
-  const r = String(roleRaw || "").trim().toLowerCase();
-  if (r === "admin") return "Administrador";
-  if (r === "seller") return "Vendedor";
-  const key = normalizeRole(r);
-  return ROLE_DEFS[key]?.name || "Básico";
+function getCategoryLabelByTier(tierRaw, tierLocked) {
+  const normalized = normalizeTier(tierRaw);
+  if (tierLocked && normalized === TIERS.FREE) return "Free (fijado)";
+  if (tierLocked) return `${tierLabel(normalized)} (fijado)`;
+  return tierLabel(normalized);
 }
 
-function getNextTierInfo(soldCount) {
+function getNextTierInfo({ soldCount, currentTier, tierLocked }) {
   const sold = Number(soldCount) || 0;
+  const normalized = normalizeTier(currentTier);
 
-  // Encuentra el siguiente nivel cuyo opsRequired sea mayor a sold
-  const nextKey = ROLE_ORDER.find((k) => sold < (ROLE_DEFS[k]?.opsRequired ?? 0));
+  // Si está fijado (ej: Free), no hay progreso automático
+  if (tierLocked) {
+    return {
+      nextKey: null,
+      missing: "—",
+      nextLabel: "Fijado por admin",
+      required: null,
+    };
+  }
+
+  // FREE se trata como Básico para progresión (pero solo si no está lockeado)
+  const startTier = normalized === TIERS.FREE ? TIERS.BASIC : normalized;
+
+  // Encuentra el siguiente tier con minSales mayor a las ventas actuales
+  const nextKey = TIER_ORDER.find((key) => sold < (TIER_DEFS[key]?.minSales ?? Infinity));
 
   if (!nextKey) {
     return {
       nextKey: null,
       missing: 0,
       nextLabel: "Máximo nivel",
-      required: sold,
+      required: TIER_DEFS[startTier]?.minSales ?? sold,
     };
   }
 
-  const required = Number(ROLE_DEFS[nextKey]?.opsRequired ?? 0);
+  const required = Number(TIER_DEFS[nextKey]?.minSales ?? 0);
   const missing = Math.max(0, required - sold);
 
   return {
     nextKey,
     missing,
     required,
-    nextLabel: ROLE_DEFS[nextKey]?.name || nextKey,
+    nextLabel: TIER_DEFS[nextKey]?.label || nextKey,
   };
 }
 
@@ -280,7 +294,7 @@ function DashboardContent() {
       // Obtener perfil con nuevos campos
       const { data: p, error: pErr } = await supabase
         .from("profiles")
-        .select("id, full_name, rut, email, phone, role, avatar_url, status, tier, is_blocked")
+        .select("id, full_name, rut, email, phone, role, avatar_url, status, tier, tier_locked, is_blocked")
         .eq("id", u.id)
         .maybeSingle();
 
@@ -554,7 +568,11 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
   const paid90dCount = Number(salesData?.paid90dCount ?? 0) || 0;
   const paid90dTotal = Number(salesData?.paid90dTotal ?? 0) || 0;
 
-  const tier = getNextTierInfo(soldCount);
+  const tierProgress = getNextTierInfo({
+    soldCount,
+    currentTier: profile?.tier,
+    tierLocked: profile?.tier_locked,
+  });
 
   return (
     <div className="min-h-screen bg-[#f4f7ff]">
@@ -853,17 +871,22 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                       </div>
                     )}
 
-                    {/* Categoría */}
+                    {/* Categoría (tier de segmentación) */}
                     <div className="px-5 py-4 flex items-start justify-between gap-4">
                       <div>
-                        <div className="text-xs font-bold text-slate-500">Categoría</div>
+                        <div className="text-xs font-bold text-slate-500">Tier</div>
 
-                        <div className="mt-2 inline-flex items-center px-3 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-700 text-xs font-extrabold">
-                          {getCategoryLabel(profile?.role)}
+                        <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-700 text-xs font-extrabold">
+                          <span>{getCategoryLabelByTier(profile?.tier, profile?.tier_locked)}</span>
+                          {profile?.tier_locked ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                              Fijado admin
+                            </span>
+                          ) : null}
                         </div>
 
                         <div className="text-xs text-slate-400 mt-2">
-                          (Basada en tu plan de usuario)
+                          (Segmentación visual, no afecta pagos)
                         </div>
                       </div>
                     </div>
@@ -953,10 +976,10 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="text-xs font-bold text-slate-500">Faltan para subir</div>
                     <div className="mt-2 text-3xl font-extrabold text-slate-900">
-                      {salesLoading ? "—" : tier.missing}
+                      {salesLoading ? "—" : tierProgress.missing}
                     </div>
                     <div className="mt-2 text-xs text-slate-400">
-                      Próximo: {salesLoading ? "—" : tier.nextLabel}
+                      Próximo: {salesLoading ? "—" : tierProgress.nextLabel}
                     </div>
                   </div>
 
