@@ -115,7 +115,20 @@ export async function POST(req) {
     }
 
     const price = Number(ticket.price ?? ticket.price_clp ?? 0);
-    const fees = calculateFees(price);
+    
+    // Obtener rol del vendedor para calcular fee dinámico
+    let sellerRole = 'basic';
+    if (sellerId) {
+      const { data: sellerProfile } = await sb
+        .from('profiles')
+        .select('role')
+        .eq('id', sellerId)
+        .single();
+      sellerRole = sellerProfile?.role ?? 'basic';
+    }
+    
+    // Calcular fee basado en rol del vendedor
+    const fees = calculateFees(price, sellerRole);
 
     const eventTitle = event.title || event.name || 'Evento';
     const eventStartsAt = normalizeEventStartsAt(event);
