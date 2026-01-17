@@ -172,14 +172,59 @@ export default function TermsPage() {
 
           <H2>8) Pagos, validación y liberación de fondos</H2>
           <P>
-            Los pagos se procesan mediante proveedores externos (por ejemplo,
-            pasarelas de pago). TixSwap no almacena datos completos de tarjetas.
+            Los pagos se procesan mediante proveedores externos certificados (PSP -
+            Proveedores de Servicios de Pago). TixSwap no almacena datos completos
+            de tarjetas. El procesamiento puede involucrar Webpay u otras pasarelas.
+          </P>
+
+          <H3>8.1 Resguardo y retención</H3>
+          <P>
+            Al momento de la compra, el pago queda <b>en resguardo</b> (retenido)
+            hasta que se confirme que la operación fue exitosa. Esto protege tanto
+            al comprador (asegura que el ticket funcione) como al vendedor (asegura
+            que el comprador no haga reclamos infundados).
+          </P>
+
+          <H3>8.2 Liberación post-evento (48-72h)</H3>
+          <P>
+            Una vez validada la operación (ticket usado correctamente), TixSwap libera
+            el pago al vendedor en un plazo de <b>48 a 72 horas</b> después del evento.
+            Este tiempo puede variar por procesos bancarios, feriados, o verificaciones
+            adicionales.
+          </P>
+
+          <H3>8.3 Transferencias masivas por wallet</H3>
+          <P>
+            Los pagos al vendedor se realizan mediante <b>transferencias bancarias</b>
+            a la cuenta registrada en su Wallet (datos bancarios configurados en el perfil).
+            TixSwap puede procesar transferencias de forma masiva (lotes) para optimizar
+            costos y tiempos operativos.
           </P>
           <P>
-            TixSwap puede implementar mecanismos de retención/liberación de
-            fondos, validación y/o confirmación de operaciones para reducir
-            riesgo de fraude. La disponibilidad de fondos puede depender de la
-            operación, verificaciones y/o estado de disputa.
+            <b>Importante:</b> los tiempos de acreditación pueden variar según el banco
+            receptor, día de la semana (fin de semana/feriados) y procesos internos del
+            sistema financiero. TixSwap no controla estos tiempos una vez iniciada la
+            transferencia.
+          </P>
+
+          <H3>8.4 Retención por disputa</H3>
+          <P>
+            Si existe una <b>disputa activa</b>, el pago se retiene hasta que se resuelva
+            el caso. TixSwap revisará evidencia de ambas partes y tomará una decisión
+            según los antecedentes.
+          </P>
+
+          <H3>8.5 Contracargos y compensación</H3>
+          <P>
+            En caso de contracargo (chargeback) iniciado por el comprador ante su banco,
+            TixSwap podrá retener pagos futuros del vendedor o aplicar compensaciones
+            para cubrir el monto del contracargo si se determina que el vendedor fue
+            responsable del problema. El vendedor deberá colaborar aportando evidencia
+            según se requiera.
+          </P>
+          <P>
+            Si el contracargo resulta improcedente (fraude del comprador), TixSwap puede
+            tomar medidas contra la cuenta del comprador, incluyendo suspensión y reporte.
           </P>
 
           <H2>9) No retracto (información importante)</H2>
@@ -204,15 +249,22 @@ export default function TermsPage() {
             solicitar, revisar y contrastar evidencia de ambas partes.
           </P>
 
-          <H3>10.1 Evidencia mínima recomendada</H3>
+          <H3>10.1 Evidencia ideal recomendada</H3>
           <ul className="mt-3 space-y-2">
             <Bullet>
-              <b>Comprador:</b> video en acceso mostrando rechazo + fotos/capturas
-              de la entrada + hora aproximada + contexto.
+              <b>Comprador - evidencia ideal:</b> video corto del acceso mostrando
+              el rechazo, foto/captura del ticket/QR usado, hora aproximada y
+              contexto (puerta/sector).
             </Bullet>
             <Bullet>
-              <b>Vendedor:</b> comprobantes de compra/emisión + antecedentes de
-              nominación (si aplica) + cualquier respaldo de uso/entrega.
+              <b>Comprador - si NO te dejan grabar (alternativas válidas):</b>{" "}
+              foto del mensaje en el lector, selfie en el acceso con hora,
+              audio/nota inmediata, testigo (nombre + contacto), nombre del
+              guardia/staff + hora, correo de confirmación + ticket adjunto.
+            </Bullet>
+            <Bullet>
+              <b>Vendedor:</b> comprobantes de compra/emisión original + antecedentes
+              de nominación (si aplica) + cualquier respaldo de uso/entrega del ticket.
             </Bullet>
           </ul>
 
@@ -223,14 +275,22 @@ export default function TermsPage() {
             información, TixSwap podrá solicitar complementos; la falta de
             respuesta puede llevar al cierre del caso.
           </P>
+          <P>
+            <b>Urgencia:</b> si el problema ocurrió en puerta, reportar de inmediato
+            mejora las posibilidades de resolución rápida. La evidencia fresca es clave.
+          </P>
 
           <H3>10.3 Decisiones y medidas</H3>
           <P>
-            Según antecedentes, TixSwap podrá (en la medida permitida por la ley
-            y por el modelo operativo implementado): autorizar reembolso,
-            liberar pago al vendedor, o aplicar soluciones intermedias. En caso
-            de sospecha fundada de fraude, TixSwap puede retener pagos,
-            suspender cuentas y reportar información a autoridades/proveedores.
+            Según antecedentes y evidencia aportada, TixSwap podrá (en la medida
+            permitida por la ley y por el modelo operativo implementado): autorizar
+            reembolso total o parcial, liberar pago al vendedor, aplicar soluciones
+            intermedias, o rechazar el reclamo si no hay evidencia suficiente.
+          </P>
+          <P>
+            En caso de sospecha fundada de fraude, TixSwap puede retener pagos,
+            suspender cuentas y reportar información a autoridades/proveedores según
+            corresponda.
           </P>
 
           <H2>11) Cancelación, reprogramación o cambios del evento</H2>
@@ -249,22 +309,27 @@ export default function TermsPage() {
           <ul className="mt-3 space-y-2">
             <Bullet>
               Uso de bots, scraping, manipulación de flujos, intento de vulnerar
-              seguridad o suplantación.
+              seguridad o suplantación de identidad.
             </Bullet>
             <Bullet>
-              Publicación de entradas falsas, duplicadas, robadas o con
+              Publicación de <b>entradas falsas, duplicadas, robadas</b> o con
               información engañosa.
             </Bullet>
             <Bullet>
-              Reclamos fraudulentos o evidencia adulterada.
+              <b>Reclamos fraudulentos o evidencia adulterada</b> (manipular fotos/videos,
+              inventar problemas inexistentes, etc.).
             </Bullet>
             <Bullet>
               Uso del sitio con fines ilícitos o que dañen a terceros.
             </Bullet>
+            <Bullet>
+              Intento de evitar comisiones o burlar controles de la plataforma.
+            </Bullet>
           </ul>
           <P>
             TixSwap podrá suspender o cancelar cuentas, anular publicaciones,
-            bloquear transacciones y ejercer acciones legales cuando corresponda.
+            bloquear transacciones, retener pagos y ejercer acciones legales cuando
+            corresponda según la gravedad del caso.
           </P>
 
           <H2>13) Propiedad intelectual</H2>
