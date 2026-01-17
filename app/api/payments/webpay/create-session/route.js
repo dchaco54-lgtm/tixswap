@@ -31,7 +31,7 @@ function calcPlatformFee(ticketPrice) {
   const price = Math.round(Number(ticketPrice) || 0);
   // Fee por plataforma: 2.5% con mínimo $1.200 (ajusta si tu negocio cambia esta regla)
   const pct = Math.round(price * 0.025);
-  const fee = Math.max(pct, 0);
+  const fee = Math.max(pct, 1200);
   return { feeAmount: fee, totalAmount: price + fee };
 }
 
