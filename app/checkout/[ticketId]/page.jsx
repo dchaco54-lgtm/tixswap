@@ -81,17 +81,20 @@ export default function CheckoutPage() {
     setError(null);
 
     try {
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr) throw authErr;
+      const { data: sessionRes } = await supabase.auth.getSession();
+      const token = sessionRes?.session?.access_token;
+      const buyerId = sessionRes?.session?.user?.id;
 
-      const buyerId = authData?.user?.id;
-      if (!buyerId) {
+      if (!token || !buyerId) {
         throw new Error('Debes iniciar sesión para comprar.');
       }
 
       const res = await fetch('/api/payments/webpay/create-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ ticketId, buyerId }),
       });
 
@@ -101,8 +104,8 @@ export default function CheckoutPage() {
         throw new Error(data?.error || 'No pudimos iniciar el pago');
       }
 
-      const { url, token } = data;
-      if (!url || !token) {
+      const { url, token: tokenWs } = data;
+      if (!url || !tokenWs) {
         throw new Error('Respuesta inválida de Webpay');
       }
 
@@ -114,7 +117,7 @@ export default function CheckoutPage() {
       const input = document.createElement('input');
       input.type = 'hidden';
       input.name = 'token_ws';
-      input.value = token;
+      input.value = tokenWs;
 
       form.appendChild(input);
       document.body.appendChild(form);
