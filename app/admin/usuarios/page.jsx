@@ -8,14 +8,16 @@ import { supabase } from "../../lib/supabaseClient";
 const ADMIN_EMAIL = "soporte@tixswap.cl";
 
 const ROLE_OPTIONS = [
-  { value: "standard", label: "Usuario general", commission: 5 },
-  { value: "premium", label: "Premium (2% comisión)", commission: 2 },
-  { value: "super_premium", label: "Super Premium (0% comisión)", commission: 0 },
+  { value: "free", label: "Free (fijado por admin)" },
+  { value: "basic", label: "Básico" },
+  { value: "pro", label: "Pro" },
+  { value: "premium", label: "Premium" },
+  { value: "elite", label: "Elite" },
 ];
 
-function getCommissionForRole(role) {
-  const found = ROLE_OPTIONS.find((r) => r.value === role);
-  return found ? found.commission : 5;
+function getCommissionForRole() {
+  // Solo informativo en esta vista legacy; no toca pagos.
+  return 0;
 }
 
 export default function AdminUsuariosPage() {
@@ -29,7 +31,7 @@ export default function AdminUsuariosPage() {
   const [form, setForm] = useState({
     email: "",
     rut: "",
-    role: "standard",
+    role: "basic",
   });
   const [savingForm, setSavingForm] = useState(false);
 
