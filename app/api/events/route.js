@@ -34,7 +34,8 @@ export async function GET() {
 
     // Si existe alguna señal de "publicado", filtramos, si no, devolvemos todo
     if (await columnExists(supabase, "events", "status")) {
-      q = q.in("status", ["published", "active"]);
+      // Mostrar estados publicados/activos y también filas sin estado (legacy)
+      q = q.or("status.is.null,status.eq.published,status.eq.active");
     } else if (await columnExists(supabase, "events", "is_published")) {
       q = q.eq("is_published", true);
     } else if (await columnExists(supabase, "events", "published")) {
