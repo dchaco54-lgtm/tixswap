@@ -35,93 +35,100 @@ export default function SecurityPage() {
             compradores y vendedores.
           </P>
 
-          <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
-            <p className="text-sm text-slate-700">
-              <b>Idea central:</b> si hay un reclamo, pedimos evidencia, investigamos
-              y resolvemos. Si detectamos abuso o intento de estafa, aplicamos sanciones.
-            </p>
-          </div>
-
-          <H2>1) ¿Cómo protegemos las operaciones?</H2>
+          <H2>1) Compra protegida</H2>
+          <P>
+            El pago queda <b>en resguardo</b> hasta que se confirme que el ticket
+            funcionó correctamente en el evento. Esto se libera tras 48-72h post-evento
+            si todo salió bien.
+          </P>
           <ul className="mt-3 space-y-2">
             <Bullet>
-              <b>Intermediación:</b> TixSwap actúa como intermediario operativo entre comprador y vendedor.
+              Si hay un problema real (ticket inválido/usado), el pago se retiene
+              hasta resolver la disputa.
             </Bullet>
             <Bullet>
-              <b>Pagos:</b> el procesamiento de pago se realiza mediante proveedores de pago (no guardamos datos completos de tarjetas).
-            </Bullet>
-            <Bullet>
-              <b>Señales de riesgo:</b> monitoreamos actividad sospechosa (patrones raros, múltiples reclamos, comportamiento anómalo).
-            </Bullet>
-            <Bullet>
-              <b>Historial y reputación:</b> el comportamiento del usuario (compras/ventas/disputas) se usa para proteger la comunidad.
+              Los pagos se procesan mediante proveedores de pago certificados (PSP).
+              TixSwap no almacena datos completos de tarjetas.
             </Bullet>
           </ul>
 
-          <H2>2) Reglas de disputas (pro comprador y vendedor)</H2>
+          <H2>2) Verificaciones y señales de confianza</H2>
           <P>
-            Si un comprador no puede acceder al evento o hay un problema serio con el ticket,
-            se abre una disputa. Para avanzar, se requiere evidencia.
+            Mostramos badges visibles en cada vendedor para que puedas tomar
+            decisiones informadas:
+          </P>
+          <ul className="mt-3 space-y-2">
+            <Bullet>
+              <b>✓ Email verificado:</b> el usuario confirmó su correo electrónico.
+            </Bullet>
+            <Bullet>
+              <b>📱 Teléfono verificado:</b> el vendedor tiene teléfono registrado.
+            </Bullet>
+            <Bullet>
+              <b>💳 Wallet verificada:</b> cuenta bancaria configurada para recibir pagos.
+            </Bullet>
+            <Bullet>
+              <b>🎫 Ventas completadas:</b> historial de operaciones exitosas.
+            </Bullet>
+          </ul>
+          <P>
+            Estos indicadores te ayudan a identificar vendedores confiables. Un
+            vendedor nuevo sin historial no es necesariamente malo, pero la evidencia
+            importa más en caso de disputa.
           </P>
 
+          <H2>3) Monitoreo anti-abuso</H2>
           <ul className="mt-3 space-y-2">
             <Bullet>
-              <b>Comprador:</b> debe adjuntar evidencia clara (idealmente video del acceso + fotos + contexto).
-              Sin evidencia suficiente, el reclamo puede rechazarse.
+              <b>Patrones sospechosos:</b> múltiples reclamos, comportamiento anómalo,
+              tickets duplicados detectados.
             </Bullet>
             <Bullet>
-              <b>Vendedor:</b> puede adjuntar comprobantes y respaldos (compra original, emisión, nominación, etc.).
-              También puede aportar antecedentes de uso del ticket cuando existan.
+              <b>Revisión de disputas:</b> si un vendedor acumula reclamos válidos,
+              se puede bloquear su cuenta y retener pagos pendientes.
             </Bullet>
             <Bullet>
-              <b>Resolución:</b> estándar hasta <b>5 días hábiles</b> desde que el caso queda completo (con evidencia suficiente).
+              <b>Protección contra compradores malintencionados:</b> reclamos sin
+              pruebas o evidencia adulterada pueden resultar en sanciones.
             </Bullet>
           </ul>
 
-          <H2>3) Política anti-abuso</H2>
+          <H2>4) Política anti-estafa</H2>
+          <P>
+            TixSwap tiene <b>cero tolerancia</b> con fraude y malas prácticas:
+          </P>
           <ul className="mt-3 space-y-2">
             <Bullet>
-              Reclamos sin pruebas, evidencia adulterada o intentos de estafa pueden terminar en{" "}
-              <b>sanciones</b>: limitación de cuenta, bloqueo o pérdida de beneficios.
+              <b>Suspensión de cuenta:</b> si detectamos intento de estafa, vendedor
+              con tickets inválidos reiterados, o comprador con reclamos falsos.
             </Bullet>
             <Bullet>
-              Venta reiterada de entradas inválidas/engañosas puede terminar en{" "}
-              <b>bloqueo</b> y revisión de operaciones asociadas.
+              <b>Retención de pagos:</b> los fondos pendientes pueden retenerse
+              mientras se investiga o para compensar afectados.
             </Bullet>
             <Bullet>
-              TixSwap puede solicitar información adicional cuando sea necesario para proteger a la comunidad.
+              <b>Reportes:</b> en casos graves, TixSwap puede reportar a autoridades
+              competentes cuando corresponda según la normativa aplicable.
             </Bullet>
           </ul>
 
-          <H2>4) Medidas técnicas (MVP)</H2>
+          <H2>5) Tips de seguridad</H2>
           <ul className="mt-3 space-y-2">
             <Bullet>
-              Comunicación segura (HTTPS) y controles de acceso por sesión.
+              <b>No compartas tickets fuera de TixSwap:</b> si alguien te pide
+              enviar el PDF por otro medio, es sospechoso.
             </Bullet>
             <Bullet>
-              Control de permisos por roles (Admin/Soporte vs usuarios).
+              <b>Reporta al tiro:</b> si algo sale mal en puerta, toma evidencia
+              inmediatamente (video/foto/hora/contexto).
             </Bullet>
             <Bullet>
-              Registro de actividad relevante para auditoría y seguridad.
+              <b>Verifica antes de comprar:</b> revisa evento, fecha, sector y
+              condiciones del organizador/recinto.
             </Bullet>
             <Bullet>
-              Buenas prácticas para resguardar datos sensibles (mínimo acceso, separación de responsabilidades).
-            </Bullet>
-          </ul>
-
-          <H2>5) Recomendaciones para usuarios (tips)</H2>
-          <ul className="mt-3 space-y-2">
-            <Bullet>
-              No compartas tu cuenta ni códigos/entradas por fuera de la plataforma.
-            </Bullet>
-            <Bullet>
-              Verifica siempre evento, fecha, sector y condiciones antes de comprar.
-            </Bullet>
-            <Bullet>
-              Si hay un problema en el acceso, <b>graba video</b> y pide respaldo al staff del evento.
-            </Bullet>
-            <Bullet>
-              Si vendes, entrega el ticket en el formato correcto y conserva respaldos.
+              <b>Consulta el historial:</b> mira los badges del vendedor para tomar
+              una decisión informada.
             </Bullet>
           </ul>
 
@@ -135,10 +142,11 @@ export default function SecurityPage() {
             .
           </P>
 
-          <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs text-slate-500">
-              Nota: esta sección se irá fortaleciendo a medida que incorporemos más
-              validaciones y capas antifraude (sin afectar la experiencia del usuario honesto).
+          <div className="mt-8 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <p className="text-sm text-slate-700">
+              <b>Mejora continua:</b> esta sección se fortalecerá a medida que
+              incorporemos más validaciones y capas antifraude (sin afectar la
+              experiencia del usuario honesto).
             </p>
           </div>
         </div>
