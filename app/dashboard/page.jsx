@@ -6,6 +6,17 @@ import { supabase } from "@/lib/supabaseClient";
 import WalletSection from "./WalletSection";
 import StarRating from "@/components/StarRating";
 import { ROLE_DEFS, ROLE_ORDER, normalizeRole } from "@/lib/roles";
+import ProfileChangeModal from "@/components/ProfileChangeModal";
+import AvatarUploadSection from "@/components/AvatarUploadSection";
+import OnboardingModal from "@/components/OnboardingModal";
+import { 
+  getCurrentProfile, 
+  updateProfile, 
+  findOpenChangeTicket,
+  formatRutForDisplay,
+  formatEmailForDisplay 
+} from "@/lib/profileActions";
+import { validateRut, formatRut, cleanRut } from "@/lib/rutUtils";
 
 /* =========================
    Helpers
@@ -220,13 +231,22 @@ function DashboardContent() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
 
-  // edición
+  // edición de perfil
   const [editing, setEditing] = useState(false);
   const [draftEmail, setDraftEmail] = useState("");
   const [draftPhone, setDraftPhone] = useState("");
+  const [draftFullName, setDraftFullName] = useState("");
+  const [draftStatus, setDraftStatus] = useState("online");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+
+  // cambios de email/rut
+  const [showChangeModal, setShowChangeModal] = useState(null); // null | 'email' | 'rut'
+  const [openChangeTicket, setOpenChangeTicket] = useState(null);
+
+  // onboarding
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // ventas
   const [salesLoading, setSalesLoading] = useState(false);
@@ -258,17 +278,35 @@ function DashboardContent() {
 
       setUser(u);
 
+      // Obtener perfil con nuevos campos
       const { data: p, error: pErr } = await supabase
         .from("profiles")
-        .select("id, full_name, rut, email, phone, role")
+        .select("id, full_name, rut, email, phone, role, avatar_url, status, tier, is_blocked")
         .eq("id", u.id)
         .maybeSingle();
 
       if (pErr) setErr(pErr.message);
       setProfile(p || null);
 
+      // Inicializar drafts
       setDraftEmail((p?.email || u.email || "").trim());
       setDraftPhone((p?.phone || "").trim());
+      setDraftFullName((p?.full_name || "").trim());
+      setDraftStatus(p?.status || "online");
+
+      // Mostrar onboarding si no tiene nombre
+      if (!p?.full_name) {
+        setShowOnboarding(true);
+      }
+
+      // Cargar ticket abierto para cambios (si existe)
+      const emailTicket = await findOpenChangeTicket("email");
+      const rutTicket = await findOpenChangeTicket("rut");
+      if (emailTicket.success && emailTicket.ticket) {
+        setOpenChangeTicket(emailTicket.ticket);
+      } else if (rutTicket.success && rutTicket.ticket) {
+        setOpenChangeTicket(rutTicket.ticket);
+      }
 
       setBooting(false);
     };
@@ -358,6 +396,8 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     setErr("");
     setDraftEmail((profile?.email || user?.email || "").trim());
     setDraftPhone((profile?.phone || "").trim());
+    setDraftFullName((profile?.full_name || "").trim());
+    setDraftStatus(profile?.status || "online");
     setEditing(true);
   };
 
@@ -365,6 +405,8 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     setEditing(false);
     setDraftEmail((profile?.email || user?.email || "").trim());
     setDraftPhone((profile?.phone || "").trim());
+    setDraftFullName((profile?.full_name || "").trim());
+    setDraftStatus(profile?.status || "online");
   };
 
   const saveProfile = async () => {
@@ -375,43 +417,69 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     try {
       const email = String(draftEmail || "").trim();
       const phone = String(draftPhone || "").trim();
+      const fullName = String(draftFullName || "").trim();
+      const status = String(draftStatus || "online").trim();
 
       if (!email) throw new Error("El correo no puede estar vacío.");
+      
+      // Validar nombre (3-40 caracteres)
+      if (fullName && (fullName.length < 3 || fullName.length > 40)) {
+        throw new Error("El nombre debe tener entre 3 y 40 caracteres.");
+      }
 
-      // 1) actualizar tabla profiles (solo email + phone)
-      const { error: upErr } = await supabase
-        .from("profiles")
-        .update({ email, phone })
-        .eq("id", user.id);
+      // Validar status
+      const validStatuses = ['online', 'busy', 'away', 'invisible'];
+      if (!validStatuses.includes(status)) {
+        throw new Error("Estado inválido.");
+      }
 
-      if (upErr) throw upErr;
+      // Actualizar perfil vía server action
+      const result = await updateProfile({
+        full_name: fullName,
+        email,
+        phone,
+        status
+      });
 
-      // 2) si cambió email, actualizar auth (puede pedir confirmación)
+      if (!result.success) {
+        throw new Error(result.error);
+      }
+
+      // Actualizar state local
+      setProfile(result.profile);
+
+      // Si cambió email en la tabla, actualizar auth (puede pedir confirmación)
       if ((user?.email || "").trim().toLowerCase() !== email.toLowerCase()) {
         const { error: aErr } = await supabase.auth.updateUser({ email });
         if (aErr) throw aErr;
 
         setMsg(
-          "Listo ✅ Te mandamos un correo para confirmar el cambio de email (si tu Supabase lo exige)."
+          "Listo ✅ Se actualizó tu perfil. Si el email cambió, revisa tu bandeja de entrada."
         );
       } else {
-        setMsg("Datos actualizados ✅");
+        setMsg("Perfil actualizado ✅");
       }
 
-      // refresh profile
-      const { data: p } = await supabase
-        .from("profiles")
-        .select("id, full_name, rut, email, phone, role")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      setProfile(p || null);
       setEditing(false);
     } catch (e) {
       setErr(e?.message || "No se pudo guardar.");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAvatarSuccess = (avatarUrl) => {
+    setProfile(prev => ({ ...prev, avatar_url: avatarUrl }));
+    setMsg("Avatar actualizado ✅");
+  };
+
+  const handleChangeModalSuccess = async () => {
+    // Recargar ticket abierto
+    const ticketResult = await findOpenChangeTicket(showChangeModal);
+    if (ticketResult.success && ticketResult.ticket) {
+      setOpenChangeTicket(ticketResult.ticket);
+    }
+    setMsg(`Solicitud de cambio de ${showChangeModal === 'email' ? 'email' : 'RUT'} creada ✅`);
   };
 
   const loadSales = async () => {
@@ -538,12 +606,47 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
             ======================= */}
             {tab === "mis_datos" && (
               <div className="tix-card p-6">
+                {/* Bloqueo */}
+                {profile?.is_blocked && (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 mb-6">
+                    <div className="text-sm font-bold text-rose-800">
+                      🚫 Tu cuenta está bloqueada
+                    </div>
+                    <p className="text-xs text-rose-700 mt-1">
+                      Contáctanos a soporte para más información.
+                    </p>
+                  </div>
+                )}
+
+                {/* Onboarding pendiente */}
+                {showOnboarding && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 mb-6">
+                    <div className="text-sm font-bold text-amber-800">
+                      ⚠️ Perfil incompleto
+                    </div>
+                    <p className="text-xs text-amber-700 mt-1">
+                      Completa tu perfil para comenzar a usar TixSwap.
+                    </p>
+                  </div>
+                )}
+
+                {/* Ticket abierto */}
+                {openChangeTicket && (
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 mb-6">
+                    <div className="text-sm font-bold text-blue-800">
+                      📋 Tienes una solicitud pendiente
+                    </div>
+                    <p className="text-xs text-blue-700 mt-1">
+                      Ticket #{openChangeTicket.id} - Estado: <span className="font-semibold">{openChangeTicket.status}</span>
+                    </p>
+                  </div>
+                )}
+
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <h1 className="text-2xl font-extrabold text-slate-900">Mis datos</h1>
+                    <h1 className="text-2xl font-extrabold text-slate-900">Mi perfil</h1>
                     <p className="text-slate-600 mt-1">
-                      Puedes editar solo <b>correo</b> y <b>teléfono</b>. Para cambiar{" "}
-                      <b>nombre</b> o <b>RUT</b>, se solicita por ticket.
+                      Gestiona tu información de perfil y preferencias.
                     </p>
                   </div>
 
@@ -570,23 +673,66 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                 {/* LISTADO */}
                 <div className="mt-6 rounded-2xl border border-slate-100 bg-white">
                   <div className="divide-y divide-slate-100">
+                    
+                    {/* Avatar */}
+                    <div className="px-5 py-4">
+                      {editing ? (
+                        <AvatarUploadSection 
+                          currentAvatarUrl={profile?.avatar_url}
+                          userId={user?.id}
+                          onSuccess={handleAvatarSuccess}
+                        />
+                      ) : (
+                        <div>
+                          <div className="text-xs font-bold text-slate-500 mb-3">Avatar</div>
+                          <div className="flex items-center gap-4">
+                            {profile?.avatar_url ? (
+                              <img
+                                src={profile.avatar_url}
+                                alt="Avatar"
+                                className="w-20 h-20 rounded-full object-cover border-2 border-slate-300"
+                              />
+                            ) : (
+                              <div className="w-20 h-20 rounded-full bg-slate-200 flex items-center justify-center text-slate-400 text-3xl">
+                                👤
+                              </div>
+                            )}
+                            {!editing && (
+                              <button onClick={startEdit} className="tix-btn-secondary text-sm">
+                                Cambiar
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Nombre */}
                     <div className="px-5 py-4 flex items-start justify-between gap-4">
-                      <div>
+                      <div className="w-full">
                         <div className="text-xs font-bold text-slate-500">
-                          Nombre (bloqueado)
+                          Nombre completo
                         </div>
-                        <div className="text-sm font-extrabold text-slate-900 mt-1">
-                          {profile?.full_name || "—"}
-                        </div>
+
+                        {!editing ? (
+                          <div className="text-sm font-extrabold text-slate-900 mt-1">
+                            {profile?.full_name || "Sin nombre (completa tu perfil)"}
+                          </div>
+                        ) : (
+                          <input
+                            className="tix-input mt-2"
+                            value={draftFullName}
+                            onChange={(e) => setDraftFullName(e.target.value)}
+                            placeholder="Tu nombre completo"
+                            maxLength="40"
+                          />
+                        )}
+                        {editing && (
+                          <div className="text-xs text-slate-500 mt-1">
+                            {draftFullName.length}/40 caracteres
+                          </div>
+                        )}
                       </div>
-                      <button
-                        onClick={() => requestChangeTicket("name")}
-                        className="tix-btn-ghost"
-                        title="Crear ticket prellenado"
-                      >
-                        Solicitar cambio
-                      </button>
                     </div>
 
                     {/* Email */}
@@ -595,12 +741,22 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                         <div className="text-xs font-bold text-slate-500">Correo</div>
 
                         {!editing ? (
-                          <div className="text-sm font-extrabold text-slate-900 mt-1">
-                            {profile?.email || user?.email || "—"}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="text-sm font-extrabold text-slate-900 mt-1">
+                              {profile?.email || user?.email || "—"}
+                            </div>
+                            <button
+                              onClick={() => setShowChangeModal('email')}
+                              className="tix-btn-ghost text-xs"
+                              title="Crear solicitud de cambio"
+                            >
+                              Cambiar
+                            </button>
                           </div>
                         ) : (
                           <input
                             className="tix-input mt-2"
+                            type="email"
                             value={draftEmail}
                             onChange={(e) => setDraftEmail(e.target.value)}
                             placeholder="correo@ejemplo.com"
@@ -611,21 +767,32 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
 
                     {/* RUT */}
                     <div className="px-5 py-4 flex items-start justify-between gap-4">
-                      <div>
+                      <div className="w-full">
                         <div className="text-xs font-bold text-slate-500">
-                          RUT (bloqueado)
+                          RUT
                         </div>
-                        <div className="text-sm font-extrabold text-slate-900 mt-1">
-                          {profile?.rut || "—"}
-                        </div>
+
+                        {!editing ? (
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="text-sm font-extrabold text-slate-900 mt-1">
+                              {profile?.rut ? formatRutForDisplay(profile.rut) : "—"}
+                            </div>
+                            <button
+                              onClick={() => setShowChangeModal('rut')}
+                              className="tix-btn-ghost text-xs"
+                              title="Crear solicitud de cambio"
+                            >
+                              Cambiar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="mt-1 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                            <p className="text-xs text-slate-600">
+                              El RUT no se puede editar directamente. Debes solicitar un cambio a través de soporte.
+                            </p>
+                          </div>
+                        )}
                       </div>
-                      <button
-                        onClick={() => requestChangeTicket("rut")}
-                        className="tix-btn-ghost"
-                        title="Crear ticket prellenado"
-                      >
-                        Solicitar cambio
-                      </button>
                     </div>
 
                     {/* Teléfono */}
@@ -650,6 +817,43 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                       </div>
                     </div>
 
+                    {/* Estado */}
+                    {editing && (
+                      <div className="px-5 py-4 flex items-start justify-between gap-4">
+                        <div className="w-full">
+                          <div className="text-xs font-bold text-slate-500">
+                            Estado
+                          </div>
+                          <select
+                            className="tix-input mt-2"
+                            value={draftStatus}
+                            onChange={(e) => setDraftStatus(e.target.value)}
+                          >
+                            <option value="online">🟢 En línea</option>
+                            <option value="busy">🔴 Ocupado</option>
+                            <option value="away">🟡 Ausente</option>
+                            <option value="invisible">⚫ Invisible</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {!editing && (
+                      <div className="px-5 py-4 flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-xs font-bold text-slate-500">Estado</div>
+                          <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full border border-slate-200 bg-slate-50">
+                            <span className="text-sm">
+                              {profile?.status === 'online' && '🟢 En línea'}
+                              {profile?.status === 'busy' && '🔴 Ocupado'}
+                              {profile?.status === 'away' && '🟡 Ausente'}
+                              {profile?.status === 'invisible' && '⚫ Invisible'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Categoría */}
                     <div className="px-5 py-4 flex items-start justify-between gap-4">
                       <div>
@@ -660,7 +864,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                         </div>
 
                         <div className="text-xs text-slate-400 mt-2">
-                          (La categoría viene del plan: basic / pro / premium…)
+                          (Basada en tu plan de usuario)
                         </div>
                       </div>
                     </div>
@@ -915,6 +1119,34 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
           </div>
         </div>
       </div>
+
+      {/* =======================
+          MODAL CHANGE EMAIL/RUT
+      ======================= */}
+      {showChangeModal && (
+        <ProfileChangeModal
+          field={showChangeModal}
+          currentValue={
+            showChangeModal === 'email'
+              ? profile?.email || user?.email || ''
+              : profile?.rut || ''
+          }
+          onClose={() => setShowChangeModal(null)}
+          onSuccess={handleChangeModalSuccess}
+        />
+      )}
+
+      {/* =======================
+          MODAL ONBOARDING
+      ======================= */}
+      {showOnboarding && (
+        <OnboardingModal
+          onComplete={() => {
+            setShowOnboarding(false);
+            setEditing(true);
+          }}
+        />
+      )}
 
       {/* =======================
           MODAL DETALLE VENTA
