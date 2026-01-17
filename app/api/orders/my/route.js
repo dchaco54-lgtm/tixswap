@@ -91,7 +91,7 @@ export async function GET(req) {
 
     let ticketsById = {};
     if (ticketIds.length) {
-      const { data: tickets, error: ticketsError } = await client
+      const { data: tickets, error: ticketsError } = await admin
         .from("tickets")
         .select("*")
         .in("id", ticketIds);
@@ -115,7 +115,7 @@ export async function GET(req) {
 
     let eventsById = {};
     if (eventIds.length) {
-      const { data: events, error: eventsError } = await client
+      const { data: events, error: eventsError } = await admin
         .from("events")
         .select("*")
         .in("id", eventIds);
