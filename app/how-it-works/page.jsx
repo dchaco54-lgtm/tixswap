@@ -193,13 +193,10 @@ export default function HowItWorksPage() {
           </Link>
         </div>
       </div>
-    </div>
-  );
-}
 
-{/* =========================
-    TIPOS DE USUARIO
-   ========================= */}
+        {/* =========================
+            TIPOS DE USUARIO
+           ========================= */}
         <div className="mt-12">
           <SectionTitle
             title="Tipos de usuario y comisiones"
