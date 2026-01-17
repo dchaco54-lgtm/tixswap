@@ -1,9 +1,9 @@
 // app/disputes/page.jsx
 
 export const metadata = {
-  title: "Disputas | TixSwap",
+  title: "Disputas y reclamos | TixSwap",
   description:
-    "Cómo funciona el proceso de disputas en TixSwap: evidencia, plazos y resolución.",
+    "Para ayudarte, necesitamos evidencia. Sin evidencia suficiente, el reclamo puede ser rechazado.",
 };
 
 function Bullet({ children }) {
@@ -20,11 +20,66 @@ export default function DisputesPage() {
           <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
             Disputas y reclamos
           </h1>
-          <p className="mt-3 text-slate-600">
-            En TixSwap protegemos a <b>compradores</b> y <b>vendedores</b>. Si algo
-            sale mal, abrimos una disputa, pedimos evidencia a ambas partes y
-            resolvemos con reglas claras.
+          <p className="mt-3 text-lg text-slate-600 font-medium">
+            Para ayudarte, necesitamos evidencia. Sin evidencia suficiente, el reclamo puede ser rechazado.
           </p>
+
+          {/* Evidencia ideal destacada */}
+          <div className="mt-6 rounded-2xl border-2 border-blue-200 bg-blue-50 p-6">
+            <h2 className="text-xl font-bold text-blue-900 flex items-center gap-2">
+              <span>🎯</span>
+              <span>Evidencia ideal (recomendado)</span>
+            </h2>
+            <ul className="mt-4 space-y-2">
+              <Bullet>
+                <b>Video corto del acceso</b> mostrando el rechazo (si te lo permiten) - es lo mejor
+              </Bullet>
+              <Bullet>
+                <b>Foto/captura del ticket/QR</b> que intentaste usar
+              </Bullet>
+              <Bullet>
+                <b>Hora aproximada y contexto</b> (puerta/sector donde te rechazaron)
+              </Bullet>
+            </ul>
+          </div>
+
+          {/* Si NO te dejan grabar */}
+          <div className="mt-6 rounded-2xl border-2 border-amber-200 bg-amber-50 p-6">
+            <h2 className="text-xl font-bold text-amber-900 flex items-center gap-2">
+              <span>📸</span>
+              <span>Si NO te dejan grabar (alternativas válidas)</span>
+            </h2>
+            <ul className="mt-4 space-y-2">
+              <Bullet>
+                <b>Foto del mensaje en el lector / motivo del rechazo</b> (si aparece en pantalla)
+              </Bullet>
+              <Bullet>
+                <b>Selfie o foto en el acceso con hora</b> (captura del reloj del celular)
+              </Bullet>
+              <Bullet>
+                <b>Audio/nota inmediata</b> describiendo lo ocurrido (con hora)
+              </Bullet>
+              <Bullet>
+                <b>1 testigo</b> (nombre + contacto/IG) que presenció el rechazo
+              </Bullet>
+              <Bullet>
+                <b>Nombre del guardia/staff + hora</b> (si acceden a dártelo)
+              </Bullet>
+              <Bullet>
+                <b>Correo/confirmación de compra + ticket adjunto</b> que recibiste de TixSwap
+              </Bullet>
+            </ul>
+          </div>
+
+          {/* CTA urgente */}
+          <div className="mt-6 rounded-2xl border-2 border-red-200 bg-red-50 p-5">
+            <p className="text-red-900 font-bold text-lg">
+              ⚠️ Si te rechazaron en puerta, repórtalo al tiro.
+            </p>
+            <p className="mt-2 text-red-800">
+              Mientras más rápido y claro reportes, más rápido resolvemos. La evidencia fresca es clave.
+            </p>
+          </div>
 
           <div className="mt-8 grid gap-6">
             <div>
@@ -53,32 +108,6 @@ export default function DisputesPage() {
                   la cuenta puede ser sancionada.
                 </p>
               </div>
-            </div>
-
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">
-                Evidencia requerida (comprador)
-              </h2>
-              <p className="mt-2 text-slate-600">
-                Para que tu reclamo avance, necesitamos pruebas claras.
-              </p>
-              <ul className="mt-3 space-y-2">
-                <Bullet>
-                  <b>Video</b> en el control de acceso mostrando el error (rechazo)
-                  y el contexto del evento.
-                </Bullet>
-                <Bullet>
-                  <b>Fotos</b> del mensaje de error (si aplica) y de la entrada
-                  (PDF/captura) que usaste.
-                </Bullet>
-                <Bullet>
-                  Si hay staff del evento: <b>nombre/cargo</b> o referencia del
-                  guardia que atendió. Nombre, lugar y videos/fotos/audios de la situación.
-                </Bullet>
-                <Bullet>
-                  <b>Timestamp</b> aproximado del intento de ingreso (hora).
-                </Bullet>
-              </ul>
             </div>
 
             <div>
