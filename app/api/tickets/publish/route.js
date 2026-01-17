@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { calculateFees } from '@/lib/fees';
+import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
 
 export async function POST(request) {
   try {
@@ -52,24 +52,18 @@ export async function POST(request) {
 
     const userRole = profile?.role || 'basic'; // default: basic (usuario nuevo)
 
-    // Calcular fee según el rol del usuario
-    let platformFee = 0;
+    // Calcular fee del vendedor según su rol usando los nuevos helpers
     const originalPrice = Number(price);
+    const platformFee = calculateSellerFee(originalPrice, userRole);
+    const sellerPayout = calculateSellerPayout(originalPrice, userRole);
 
-    if (userRole === 'free') {
-      // Usuario FREE: sin comisión
-      platformFee = 0;
-      console.log('[Publish] Usuario FREE - Sin comisión');
-    } else if (userRole === 'admin') {
-      // Admin: sin comisión
-      platformFee = 0;
-      console.log('[Publish] Usuario ADMIN - Sin comisión');
-    } else {
-      // Usuario básico: 2.5% con mínimo $1.200
-      const fees = calculateFees(originalPrice);
-      platformFee = fees.platformFee;
-      console.log('[Publish] Usuario básico - Fee:', platformFee, '(2.5% con mínimo $1.200)');
-    }
+    console.log('[Publish] Cálculo de fees:', {
+      userRole,
+      originalPrice,
+      platformFee,
+      sellerPayout,
+      isFreeOrAdmin: userRole === 'free' || userRole === 'admin'
+    });
 
     const insertPayload = {
       event_id: eventId,
