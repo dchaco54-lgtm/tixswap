@@ -52,50 +52,46 @@ export default function HowItWorksPage() {
           acceso se valida y, si algo falla, el soporte entra como intermediario.
         </p>
 
-        <div className="mt-8 grid grid-cols-1 gap-5">
-          <Card title="1) Publicación de la entrada (vendedor)">
-            <ul className="space-y-2">
-              <Bullet>
-                El vendedor elige el evento y publica su entrada en TixSwap.
-              </Bullet>
-              <Bullet>
-                Se recomienda subir evidencia: PDF/QR, comprobante, o lo que
-                acredite legitimidad.
-              </Bullet>
-              <Bullet>
-                Para recibir pagos, el vendedor debe tener su <b>Wallet</b>{" "}
-                configurada (datos bancarios).
-              </Bullet>
-              <Bullet>
-                El vendedor puede ver badges de verificación (email, teléfono, wallet)
-                que dan confianza a los compradores.
-              </Bullet>
-            </ul>
-          </Card>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <Card title="Free (solo admin)">
+              <p className="leading-relaxed">
+                Segmento fijado manualmente por un administrador. No se recalcula
+                automáticamente.
+              </p>
+            </Card>
 
-          <Card title="2) Compra protegida (comprador)">
-            <ul className="space-y-2">
-              <Bullet>El comprador paga dentro de TixSwap.</Bullet>
-              <Bullet>
-                El pago queda <b>en resguardo</b> (retenido) hasta que se confirme
-                que el ticket funcionó correctamente.
-              </Bullet>
-              <Bullet>
-                Los pagos se procesan mediante proveedores certificados (PSP). TixSwap
-                no almacena datos completos de tarjetas.
-              </Bullet>
-              <Bullet>
-                Si el ticket se usa sin problemas, el proceso avanza a la
-                liberación de pago.
-              </Bullet>
-            </ul>
-          </Card>
+            <Card title="Básico">
+              <p className="leading-relaxed">
+                Segmento por defecto para usuarios que recién comienzan o tienen
+                pocas transacciones.
+              </p>
+            </Card>
 
-          <Card title="3) Día del evento / validación">
-            <ul className="space-y-2">
-              <Bullet>
-                Si el comprador entra correctamente al evento, la operación se marca
-                como exitosa.
+            <Card title="Pro">
+              <p className="leading-relaxed">
+                Segmento intermedio pensado para usuarios frecuentes, con mayor
+                visibilidad y badges.
+              </p>
+            </Card>
+
+            <Card title="Premium">
+              <p className="leading-relaxed">
+                Segmento alto para usuarios recurrentes y buena conducta, con
+                más beneficios de visibilidad.
+              </p>
+            </Card>
+
+            <Card title="Elite">
+              <p className="leading-relaxed">
+                Segmento máximo, típicamente por invitación o alto uso sostenido.
+              </p>
+            </Card>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-slate-700">
+            <b>Nota:</b> Los tiers son de segmentación/beneficios. Las comisiones y
+            condiciones pueden variar según reglas vigentes y no se definen aquí.
+          </div>
               </Bullet>
               <Bullet>
                 Si hay un problema real (QR inválido, ya usado, sector equivocado),
@@ -203,41 +199,37 @@ export default function HowItWorksPage() {
           />
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Card title="Básico — 3,5% comisión">
+            <Card title="Free (solo admin)">
               <p className="leading-relaxed">
-                Es el rol por defecto. Ideal para usuarios que están partiendo o
-                venden/compran ocasionalmente.
-              </p>
-              <p className="mt-3 text-sm text-slate-500">
-                Ejemplo: entrada $35.000 → comisión $1.225.
+                Segmento fijado manualmente por un administrador. No se recalcula
+                automáticamente.
               </p>
             </Card>
 
-            <Card title="Pro — 2,5% comisión">
+            <Card title="Básico">
               <p className="leading-relaxed">
-                Para usuarios más frecuentes. Baja la comisión y mejora el
-                incentivo a seguir usando la plataforma.
+                Segmento por defecto para usuarios que recién comienzan o tienen
+                pocas transacciones.
               </p>
             </Card>
 
-            <Card title="Premium — 1,5% comisión">
+            <Card title="Pro">
               <p className="leading-relaxed">
-                Para usuarios recurrentes y de buena conducta. Comisión baja y
-                mayor reconocimiento.
+                Segmento intermedio pensado para usuarios frecuentes, con mayor
+                visibilidad y badges.
               </p>
             </Card>
 
-            <Card title="Elite — 0,5% comisión">
+            <Card title="Premium">
               <p className="leading-relaxed">
-                Para usuarios de alto uso y confianza. Este rol es difícil de
-                alcanzar a propósito: premia fidelidad real.
+                Segmento alto para usuarios recurrentes y buena conducta, con
+                más beneficios de visibilidad.
               </p>
             </Card>
 
-            <Card title="Ultra Premium — 0% comisión">
+            <Card title="Elite">
               <p className="leading-relaxed">
-                Rol especial por invitación/beneficio (concursos, partners,
-                primeros usuarios, regalías). No es automático.
+                Segmento máximo, típicamente por invitación o alto uso sostenido.
               </p>
             </Card>
 
@@ -249,8 +241,8 @@ export default function HowItWorksPage() {
           </div>
 
           <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-slate-700">
-            <b>Nota:</b> Ultra Premium es por invitación/manual. No se obtiene
-            por volumen automáticamente.
+            <b>Nota:</b> Los tiers son de segmentación/beneficios. Las comisiones y
+            condiciones pueden variar según reglas vigentes y no se definen aquí.
           </div>
         </div>
 
@@ -280,15 +272,21 @@ export default function HowItWorksPage() {
                 <tbody className="text-slate-700">
                   <tr className="border-t border-slate-100">
                     <td className="py-3 px-4 font-medium text-slate-900">
-                      Básico
+                      Free
                     </td>
+                    <td className="py-3 px-4">Solo admin</td>
+                    <td className="py-3 px-4">Fijado manual</td>
+                  </tr>
+
+                  <tr className="border-t border-slate-100">
+                    <td className="py-3 px-4 font-medium text-slate-900">Básico</td>
                     <td className="py-3 px-4">Default</td>
                     <td className="py-3 px-4">—</td>
                   </tr>
 
                   <tr className="border-t border-slate-100">
                     <td className="py-3 px-4 font-medium text-slate-900">Pro</td>
-                    <td className="py-3 px-4">50 operaciones</td>
+                    <td className="py-3 px-4">≈ 10 operaciones</td>
                     <td className="py-3 px-4">≥ 3 meses</td>
                   </tr>
 
@@ -296,7 +294,7 @@ export default function HowItWorksPage() {
                     <td className="py-3 px-4 font-medium text-slate-900">
                       Premium
                     </td>
-                    <td className="py-3 px-4">100 operaciones</td>
+                    <td className="py-3 px-4">≈ 50 operaciones</td>
                     <td className="py-3 px-4">≥ 6 meses</td>
                   </tr>
 
@@ -304,16 +302,8 @@ export default function HowItWorksPage() {
                     <td className="py-3 px-4 font-medium text-slate-900">
                       Elite
                     </td>
-                    <td className="py-3 px-4">200 operaciones</td>
+                    <td className="py-3 px-4">≈ 200 operaciones (o invitación)</td>
                     <td className="py-3 px-4">≥ 12 meses</td>
-                  </tr>
-
-                  <tr className="border-t border-slate-100">
-                    <td className="py-3 px-4 font-medium text-slate-900">
-                      Ultra Premium
-                    </td>
-                    <td className="py-3 px-4">Manual / invitación</td>
-                    <td className="py-3 px-4">N/A</td>
                   </tr>
                 </tbody>
               </table>
