@@ -26,35 +26,6 @@ function formatDateTime(iso) {
 export default function CheckoutPage() {
   const router = useRouter();
   const { ticketId } = useParams();
-'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabaseClient';
-import { formatPrice } from '@/lib/fees';
-
-function formatDateTime(iso) {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString('es-CL', {
-      weekday: 'long',
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
-}
-
-export default function CheckoutPage() {
-  const router = useRouter();
-  const { ticketId } = useParams();
-
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState(null);
