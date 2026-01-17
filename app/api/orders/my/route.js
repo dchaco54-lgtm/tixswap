@@ -1,48 +1,72 @@
 // app/api/orders/my/route.js
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
+async function getUserFromRequest(req) {
+  try {
+    // Método 1: Bearer token desde header (preferido)
+    const authHeader = req.headers.get('authorization') || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+    if (token) {
+      const admin = supabaseAdmin();
+      const { data, error } = await admin.auth.getUser(token);
+      if (!error && data?.user) {
+        return data.user;
+      }
+    }
+
+    // Método 2: Fallback con REST endpoint
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const apiKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (token && supabaseUrl && apiKey) {
+      const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: {
+          apikey: apiKey,
+          Authorization: `Bearer ${token}`,
+        },
+        cache: 'no-store',
+      });
+
+      if (res.ok) {
+        const user = await res.json().catch(() => null);
+        if (user?.id) return user;
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.error('[getUserFromRequest] Error:', err);
+    return null;
+  }
+}
 
 /**
  * Devuelve las compras (orders) del usuario logeado.
- * - Auth por cookies (lo normal en el navegador).
- * - Si existe SERVICE ROLE, lo usa para evitar dramas de RLS.
- * - Si no existen FK (joins), arma la data manualmente con maps (robusto).
  */
-export async function GET() {
+export async function GET(req) {
   try {
     console.log('[Orders/My] Iniciando...');
-    const cookieStore = cookies();
-    const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
+    
+    const user = await getUserFromRequest(req);
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseUser.auth.getUser();
+    console.log('[Orders/My] User:', { hasUser: !!user, userId: user?.id });
 
-    console.log('[Orders/My] User:', { hasUser: !!user, userId: user?.id, error: userError?.message });
-
-    if (userError || !user) {
+    if (!user) {
       console.log('[Orders/My] Unauthorized - no user');
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    let admin = null;
-    try {
-      admin = supabaseAdmin();
-    } catch {
-      // sin SERVICE KEY, seguimos con el client del usuario
-    }
+    const admin = supabaseAdmin();
 
-    const client = admin || supabaseUser;
-
-    console.log('[Orders/My] Usando:', admin ? 'admin client' : 'user client');
+    console.log('[Orders/My] Buscando orders para userId:', user.id);
 
     // 1) orders del buyer
-    const { data: orders, error: ordersError } = await client
+    const { data: orders, error: ordersError } = await admin
       .from("orders")
       .select("*")
       .eq("buyer_id", user.id)
