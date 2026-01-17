@@ -150,7 +150,7 @@ export default function PurchasesPage() {
             {normalized.map((o) => (
               <div key={o.id} className="bg-white rounded-2xl shadow p-6">
                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                  <div>
+                  <div className="flex-1">
                     <div className="text-xl font-semibold">{o._eventTitle}</div>
                     <div className="text-gray-600">
                       {[o._eventWhere, o._eventWhen].filter(Boolean).join(" • ")}
@@ -160,21 +160,28 @@ export default function PurchasesPage() {
                       <div className="text-gray-600 mt-2">{o._seatText}</div>
                     )}
 
-                    <div className="text-sm text-gray-500 mt-2">
-                      Orden: <span className="font-mono">{o.id}</span>
-                    </div>
-
-                    <div className="text-sm text-gray-500">
-                      Estado: <span className="font-semibold">{o.status ?? "—"}</span>
-                      {o.created_at ? (
-                        <>
-                          {" "}
-                          • Comprado:{" "}
-                          <span className="font-semibold">
-                            {formatDateCL(o.created_at)}
-                          </span>
-                        </>
-                      ) : null}
+                    <div className="flex items-center gap-3 mt-3">
+                      <span
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                          o.status === "completed" || o.payment_state === "paid"
+                            ? "bg-green-50 text-green-700 border border-green-200"
+                            : o.status === "pending"
+                            ? "bg-yellow-50 text-yellow-700 border border-yellow-200"
+                            : "bg-gray-50 text-gray-700 border border-gray-200"
+                        }`}
+                      >
+                        {o.payment_state === "paid" || o.status === "completed"
+                          ? "✓ Pagado"
+                          : o.status === "pending"
+                          ? "⏳ Pendiente"
+                          : o.status || "—"}
+                      </span>
+                      
+                      {o.created_at && (
+                        <span className="text-sm text-gray-500">
+                          {formatDateCL(o.created_at)}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -184,35 +191,13 @@ export default function PurchasesPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => handleDownloadPdf(o.ticket_id)}
-                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                        disabled={!o.ticket_id}
-                        title={!o.ticket_id ? "Esta compra no tiene ticket_id asociado." : "Descargar tu entrada en PDF"}
-                      >
-                        Descargar PDF
-                      </button>
-
                       <Link
-                        href={`/dashboard/soporte?new=1&category=disputa_compra&subject=${encodeURIComponent(
-                          `Compra ${o.id}`
-                        )}&message=${encodeURIComponent(
-                          `Hola! Necesito hablar con el vendedor por mi compra.\n\nOrden: ${o.id}\nTicket: ${o.ticket_id || "—"}\nVendedor: ${o.seller_id || "—"}\n\n(Escribe tu mensaje acá)`
-                        )}`}
-                        className="px-4 py-2 rounded-xl border hover:bg-gray-50 font-semibold"
+                        href={`/dashboard/purchases/${o.id}`}
+                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
                       >
-                        Chat con vendedor
+                        Ver más →
                       </Link>
                     </div>
-
-                    {o.event_id && (
-                      <Link
-                        href={`/events/${o.event_id}`}
-                        className="text-sm text-blue-600 hover:underline"
-                      >
-                        Ver evento
-                      </Link>
-                    )}
                   </div>
                 </div>
               </div>
