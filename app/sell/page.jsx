@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation"; // ✅ agregado (solo lógica)
 import { supabase } from "@/lib/supabaseClient";
+import { calculateSellerFee, calculateSellerPayout, formatPrice } from "@/lib/fees";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1"; // ✅ agregado (solo lógica)
 
@@ -35,6 +36,7 @@ export default function SellPage() {
   const steps = ["Detalles", "Archivo", "Confirmar"];
   const [currentStep] = useState(0);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [userRole, setUserRole] = useState("basic"); // Rol del usuario (para calcular comisión)
 
   const [events, setEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(true);
@@ -82,6 +84,21 @@ export default function SellPage() {
             }
           }, 500);
           return;
+        }
+
+        // Obtener rol del usuario desde profiles
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle();
+          
+          if (profile?.role) {
+            setUserRole(profile.role);
+          }
+        } catch (err) {
+          console.error('Error obteniendo rol del usuario:', err);
         }
         
         setCheckingAuth(false);
@@ -496,6 +513,60 @@ export default function SellPage() {
               />
             </div>
           </div>
+
+          {/* Resumen de comisiones */}
+          {price && Number(price) > 0 && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+              <div className="text-sm font-semibold text-slate-900 mb-3">Resumen de tu venta</div>
+              
+              {(() => {
+                const ticketPrice = Number(price);
+                const sellerFee = calculateSellerFee(ticketPrice, userRole);
+                const payout = calculateSellerPayout(ticketPrice, userRole);
+                const isFreeOrAdmin = userRole === 'free' || userRole === 'admin';
+
+                return (
+                  <>
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-slate-600">Precio de venta</span>
+                      <span className="font-semibold text-slate-900">{formatPrice(ticketPrice)}</span>
+                    </div>
+                    
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="text-slate-600">Cargo por servicio</span>
+                      <span className={`font-semibold ${isFreeOrAdmin ? 'text-green-600' : 'text-slate-900'}`}>
+                        {isFreeOrAdmin ? (
+                          <span className="flex items-center gap-1">
+                            {formatPrice(0)}
+                            <span className="text-xs text-green-600 font-normal">(Cuenta {userRole.toUpperCase()})</span>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            {formatPrice(sellerFee)}
+                            <span className="text-xs text-slate-500 font-normal">(2.5% mín $1.200)</span>
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="pt-3 mt-3 border-t border-slate-300 flex justify-between">
+                      <span className="text-sm font-semibold text-slate-900">Tú recibes aprox.</span>
+                      <span className="text-lg font-bold text-green-600">{formatPrice(payout)}</span>
+                    </div>
+
+                    {payout === 0 && (
+                      <div className="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                        <p className="text-xs text-amber-800">
+                          ⚠️ <strong>Atención:</strong> El cargo por servicio es igual o mayor al precio de venta.
+                          Considera aumentar el precio para recibir un monto positivo.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Tipo de venta (cards como tu diseño) */}
           <div className="mt-8">
