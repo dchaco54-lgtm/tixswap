@@ -192,7 +192,6 @@ export default function HowItWorksPage() {
             Ver disputas
           </Link>
         </div>
-      </div>
 
         {/* =========================
             TIPOS DE USUARIO
