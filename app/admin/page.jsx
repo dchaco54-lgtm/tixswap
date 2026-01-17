@@ -33,7 +33,14 @@ export default function AdminPage() {
         return;
       }
 
-      if (user.email?.toLowerCase() !== "soporte@tixswap.cl") {
+      // Validar que el usuario sea admin en la BD
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError || profile?.role !== "admin") {
         router.replace("/dashboard");
         return;
       }
@@ -76,6 +83,11 @@ export default function AdminPage() {
 
     init();
   }, [router]);
+
+  // Redirigir a usuarios
+  const handleGoToUsers = () => {
+    router.push("/admin/users");
+  };
 
   const handleDeleteEvent = async (id) => {
     if (!confirm("¿Seguro que quieres eliminar este evento?")) return;
@@ -151,6 +163,45 @@ export default function AdminPage() {
           >
             ← Volver a mi cuenta
           </button>
+        </div>
+
+        {/* CARDS PRINCIPALES */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* CARD USUARIOS */}
+          <div 
+            onClick={handleGoToUsers}
+            className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Usuarios</h3>
+            <p className="text-sm text-gray-500 mt-1">Editar roles, bloquear cuentas</p>
+            <button className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Ir a Usuarios →
+            </button>
+          </div>
+
+          {/* CARD EVENTOS */}
+          <div 
+            onClick={() => router.push("/admin/events")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Eventos</h3>
+            <p className="text-sm text-gray-500 mt-1">Crear y gestionar eventos</p>
+            <button className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Ir a Eventos →
+            </button>
+          </div>
+
+          {/* CARD TICKETS */}
+          <div 
+            onClick={() => router.push("/admin/support")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Soporte</h3>
+            <p className="text-sm text-gray-500 mt-1">Gestionar tickets de soporte</p>
+            <button className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Ir a Tickets →
+            </button>
+          </div>
         </div>
 
         {/* SECCIÓN EVENTOS */}
