@@ -12,10 +12,9 @@ import OnboardingModal from "@/components/OnboardingModal";
 import { 
   getCurrentProfile, 
   updateProfile, 
-  findOpenChangeTicket,
-  formatRutForDisplay,
-  formatEmailForDisplay 
+  findOpenChangeTicket
 } from "@/lib/profileActions";
+import { formatRutForDisplay, formatEmailForDisplay } from "@/lib/formatUtils";
 import { validateRut, formatRut, cleanRut } from "@/lib/rutUtils";
 
 /* =========================
