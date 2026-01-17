@@ -40,11 +40,22 @@ export default function AdminPage() {
         .eq("id", user.id)
         .single();
 
-      if (profileError || profile?.role !== "admin") {
+      // Si hay error en la consulta, loguealo pero no bloquees aún
+      if (profileError) {
+        console.error("Error cargando perfil:", profileError);
+      }
+
+      // Validar admin: por rol en BD O por email específico de soporte
+      const userRole = profile?.role ? String(profile.role).toLowerCase().trim() : "";
+      const isAdminByRole = userRole === "admin";
+      const isAdminByEmail = user.email?.toLowerCase() === "davidchacon_17@hotmail.com";
+
+      if (!isAdminByRole && !isAdminByEmail) {
         router.replace("/dashboard");
         return;
       }
 
+      console.log("✓ Admin autorizado:", { email: user.email, role: userRole });
       setIsAdmin(true);
       setCheckingAdmin(false);
 
