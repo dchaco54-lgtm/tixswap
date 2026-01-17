@@ -160,9 +160,10 @@ export default function TermsPage() {
           <P>
             TixSwap cobra una comisión por el uso de la plataforma, aplicable
             según el tipo de usuario y las reglas vigentes en la plataforma.
-            Actualmente los niveles pueden incluir (a modo referencial):{" "}
-            <b>Básico, Pro, Premium, Elite, Ultra Premium</b> con comisiones
-            distintas.
+            Los niveles de segmentación (no equivalen a descuentos garantizados)
+            incluyen, de forma referencial: <b>Free, Básico, Pro, Premium, Elite</b>.
+            Las comisiones o beneficios pueden variar según condiciones vigentes y
+            se informarán en la plataforma.
           </P>
           <P>
             TixSwap puede actualizar comisiones y requisitos para upgrades hacia
