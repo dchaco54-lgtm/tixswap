@@ -228,8 +228,6 @@ export default function SellConfirmPage() {
       const payload = {
         eventId: selectedEvent?.id,
         price: Number(String(price).replace(/[^\d]/g, "")),
-        userId: session.user.id, // Enviar user ID en el payload
-        userEmail: session.user.email,
         
         // paso 1
         sector: draft?.sector || null,
@@ -239,10 +237,20 @@ export default function SellConfirmPage() {
 
       console.log('[Confirm] Enviando payload:', payload);
 
+      // Obtener token para auth
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      if (!token) {
+        setError('Sesión expirada. Por favor inicia sesión de nuevo.');
+        return;
+      }
+
       const res = await fetch("/api/tickets/publish", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
         },
         body: JSON.stringify(payload),
       });
