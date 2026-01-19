@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
@@ -17,7 +17,22 @@ function LoginContent() {
   });
 
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+
+  // Verificar si ya hay sesión activa
+  useEffect(() => {
+    async function checkExistingSession() {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) {
+        // Usuario ya está logueado, redirigir
+        router.replace(redirectTo);
+      } else {
+        setCheckingSession(false);
+      }
+    }
+    checkExistingSession();
+  }, [router, redirectTo]);
 
   const handleChange = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -91,6 +106,15 @@ function LoginContent() {
       setLoading(false);
     }
   };
+
+  // Mostrar loading mientras verificamos sesión
+  if (checkingSession) {
+    return (
+      <main className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-sm text-slate-600">Verificando sesión...</div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 flex flex-col">
