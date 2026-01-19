@@ -21,12 +21,15 @@ export async function middleware(req) {
     return NextResponse.redirect(redirectUrl);
   }
   
-  // Si es admin route, verificar que tenga rol admin
+  // Si es admin route, verificar que tenga user_type admin
   if (req.nextUrl.pathname.startsWith('/admin') && session) {
-    // Obtener rol del usuario desde metadata o profiles
-    const userRole = session.user?.user_metadata?.role || session.user?.app_metadata?.role;
-    
-    if (userRole !== 'admin') {
+    const userType =
+      session.user?.user_metadata?.user_type ||
+      session.user?.app_metadata?.user_type ||
+      session.user?.user_metadata?.role || // fallback legacy
+      session.user?.app_metadata?.role;
+
+    if (userType !== 'admin') {
       // Redirigir a dashboard si no es admin
       return NextResponse.redirect(new URL('/dashboard', req.url));
     }

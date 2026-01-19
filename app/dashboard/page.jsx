@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import WalletSection from "./WalletSection";
 import StarRating from "@/components/StarRating";
-import { ROLE_DEFS, ROLE_ORDER, normalizeRole } from "@/lib/roles";
+import { normalizeRole, USER_TYPES } from "@/lib/roles";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
 import AvatarUploadSection from "@/components/AvatarUploadSection";
 import OnboardingModal from "@/components/OnboardingModal";
@@ -307,7 +307,7 @@ function DashboardContent() {
       // Obtener perfil con nuevos campos
       const { data: p, error: pErr } = await supabase
         .from("profiles")
-        .select("id, full_name, rut, email, phone, role, avatar_url, status, tier, tier_locked, is_blocked")
+        .select("id, full_name, rut, email, phone, user_type, seller_tier, seller_tier_locked, avatar_url, status, is_blocked")
         .eq("id", u.id)
         .maybeSingle();
 
@@ -348,7 +348,7 @@ function DashboardContent() {
   }, [sp]);
 
   const navItems = useMemo(() => {
-    const isAdmin = String(profile?.role || "").toLowerCase() === "admin";
+    const isAdmin = normalizeRole(profile?.user_type) === USER_TYPES.ADMIN;
 
     return [
       { id: "mis_datos", label: "Mis datos" },
@@ -362,7 +362,7 @@ function DashboardContent() {
 
       ...(isAdmin ? [{ id: "admin", label: "Admin", href: "/admin" }] : []),
     ];
-  }, [profile?.role]);
+  }, [profile?.user_type]);
 
   const goTab = (id, href) => {
     setMsg("");
@@ -581,10 +581,16 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
   const paid90dCount = Number(salesData?.paid90dCount ?? 0) || 0;
   const paid90dTotal = Number(salesData?.paid90dTotal ?? 0) || 0;
 
+  const currentSellerTier = profile?.seller_tier || profile?.tier;
+  const sellerTierLocked =
+    profile?.seller_tier_locked !== undefined
+      ? profile?.seller_tier_locked
+      : profile?.tier_locked;
+
   const tierProgress = getNextTierInfo({
     soldCount,
-    currentTier: profile?.tier,
-    tierLocked: profile?.tier_locked,
+    currentTier: currentSellerTier,
+    tierLocked: sellerTierLocked,
   });
 
   return (
@@ -890,8 +896,8 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                         <div className="text-xs font-bold text-slate-500">Tier</div>
 
                         <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-700 text-xs font-extrabold">
-                          <span>{getCategoryLabelByTier(profile?.tier, profile?.tier_locked)}</span>
-                          {profile?.tier_locked ? (
+                                <span>{getCategoryLabelByTier(currentSellerTier, sellerTierLocked)}</span>
+                                {sellerTierLocked ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
                               Fijado admin
                             </span>

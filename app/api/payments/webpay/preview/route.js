@@ -35,11 +35,17 @@ export async function GET(req) {
       return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
     }
 
-    const fees = getFees(ticket.price);
+    const { data: sellerProfile } = await admin
+      .from("profiles")
+      .select("seller_tier")
+      .eq("id", ticket.seller_id)
+      .maybeSingle();
+
+    const fees = getFees(ticket.price, { sellerTier: sellerProfile?.seller_tier });
     const breakdown = {
       price: Number(ticket.price || 0),
-      buyerFee: fees.buyerFee,
-      total: fees.total,
+      buyerFee: fees.platformFee,
+      total: fees.totalDue,
       currency: ticket.currency || "CLP",
     };
 

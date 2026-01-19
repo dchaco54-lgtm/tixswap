@@ -3,6 +3,7 @@ import crypto from 'crypto';
 
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getWebpayTransaction } from '@/lib/webpay';
+import { normalizeTier, TIERS, getTierCommissionPercent } from '@/lib/tiers';
 // NOTA: Evitamos depender de helpers externos (ej: getFees) porque en prod puede quedar
 // desfasado con el repo (y explota con "... is not a function"). Calculamos el fee acá.
 
@@ -27,28 +28,17 @@ function normalizeBaseUrl(url) {
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
-// Comisiones por rol (debe coincidir con lib/roles.js)
-const ROLE_COMMISSIONS = {
-  'basic': 0.035,
-  'free': 0,
-  'pro': 0.025,
-  'premium': 0.015,
-  'elite': 0.005,
-  'ultra': 0,
-  'admin': 0,
-};
-
-function calcPlatformFee(ticketPrice, sellerRole = 'basic') {
+function calcPlatformFee(ticketPrice, sellerTier = TIERS.BASIC) {
   const price = Math.round(Number(ticketPrice) || 0);
-  
-  // Normalizar rol
-  const role = String(sellerRole || 'basic').toLowerCase().trim();
-  const commission = ROLE_COMMISSIONS[role] !== undefined ? ROLE_COMMISSIONS[role] : ROLE_COMMISSIONS['basic'];
-  
+
+  // Normalizar seller_tier
+  const tier = normalizeTier(sellerTier || TIERS.BASIC);
+  const commission = getTierCommissionPercent(tier);
+
   // Calcular fee: porcentaje del precio
   const fee = Math.round(price * commission);
-  
-  console.log('[Webpay] Fee calc:', { price, role, commission: (commission * 100).toFixed(1) + '%', fee });
+
+  console.log('[Webpay] Fee calc:', { price, tier, commission: (commission * 100).toFixed(1) + '%', fee });
   return { feeAmount: fee, totalAmount: price + fee };
 }
 
@@ -156,20 +146,20 @@ export async function POST(req) {
       return NextResponse.json({ error: 'No puedes comprar tu propio ticket' }, { status: 400 });
     }
 
-    // Obtener rol del vendedor para calcular fee
-    console.log('[Webpay] Buscando rol del vendedor:', ticket.seller_id);
+    // Obtener seller_tier del vendedor para calcular fee
+    console.log('[Webpay] Buscando seller_tier del vendedor:', ticket.seller_id);
     const { data: sellerProfile, error: sellerError } = await admin
       .from('profiles')
-      .select('role')
+      .select('seller_tier')
       .eq('id', ticket.seller_id)
       .single();
 
-    const sellerRole = sellerProfile?.role || 'basic';
-    console.log('[Webpay] Vendedor role:', sellerRole);
+    const sellerTier = normalizeTier(sellerProfile?.seller_tier || TIERS.BASIC);
+    console.log('[Webpay] Vendedor seller_tier:', sellerTier);
 
-    // Fees basados en el rol del vendedor
+    // Fees basados en el seller_tier del vendedor
     const amount = Number(ticket.price);
-    const { feeAmount, totalAmount } = calcPlatformFee(amount, sellerRole);
+    const { feeAmount, totalAmount } = calcPlatformFee(amount, sellerTier);
 
     console.log('[Webpay] Fees calculados:', { amount, feeAmount, totalAmount });
 

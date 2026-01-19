@@ -4,7 +4,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { ROLE_OPTIONS, normalizeRole, roleCommissionLabel } from "@/lib/roles";
+import { USER_TYPES, normalizeRole, roleLabel } from "@/lib/roles";
+
+const USER_TYPE_OPTIONS = [
+  { value: USER_TYPES.FREE, label: roleLabel(USER_TYPES.FREE) },
+  { value: USER_TYPES.STANDARD, label: roleLabel(USER_TYPES.STANDARD) },
+  { value: USER_TYPES.ADMIN, label: roleLabel(USER_TYPES.ADMIN) },
+];
 
 export default function AdminUsersPage() {
   const router = useRouter();
@@ -26,7 +32,7 @@ export default function AdminUsersPage() {
     rut: "",
     email: "",
     phone: "",
-    role: "basic",
+    user_type: USER_TYPES.STANDARD,
     is_blocked: false,
   });
   const [saving, setSaving] = useState(false);
@@ -45,10 +51,10 @@ export default function AdminUsersPage() {
         return;
       }
 
-      // Validar admin por profiles.role
+      // Validar admin por profiles.user_type
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("role")
+        .select("user_type")
         .eq("id", user.id)
         .single();
 
@@ -59,7 +65,7 @@ export default function AdminUsersPage() {
         return;
       }
 
-      if (profile?.role !== "admin") {
+      if (profile?.user_type !== "admin") {
         setErrorMsg("No tienes permisos para ver esta página.");
         setChecking(false);
         return;
@@ -81,7 +87,7 @@ export default function AdminUsersPage() {
 
     const { data: allUsers, error: usersError } = await supabase
       .from("profiles")
-      .select("id, email, phone, full_name, rut, role, is_blocked")
+      .select("id, email, phone, full_name, rut, user_type, is_blocked")
       .order("email", { ascending: true });
 
     if (usersError) {
@@ -114,7 +120,7 @@ export default function AdminUsersPage() {
       rut: u.rut || "",
       email: u.email || "",
       phone: u.phone || "",
-      role: normalizeRole(u.role || "basic"),
+      user_type: normalizeRole(u.user_type || USER_TYPES.STANDARD),
       is_blocked: !!u.is_blocked,
     });
     setIsModalOpen(true);
@@ -129,7 +135,7 @@ export default function AdminUsersPage() {
       rut: "",
       email: "",
       phone: "",
-      role: "basic",
+      user_type: USER_TYPES.STANDARD,
       is_blocked: false,
     });
   };
@@ -151,7 +157,7 @@ export default function AdminUsersPage() {
         rut: String(editForm.rut || "").trim(),
         email: String(editForm.email || "").trim().toLowerCase(),
         phone: String(editForm.phone || "").trim(),
-        role: normalizeRole(editForm.role || "basic"),
+        user_type: normalizeRole(editForm.user_type || USER_TYPES.STANDARD),
         is_blocked: !!editForm.is_blocked,
       };
 
@@ -202,7 +208,7 @@ export default function AdminUsersPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Usuarios</h1>
           <p className="text-slate-600 mt-1">
-            Administra roles, bloquea cuentas y busca usuarios por correo, nombre o RUT.
+            Administra tipos de usuario, bloquea cuentas y busca usuarios por correo, nombre o RUT.
           </p>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -249,7 +255,7 @@ export default function AdminUsersPage() {
                 <th className="py-3 px-4 text-left font-medium">Teléfono</th>
                 <th className="py-3 px-4 text-left font-medium">Nombre</th>
                 <th className="py-3 px-4 text-left font-medium">RUT</th>
-                <th className="py-3 px-4 text-left font-medium">Rol</th>
+                <th className="py-3 px-4 text-left font-medium">Tipo</th>
                 <th className="py-3 px-4 text-left font-medium">Estado</th>
                 <th className="py-3 px-4 text-left font-medium">Acciones</th>
               </tr>
@@ -288,7 +294,7 @@ export default function AdminUsersPage() {
                     </td>
 
                     <td className="py-2.5 px-4 text-slate-700">
-                      {u.role ? roleCommissionLabel(u.role) : roleCommissionLabel("basic")}
+                      {roleLabel(u.user_type || USER_TYPES.STANDARD)}
                     </td>
 
                     <td className="py-2.5 px-4">
@@ -319,7 +325,7 @@ export default function AdminUsersPage() {
         </div>
 
         <p className="mt-4 text-[11px] text-gray-400">
-          Tip: roles solo para referencia visual. Tiers de segmentación: Free (fijado por admin), Básico, Pro, Premium, Elite.
+          Tip: tipos de usuario = Free, Standard, Admin. Comisiones dependen de seller_tier (Basic, Pro, Elite).
         </p>
       </div>
 
@@ -402,15 +408,15 @@ export default function AdminUsersPage() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Rol
+                  Tipo de usuario
                 </label>
                 <select
-                  value={editForm.role}
-                  onChange={handleFormChange("role")}
+                  value={editForm.user_type}
+                  onChange={handleFormChange("user_type")}
                   disabled={saving}
                   className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
                 >
-                  {ROLE_OPTIONS.map((opt) => (
+                  {USER_TYPE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>

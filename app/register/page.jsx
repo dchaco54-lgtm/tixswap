@@ -20,6 +20,9 @@ export default function RegisterPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  const DEFAULT_USER_TYPE = "standard";
+  const DEFAULT_SELLER_TIER = "basic";
+
   const normalizeRutForDb = (rutAny) => {
     const clean = String(rutAny || "")
       .replace(/\./g, "")
@@ -122,6 +125,8 @@ export default function RegisterPage() {
             full_name: fullName.trim(),
             rut: rutNormalized,
             phone: phone,
+            user_type: DEFAULT_USER_TYPE,
+            seller_tier: DEFAULT_SELLER_TIER,
           },
           emailRedirectTo: redirectTo,
         },
