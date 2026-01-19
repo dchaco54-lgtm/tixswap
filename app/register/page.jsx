@@ -132,7 +132,12 @@ export default function RegisterPage() {
         },
       });
 
-      if (signUpError) throw signUpError;
+      console.log('[Register] SignUp response:', { user: data?.user?.id, error: signUpError, data });
+
+      if (signUpError) {
+        console.error('[Register] SignUp error:', signUpError);
+        throw signUpError;
+      }
 
       // SaaS flow: user creado pero sin sesión => email confirm
       if (data?.user && !data?.session) {
