@@ -84,7 +84,7 @@ function AuthCallbackContent() {
     };
 
     handleCallback();
-  }, [router, searchParams, processing]);
+  }, [router, searchParams]);
 
   if (processing) {
     return (
