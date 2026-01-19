@@ -1,24 +1,27 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 function makeCode(n) {
   return `TS-${String(n).padStart(4, "0")}`;
 }
 
-export async function GET() {
-  const supabase = createRouteHandlerClient({ cookies });
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+export async function GET(req) {
+  // Autenticación por token (más confiable que cookies)
+  const authHeader = req.headers.get('authorization') || '';
+  const token = authHeader.replace('Bearer ', '').trim();
+
+  if (!token) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  const admin = supabaseAdmin();
+  const { data: { user }, error: userErr } = await admin.auth.getUser(token);
 
   if (userErr || !user) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await admin
     .from("support_tickets")
     .select("id, code, subject, status, kind, created_at, last_message_at")
     .eq("user_id", user.id)
@@ -29,11 +32,16 @@ export async function GET() {
 }
 
 export async function POST(req) {
-  const supabase = createRouteHandlerClient({ cookies });
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+  // Autenticación por token
+  const authHeader = req.headers.get('authorization') || '';
+  const token = authHeader.replace('Bearer ', '').trim();
+
+  if (!token) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  const admin = supabaseAdmin();
+  const { data: { user }, error: userErr } = await admin.auth.getUser(token);
 
   if (userErr || !user) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
@@ -47,13 +55,13 @@ export async function POST(req) {
   if (!subject) return NextResponse.json({ error: "Falta asunto" }, { status: 400 });
   if (!message) return NextResponse.json({ error: "Falta mensaje" }, { status: 400 });
 
-  const { count } = await supabase
+  const { count } = await admin
     .from("support_tickets")
     .select("id", { count: "exact", head: true });
 
   const code = makeCode((count ?? 0) + 1000);
 
-  const { data: ticket, error: tErr } = await supabase
+  const { data: ticket, error: tErr } = await admin
     .from("support_tickets")
     .insert({
       code,
@@ -67,7 +75,7 @@ export async function POST(req) {
 
   if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
 
-  const { error: mErr } = await supabase.from("support_messages").insert({
+  const { error: mErr } = await admin.from("support_messages").insert({
     ticket_id: ticket.id,
     sender_role: "user",
     sender_user_id: user.id,
@@ -87,7 +95,6 @@ export async function POST(req) {
         kind: ticket.kind,
       }),
     });
-    void supabaseAdmin; // no romper si no se usa
   } catch {}
 
   return NextResponse.json({ ticket });
