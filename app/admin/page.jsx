@@ -36,7 +36,7 @@ export default function AdminPage() {
       // Validar que el usuario sea admin en la BD
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("role")
+        .select("user_type")
         .eq("id", user.id)
         .single();
 
@@ -45,9 +45,9 @@ export default function AdminPage() {
         console.error("Error cargando perfil:", profileError);
       }
 
-      // Validar admin: por rol en BD O por email específico de soporte
-      const userRole = profile?.role ? String(profile.role).toLowerCase().trim() : "";
-      const isAdminByRole = userRole === "admin";
+      // Validar admin: por user_type en BD O por email específico de soporte
+      const userType = profile?.user_type ? String(profile.user_type).toLowerCase().trim() : "";
+      const isAdminByRole = userType === "admin";
       const isAdminByEmail = user.email?.toLowerCase() === "davidchacon_17@hotmail.com";
 
       if (!isAdminByRole && !isAdminByEmail) {
@@ -55,7 +55,7 @@ export default function AdminPage() {
         return;
       }
 
-      console.log("✓ Admin autorizado:", { email: user.email, role: userRole });
+      console.log("✓ Admin autorizado:", { email: user.email, userType });
       setIsAdmin(true);
       setCheckingAdmin(false);
 
