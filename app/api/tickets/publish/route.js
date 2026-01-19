@@ -7,37 +7,33 @@ import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
 
 export async function POST(request) {
   try {
-    const body = await request.json();
-    const { eventId, sector, fila, asiento, price, userId, userEmail } = body || {};
+    // Obtener token del header (nunca confiar en userId del body)
+    const authHeader = request.headers.get('authorization') || '';
+    const token = authHeader.replace('Bearer ', '').trim();
 
-    console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento, userId });
-
-    if (!eventId || !price) {
-      return NextResponse.json(
-        { error: 'Faltan datos: eventId y price son requeridos.' },
-        { status: 400 }
-      );
-    }
-
-    if (!userId) {
-      return NextResponse.json({ error: 'No autenticado - falta userId' }, { status: 401 });
+    if (!token) {
+      return NextResponse.json({ error: 'No autorizado - falta token' }, { status: 401 });
     }
 
     const supabase = supabaseAdmin();
 
-    // Verificar que el usuario existe
-    const { data: authUser, error: authErr } = await supabase.auth.admin.getUserById(userId);
+    // Verificar que el token es válido y obtener el usuario
+    const { data: authUser, error: authErr } = await supabase.auth.getUser(token);
     
-    console.log('[Publish] Auth check:', { hasUser: !!authUser, userId: authUser?.user?.id, error: authErr?.message });
+    console.log('[Publish] Auth check:', { hasUser: !!authUser?.user, userId: authUser?.user?.id, error: authErr?.message });
     
     if (authErr || !authUser?.user) {
       return NextResponse.json({ error: 'Usuario no válido' }, { status: 401 });
     }
 
     const user = authUser.user;
+    const sellerId = user.id; // ✅ Confiamos en el token, no en el body
 
-    // seller profile
-    const sellerId = user.id;
+    // Ahora leemos el body (sin userId)
+    const body = await request.json();
+    const { eventId, sector, fila, asiento, price } = body || {};
+
+    console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento, sellerId });
 
     // Obtener perfil del usuario con su rol
     const { data: profile, error: profErr } = await supabase
