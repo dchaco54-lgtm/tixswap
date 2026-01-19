@@ -81,37 +81,9 @@ export default function RegisterPage() {
     try {
       setLoading(true);
 
-      // 1) Validar RUT duplicado
-      const { data: rutExists, error: rutCheckError } = await supabase
-        .from("profiles")
-        .select("id")
-        .in("rut", [rutFormatted, rutNormalized])
-        .limit(1);
-
-      if (rutCheckError) throw rutCheckError;
-
-      if (Array.isArray(rutExists) && rutExists.length > 0) {
-        setError("Rut ya con cuenta en Tixswap, debes iniciar sesión");
-        return;
-      }
-
-      // 2) Validar EMAIL duplicado (case-insensitive)
-      const { data: emailExists, error: emailCheckError } = await supabase
-        .from("profiles")
-        .select("id")
-        .ilike("email", emailNormalized) // exact match pero case-insensitive
-        .limit(1);
-
-      if (emailCheckError) throw emailCheckError;
-
-      if (Array.isArray(emailExists) && emailExists.length > 0) {
-        setError("Correo ya con cuenta en Tixswap, debes iniciar sesión");
-        return;
-      }
-
-      // 3) Crear cuenta
-      // La URL de confirmación de email redirigirá a /auth/callback
-      // Supabase agregará automáticamente los parámetros: code, token_hash, type
+      // Crear cuenta sin validaciones pre-signup
+      // El trigger en la BD creará el profile con los metadatos
+      // El UNIQUE constraint en email evitará duplicados
       const redirectTo =
         typeof window !== "undefined"
           ? `${window.location.origin}/auth/callback`
