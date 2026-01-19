@@ -83,9 +83,8 @@ export default function CheckoutPage() {
     try {
       const { data: sessionRes } = await supabase.auth.getSession();
       const token = sessionRes?.session?.access_token;
-      const buyerId = sessionRes?.session?.user?.id;
 
-      if (!token || !buyerId) {
+      if (!token) {
         throw new Error('Debes iniciar sesión para comprar.');
       }
 
@@ -95,7 +94,7 @@ export default function CheckoutPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ ticketId, buyerId }),
+        body: JSON.stringify({ ticketId }), // ✅ Sin buyerId, el backend lo extrae del token
       });
 
       const data = await res.json().catch(() => ({}));
