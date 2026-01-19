@@ -84,6 +84,11 @@ export default function RegisterPage() {
       // Crear cuenta sin validaciones pre-signup
       // El trigger en la BD creará el profile con los metadatos
       // El UNIQUE constraint en email evitará duplicados
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback`
+          : "https://tixswap.cl/auth/callback";
+
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: emailNormalized,
         password,
@@ -95,8 +100,7 @@ export default function RegisterPage() {
             user_type: DEFAULT_USER_TYPE,
             seller_tier: DEFAULT_SELLER_TIER,
           },
-          // Dejar que Supabase use la URL por defecto de la consola
-          // emailRedirectTo se configura en Supabase > Auth > URL Configuration
+          emailRedirectTo: redirectTo,
         },
       });
 
