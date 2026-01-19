@@ -52,47 +52,45 @@ export default function HowItWorksPage() {
           acceso se valida y, si algo falla, el soporte entra como intermediario.
         </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Card title="Free (solo admin)">
-              <p className="leading-relaxed">
-                Segmento fijado manualmente por un administrador. No se recalcula
-                automáticamente.
-              </p>
-            </Card>
+        {/* =========================
+            FLUJO DE PAGO
+           ========================= */}
+        <div className="mt-12">
+          <SectionTitle
+            title="Flujo de transacción y pago"
+            subtitle="Cómo funciona el proceso desde que compras hasta que el vendedor recibe su dinero."
+          />
 
-            <Card title="Básico">
-              <p className="leading-relaxed">
-                Segmento por defecto para usuarios que recién comienzan o tienen
-                pocas transacciones.
-              </p>
-            </Card>
-
-            <Card title="Pro">
-              <p className="leading-relaxed">
-                Segmento intermedio pensado para usuarios frecuentes, con mayor
-                visibilidad y badges.
-              </p>
-            </Card>
-
-            <Card title="Premium">
-              <p className="leading-relaxed">
-                Segmento alto para usuarios recurrentes y buena conducta, con
-                más beneficios de visibilidad.
-              </p>
-            </Card>
-
-            <Card title="Elite">
-              <p className="leading-relaxed">
-                Segmento máximo, típicamente por invitación o alto uso sostenido.
-              </p>
-            </Card>
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-5 text-sm text-slate-700">
-            <b>Nota:</b> Los tiers son de segmentación/beneficios. Las comisiones y
-            condiciones pueden variar según reglas vigentes y no se definen aquí.
-          </div>
+          <Card title="1) Publicación y compra">
+            <ul className="space-y-2">
+              <Bullet>
+                El vendedor publica su ticket con precio y detalles.
               </Bullet>
+              <Bullet>
+                El comprador lo encuentra, revisa y procede al checkout.
+              </Bullet>
+              <Bullet>
+                El pago se retiene en custodia hasta validar el acceso.
+              </Bullet>
+            </ul>
+          </Card>
+
+          <Card title="2) Validación en evento">
+            <ul className="space-y-2">
+              <Bullet>
+                El comprador va al evento y valida su entrada.
+              </Bullet>
+              <Bullet>
+                Debe confirmar el acceso exitoso desde la app/dashboard.
+              </Bullet>
+              <Bullet>
+                Sin confirmación, el pago se retiene por más tiempo.
+              </Bullet>
+            </ul>
+          </Card>
+
+          <Card title="3) Disputas si hay problema">
+            <ul className="space-y-2">
               <Bullet>
                 Si hay un problema real (QR inválido, ya usado, sector equivocado),
                 se abre una <b>disputa</b>.
