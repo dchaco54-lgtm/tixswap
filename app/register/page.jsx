@@ -65,7 +65,7 @@ export default function RegisterPage() {
     const rutNormalized = normalizeRutForDb(rutFormatted);
     const emailNormalized = normalizeEmail(email);
 
-    if (!isValidRut(rutFormatted)) {
+    if (!validateRut(rutFormatted)) {
       setError("RUT inválido. Revisa el formato y el dígito verificador.");
       return;
     }
