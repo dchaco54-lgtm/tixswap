@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 
-export default function AuthCallbackPage() {
+function AuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState(null);
@@ -133,5 +133,31 @@ export default function AuthCallbackPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <div className="max-w-md w-full mx-auto px-4">
+            <div className="bg-white rounded-2xl shadow-lg p-8 border border-slate-100 text-center">
+              <div className="mb-4">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"></div>
+              </div>
+              <h1 className="text-xl font-semibold text-slate-900 mb-2">
+                Confirmando tu correo...
+              </h1>
+              <p className="text-sm text-slate-600">
+                Esto tomará solo unos segundos.
+              </p>
+            </div>
+          </div>
+        </main>
+      }
+    >
+      <AuthCallbackContent />
+    </Suspense>
   );
 }
