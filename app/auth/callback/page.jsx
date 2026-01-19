@@ -23,14 +23,29 @@ function AuthCallbackContent() {
         }, 10000);
 
         const redirectTo = searchParams.get("redirectTo") || "/dashboard";
+        const code = searchParams.get("code");
+        const tokenHash = searchParams.get("token_hash");
+        const type = searchParams.get("type");
 
-        // PKCE: Supabase con detectSessionInUrl:true procesa automáticamente
-        // los parámetros code/token_hash cuando el cliente se inicializa.
-        // Esperamos un momento y verificamos si hay sesión.
-        
-        // Dar tiempo a Supabase para procesar el callback (PKCE exchange)
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log("[AuthCallback] Parámetros recibidos:", { code: !!code, tokenHash: !!tokenHash, type, redirectTo });
 
+        // Si hay code (PKCE flow), hacer el exchange explícitamente
+        if (code) {
+          console.log("[AuthCallback] Intercambiando code por sesión...");
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          
+          if (exchangeError) {
+            console.error("[AuthCallback] Error en exchange:", exchangeError);
+            setError("No se pudo confirmar tu correo. El enlace puede estar expirado.");
+            clearTimeout(timeoutId);
+            setProcessing(false);
+            return;
+          }
+          
+          console.log("[AuthCallback] Exchange exitoso, verificando sesión...");
+        }
+
+        // Verificar que la sesión fue establecida
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
         clearTimeout(timeoutId);
@@ -42,26 +57,23 @@ function AuthCallbackContent() {
           return;
         }
 
-        if (session) {
+        if (session && session.user) {
           // Sesión exitosa, redirigir
-          console.log("[AuthCallback] Sesión confirmada, redirigiendo a:", redirectTo);
+          console.log("[AuthCallback] ✓ Sesión confirmada para usuario:", session.user.email);
           router.replace(redirectTo);
           return;
         }
 
-        // Si después de 500ms no hay sesión, esperamos un poco más (por si acaso)
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        const { data: { session: session2 } } = await supabase.auth.getSession();
-        
-        if (session2) {
-          console.log("[AuthCallback] Sesión confirmada (segundo intento), redirigiendo a:", redirectTo);
-          router.replace(redirectTo);
+        // Si no hay código PKCE, pero está aquí en el callback, algo pasó
+        if (!code && !tokenHash) {
+          console.warn("[AuthCallback] Sin parámetros PKCE, podría ser una URL incompleta");
+          setError("El enlace de confirmación parece incompleto. Por favor, pide un nuevo correo de confirmación.");
+          setProcessing(false);
           return;
         }
 
-        // No hay sesión después de esperar
-        setError("No se pudo confirmar tu correo. El enlace puede estar expirado o ya fue usado.");
+        // No hay sesión después del exchange
+        setError("No se pudo confirmar tu correo. Intenta iniciar sesión manualmente.");
         setProcessing(false);
 
       } catch (err) {

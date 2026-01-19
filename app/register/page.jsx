@@ -107,9 +107,11 @@ export default function RegisterPage() {
       }
 
       // 3) Crear cuenta
+      // La URL de confirmación de email redirigirá a /auth/callback
+      // Supabase agregará automáticamente los parámetros: code, token_hash, type
       const redirectTo =
         typeof window !== "undefined"
-          ? `${window.location.origin}/auth/callback?redirectTo=${encodeURIComponent('/dashboard')}`
+          ? `${window.location.origin}/auth/callback`
           : undefined;
 
       const { data, error: signUpError } = await supabase.auth.signUp({
