@@ -23,27 +23,12 @@ function AuthCallbackContent() {
         }, 10000);
 
         const redirectTo = searchParams.get("redirectTo") || "/dashboard";
-        const code = searchParams.get("code");
-        const tokenHash = searchParams.get("token_hash");
-        const type = searchParams.get("type");
+        
+        console.log("[AuthCallback] Procesando callback implicit flow...");
 
-        console.log("[AuthCallback] Parámetros recibidos:", { code: !!code, tokenHash: !!tokenHash, type, redirectTo });
-
-        // Si hay code (PKCE flow), hacer el exchange explícitamente
-        if (code) {
-          console.log("[AuthCallback] Intercambiando code por sesión...");
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          
-          if (exchangeError) {
-            console.error("[AuthCallback] Error en exchange:", exchangeError);
-            setError("No se pudo confirmar tu correo. El enlace puede estar expirado.");
-            clearTimeout(timeoutId);
-            setProcessing(false);
-            return;
-          }
-          
-          console.log("[AuthCallback] Exchange exitoso, verificando sesión...");
-        }
+        // Con implicit flow, Supabase maneja automáticamente el hash fragment
+        // Solo necesitamos esperar a que la sesión esté lista
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Dar tiempo a que procese
 
         // Verificar que la sesión fue establecida
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -64,15 +49,8 @@ function AuthCallbackContent() {
           return;
         }
 
-        // Si no hay código PKCE, pero está aquí en el callback, algo pasó
-        if (!code && !tokenHash) {
-          console.warn("[AuthCallback] Sin parámetros PKCE, podría ser una URL incompleta");
-          setError("El enlace de confirmación parece incompleto. Por favor, pide un nuevo correo de confirmación.");
-          setProcessing(false);
-          return;
-        }
-
-        // No hay sesión después del exchange
+        // No hay sesión
+        console.warn("[AuthCallback] No se encontró sesión después del callback");
         setError("No se pudo confirmar tu correo. Intenta iniciar sesión manualmente.");
         setProcessing(false);
 
