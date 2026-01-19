@@ -274,6 +274,19 @@ function DashboardContent() {
   // modal detalle venta
   const [openSale, setOpenSale] = useState(null);
 
+  // Prevenir scroll del body cuando el modal de venta está abierto
+  useEffect(() => {
+    if (openSale) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [openSale]);
+
   useEffect(() => {
     const init = async () => {
       setBooting(true);
@@ -1046,6 +1059,9 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                   </div>
 
                   <div className="overflow-x-auto">
+                    <div className="text-xs text-slate-500 mb-2 text-center md:hidden">
+                      ← Desliza para ver más →
+                    </div>
                     <table className="min-w-full text-left">
                       <thead className="bg-slate-50 border-y border-slate-200">
                         <tr className="text-xs font-extrabold text-slate-600">
@@ -1175,11 +1191,11 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
       ======================= */}
       {openSale ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setOpenSale(null)}
-          />
-          <div className="relative w-full max-w-2xl tix-card p-6">
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setOpenSale(null)}
+            />
+            <div className="relative w-full max-w-2xl tix-card p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-xl font-extrabold text-slate-900">Detalle de venta</div>
