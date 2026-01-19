@@ -106,6 +106,14 @@ export default function OrderChat({ orderId, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
+  // Prevenir scroll del body cuando el modal está abierto
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl flex flex-col max-h-[80vh]">
