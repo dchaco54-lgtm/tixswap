@@ -109,7 +109,7 @@ export default function RegisterPage() {
       // 3) Crear cuenta
       const redirectTo =
         typeof window !== "undefined"
-          ? `${window.location.origin}/login`
+          ? `${window.location.origin}/auth/callback?redirectTo=${encodeURIComponent('/dashboard')}`
           : undefined;
 
       const { data, error: signUpError } = await supabase.auth.signUp({

@@ -23,15 +23,51 @@ function LoginContent() {
   // Verificar si ya hay sesión activa
   useEffect(() => {
     async function checkExistingSession() {
-      const { data } = await supabase.auth.getSession();
-      if (data?.session) {
-        router.replace(redirectTo);
-      } else {
+      try {
+        // Timeout de seguridad para evitar "Verificando sesión..." infinito
+        const timeoutId = setTimeout(() => {
+          console.warn("[Login] Timeout verificando sesión, mostrando formulario");
+          setCheckingSession(false);
+        }, 3000);
+
+        // Si vienen parámetros de Supabase PKCE (code, etc.), 
+        // redirigir inmediatamente a /auth/callback para procesarlos correctamente
+        const hasAuthParams = 
+          searchParams.has('code') || 
+          searchParams.has('token_hash') || 
+          searchParams.has('type');
+
+        if (hasAuthParams) {
+          clearTimeout(timeoutId);
+          const callbackUrl = `/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`;
+          router.replace(callbackUrl);
+          return;
+        }
+
+        const { data, error } = await supabase.auth.getSession();
+        
+        clearTimeout(timeoutId);
+
+        if (error) {
+          console.error("[Login] Error obteniendo sesión:", error);
+          setCheckingSession(false);
+          return;
+        }
+
+        if (data?.session) {
+          // Ya hay sesión, redirigir
+          router.replace(redirectTo);
+        } else {
+          setCheckingSession(false);
+        }
+      } catch (err) {
+        console.error("[Login] Error verificando sesión:", err);
         setCheckingSession(false);
       }
     }
+    
     checkExistingSession();
-  }, [router, redirectTo]);
+  }, [router, redirectTo, searchParams]);
 
   const handleChange = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
