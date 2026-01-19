@@ -85,9 +85,9 @@ export async function POST(req) {
   try {
     console.log('[Webpay] === INICIO create-session ===');
     const body = await req.json();
-    const { ticketId, buyerId } = body || {};
+    const { ticketId } = body || {};
 
-    console.log('[Webpay] Body recibido:', { ticketId, buyerId });
+    console.log('[Webpay] Body recibido:', { ticketId });
 
     if (!ticketId) {
       console.log('[Webpay] Error: ticketId faltante');
@@ -130,12 +130,6 @@ export async function POST(req) {
     }
 
     console.log('[Webpay] Usuario autenticado:', user.id);
-
-    // Defensa extra: si el frontend envía buyerId, debe coincidir
-    if (buyerId && buyerId !== user.id) {
-      console.log('[Webpay] Error: buyerId no coincide', { esperado: user.id, recibido: buyerId });
-      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-    }
 
     // Ticket
     console.log('[Webpay] Buscando ticket:', ticketId);
