@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req, { params }) {
   const id = params?.id;
@@ -10,18 +9,22 @@ export async function POST(req, { params }) {
   const message = String(body.message ?? "").trim();
   if (!message) return NextResponse.json({ error: "Falta mensaje" }, { status: 400 });
 
-  const supabase = createRouteHandlerClient({ cookies });
+  // Autenticación por token
+  const authHeader = req.headers.get('authorization') || '';
+  const token = authHeader.replace('Bearer ', '').trim();
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+  if (!token) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  const admin = supabaseAdmin();
+  const { data: { user }, error: userErr } = await admin.auth.getUser(token);
 
   if (userErr || !user) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const { data: ticket, error: tErr } = await supabase
+  const { data: ticket, error: tErr } = await admin
     .from("support_tickets")
     .select("id, user_id")
     .eq("id", id)
@@ -34,7 +37,7 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 
-  const { data: msg, error: mErr } = await supabase
+  const { data: msg, error: mErr } = await admin
     .from("support_messages")
     .insert({
       ticket_id: id,
@@ -47,7 +50,7 @@ export async function POST(req, { params }) {
 
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
 
-  await supabase
+  await admin
     .from("support_tickets")
     .update({ last_message_at: new Date().toISOString() })
     .eq("id", id);
