@@ -20,6 +20,19 @@ function LoginContent() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
+  useEffect(() => {
+    async function checkExistingSession() {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) {
+        router.replace(redirectTo);
+      } else {
+        setCheckingSession(false);
+      }
+    }
+    checkExistingSession();
+  }, [router, redirectTo]);
+  const [errorMessage, setErrorMessage] = useState("");
+
   // Verificar si ya hay sesión activa
   useEffect(() => {
     async function checkExistingSession() {
