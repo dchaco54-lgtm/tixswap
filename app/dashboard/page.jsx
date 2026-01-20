@@ -11,7 +11,6 @@ import { normalizeRole, USER_TYPES } from "@/lib/roles";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
 import AvatarUploadSection from "@/components/AvatarUploadSection";
 import OnboardingWelcomeModal from "@/components/OnboardingWelcomeModal";
-import DashboardTour, { shouldShowTour } from "@/components/DashboardTour";
 import { 
   getCurrentProfile, 
   updateProfile, 
@@ -1090,17 +1089,6 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
           }}
           onComplete={() => {
             completeOnboarding();
-          }}
-        />
-      )}
-
-      {/* =======================
-          TOUR DEL DASHBOARD
-      ======================= */}
-      {showTour && (
-        <DashboardTour
-          onComplete={() => {
-            setShowTour(false);
           }}
         />
       )}
