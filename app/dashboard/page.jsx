@@ -10,6 +10,7 @@ import { normalizeRole, USER_TYPES } from "@/lib/roles";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
 import AvatarUploadSection from "@/components/AvatarUploadSection";
 import OnboardingModal from "@/components/OnboardingModal";
+import DashboardTour, { shouldShowTour } from "@/components/DashboardTour";
 import { 
   getCurrentProfile, 
   updateProfile, 
@@ -259,6 +260,7 @@ function DashboardContent() {
 
   // onboarding
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showTour, setShowTour] = useState(false);
 
   // ventas
   const [salesLoading, setSalesLoading] = useState(false);
@@ -306,8 +308,15 @@ function DashboardContent() {
     if (profile) {
       setDraftPhone((profile?.phone || "").trim());
 
-      // Mostrar onboarding si no tiene nombre
-      if (!profile?.full_name) {
+      // Mostrar onboarding si no tiene nombre y no lo ha omitido recientemente
+      const skipKey = 'tixswap_onboarding_skip_until';
+      const skipUntil = localStorage.getItem(skipKey);
+      const now = Date.now();
+      
+      // Si hay skip activo (menos de 7 días), no mostrar
+      const shouldSkip = skipUntil && parseInt(skipUntil, 10) > now;
+      
+      if (!profile?.full_name && !shouldSkip) {
         setShowOnboarding(true);
       }
     }
@@ -341,12 +350,13 @@ function DashboardContent() {
 
     return [
       { id: "mis_datos", label: "Mis datos" },
-      { id: "mis_ventas", label: "Mis ventas" },
-      { id: "wallet", label: "Wallet" },
+      { id: "mis_ventas", label: "Mis ventas", tourId: "sales" },
+      { id: "wallet", label: "Wallet", tourId: "wallet" },
+      { id: "vender", label: "🎫 Vender", href: "/sell", tourId: "sell" },
 
       // páginas ya existentes
-      { id: "mis_compras", label: "Mis compras", href: "/dashboard/purchases" },
-      { id: "soporte", label: "Soporte", href: "/dashboard/soporte" },
+      { id: "mis_compras", label: "Mis compras", href: "/dashboard/purchases", tourId: "purchases" },
+      { id: "soporte", label: "Soporte", href: "/dashboard/soporte", tourId: "support" },
       { id: "tickets", label: "Mis tickets", href: "/dashboard/tickets" },
 
       ...(isAdmin ? [{ id: "admin", label: "Admin", href: "/admin" }] : []),
@@ -587,6 +597,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                   <button
                     key={it.id}
                     onClick={() => goTab(it.id, it.href)}
+                    data-tour-id={it.tourId}
                     className={`w-full text-left px-3 py-2 rounded-xl text-sm font-semibold transition ${
                       active
                         ? "bg-blue-600 text-white"
@@ -1088,6 +1099,31 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
           onComplete={() => {
             setShowOnboarding(false);
             setEditing(true);
+            // Después de completar, mostrar tour si corresponde
+            if (shouldShowTour()) {
+              setTimeout(() => setShowTour(true), 500);
+            }
+          }}
+          onSkip={() => {
+            setShowOnboarding(false);
+            // Guardar skip por 7 días
+            const sevenDays = 7 * 24 * 60 * 60 * 1000;
+            localStorage.setItem('tixswap_onboarding_skip_until', String(Date.now() + sevenDays));
+            // Mostrar tour igual si corresponde
+            if (shouldShowTour()) {
+              setTimeout(() => setShowTour(true), 500);
+            }
+          }}
+        />
+      )}
+
+      {/* =======================
+          TOUR DEL DASHBOARD
+      ======================= */}
+      {showTour && (
+        <DashboardTour
+          onComplete={() => {
+            setShowTour(false);
           }}
         />
       )}
