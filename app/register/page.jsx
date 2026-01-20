@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { createClient } from "@/lib/supabase/client";
 import {
   normalizeRut,
   isValidRut,
@@ -16,6 +16,7 @@ import {
 
 export default function RegisterPage() {
   const router = useRouter();
+  const supabase = createClient();
 
   const [fullName, setFullName] = useState("");
   const [rut, setRut] = useState("");
@@ -160,11 +161,9 @@ export default function RegisterPage() {
         return;
       }
 
-      // Crear cuenta
-      const redirectTo =
-        typeof window !== "undefined"
-          ? `${window.location.origin}/auth/callback`
-          : "https://tixswap.cl/auth/callback";
+      // Crear cuenta con PKCE
+      const origin = typeof window !== "undefined" ? window.location.origin : "https://www.tixswap.cl";
+      const callbackUrl = `${origin}/auth/callback?redirectTo=${encodeURIComponent('/dashboard')}`;
 
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: normalized.email,
@@ -177,7 +176,7 @@ export default function RegisterPage() {
             user_type: DEFAULT_USER_TYPE,
             seller_tier: DEFAULT_SELLER_TIER,
           },
-          emailRedirectTo: redirectTo,
+          emailRedirectTo: callbackUrl, // PKCE callback
         },
       });
 
