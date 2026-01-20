@@ -107,7 +107,7 @@ export default function AvatarUploadSection({ currentAvatarUrl, userId, onSucces
               className="hidden"
             />
             <span className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
-              {uploading ? 'Subiendo...' : 'Cambiar'}
+              {uploading ? 'Subiendo...' : 'Subir imagen'}
             </span>
           </label>
           <p className="text-xs text-gray-500 mt-1">
