@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { useProfile } from "@/hooks/useProfile";
 import WalletSection from "./WalletSection";
 import StarRating from "@/components/StarRating";
 import { normalizeRole, USER_TYPES } from "@/lib/roles";
@@ -240,15 +241,14 @@ function DashboardContent() {
 
   const [tab, setTab] = useState(sp.get("tab") || "mis_datos");
 
-  const [booting, setBooting] = useState(true);
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
+  
+  // ✅ Hook con Realtime - fuente de verdad desde BD
+  const { profile, loading: profileLoading, error: profileError, refetch: refetchProfile } = useProfile();
 
   // edición de perfil
   const [editing, setEditing] = useState(false);
-  const [draftEmail, setDraftEmail] = useState("");
   const [draftPhone, setDraftPhone] = useState("");
-  const [draftFullName, setDraftFullName] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
@@ -288,13 +288,7 @@ function DashboardContent() {
 
   useEffect(() => {
     const init = async () => {
-      setBooting(true);
-      setErr("");
-      setMsg("");
-
-      const {
-        data: { user: u },
-      } = await supabase.auth.getUser();
+      const { data: { user: u } } = await supabase.auth.getUser();
 
       if (!u) {
         router.push("/login");
@@ -302,28 +296,28 @@ function DashboardContent() {
       }
 
       setUser(u);
+    };
 
-      // Obtener perfil con nuevos campos
-      const { data: p, error: pErr } = await supabase
-        .from("profiles")
-        .select("id, full_name, rut, email, phone, user_type, seller_tier, seller_tier_locked, avatar_url, status, is_blocked")
-        .eq("id", u.id)
-        .maybeSingle();
+    init();
+  }, [router]);
 
-      if (pErr) setErr(pErr.message);
-      setProfile(p || null);
-
-      // Inicializar drafts
-      setDraftEmail((p?.email || u.email || "").trim());
-      setDraftPhone((p?.phone || "").trim());
-      setDraftFullName((p?.full_name || "").trim());
+  // Sincronizar drafts cuando profile carga/cambia (Realtime)
+  useEffect(() => {
+    if (profile) {
+      setDraftPhone((profile?.phone || "").trim());
 
       // Mostrar onboarding si no tiene nombre
-      if (!p?.full_name) {
+      if (!profile?.full_name) {
         setShowOnboarding(true);
       }
+    }
+  }, [profile]);
 
-      // Cargar ticket abierto para cambios (si existe)
+  // Cargar ticket abierto para cambios
+  useEffect(() => {
+    const loadTickets = async () => {
+      if (!user) return;
+
       const emailTicket = await findOpenChangeTicket("email");
       const rutTicket = await findOpenChangeTicket("rut");
       if (emailTicket.success && emailTicket.ticket) {
@@ -331,13 +325,10 @@ function DashboardContent() {
       } else if (rutTicket.success && rutTicket.ticket) {
         setOpenChangeTicket(rutTicket.ticket);
       }
-
-      setBooting(false);
     };
 
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    loadTickets();
+  }, [user]);
 
   useEffect(() => {
     const urlTab = sp.get("tab");
@@ -418,17 +409,13 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
   const startEdit = () => {
     setMsg("");
     setErr("");
-    setDraftEmail((profile?.email || user?.email || "").trim());
     setDraftPhone((profile?.phone || "").trim());
-    setDraftFullName((profile?.full_name || "").trim());
     setEditing(true);
   };
 
   const cancelEdit = () => {
     setEditing(false);
-    setDraftEmail((profile?.email || user?.email || "").trim());
     setDraftPhone((profile?.phone || "").trim());
-    setDraftFullName((profile?.full_name || "").trim());
   };
 
   const saveProfile = async () => {
@@ -444,8 +431,10 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
         throw new Error(result.error);
       }
 
-      setProfile(result.profile);
-      setMsg("Perfil actualizado ✅");
+      // Refetch profile desde BD (Realtime lo actualizará automáticamente)
+      await refetchProfile();
+
+      setMsg("Teléfono actualizado ✅");
       setEditing(false);
     } catch (e) {
       setErr(e?.message || "No se pudo guardar.");
@@ -454,8 +443,9 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     }
   };
 
-  const handleAvatarSuccess = (avatarUrl) => {
-    setProfile(prev => ({ ...prev, avatar_url: avatarUrl }));
+  const handleAvatarSuccess = async (avatarUrl) => {
+    // Refetch para obtener la URL actualizada desde BD
+    await refetchProfile();
     setMsg("Avatar actualizado ✅");
   };
 
@@ -525,12 +515,27 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, user?.id]);
 
-  if (booting) {
+  if (profileLoading || !user) {
     return (
       <div className="min-h-screen bg-[#f4f7ff]">
         <div className="tix-container py-10">
           <div className="tix-card p-6">
             <p className="text-slate-600">Cargando dashboard…</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (profileError) {
+    return (
+      <div className="min-h-screen bg-[#f4f7ff]">
+        <div className="tix-container py-10">
+          <div className="tix-card p-6 bg-red-50 border-red-200">
+            <p className="text-red-600">Error cargando perfil: {profileError}</p>
+            <button onClick={refetchProfile} className="mt-3 tix-btn-primary text-sm">
+              Reintentar
+            </button>
           </div>
         </div>
       </div>
