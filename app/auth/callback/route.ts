@@ -16,23 +16,27 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
+  const token = requestUrl.searchParams.get('token'); // Implicit flow fallback
+  const type = requestUrl.searchParams.get('type');
   const redirectTo = requestUrl.searchParams.get('redirectTo') || '/dashboard';
   const origin = process.env.NEXT_PUBLIC_APP_URL || requestUrl.origin;
 
   console.log('[AuthCallback] Iniciando callback:', {
     code: code ? `${code.substring(0, 20)}...` : 'null',
+    token: token ? `${token.substring(0, 20)}...` : 'null',
+    type,
     redirectTo,
     origin,
     timestamp: new Date().toISOString(),
   });
 
   // ============================================
-  // 1. VALIDAR CODE
+  // 1. VALIDAR CODE O TOKEN
   // ============================================
-  if (!code) {
-    console.warn('[AuthCallback] No code en URL');
+  if (!code && !token) {
+    console.warn('[AuthCallback] No code ni token en URL');
     return NextResponse.redirect(
-      new URL(`/login?error=no_code&message=${encodeURIComponent('Link de confirmación inválido')}`, origin)
+      new URL(`/login?error=no_code&message=${encodeURIComponent('Link de confirmación inválido. Verifica que hayas usado el link completo del email.')}`, origin)
     );
   }
 
@@ -44,53 +48,83 @@ export async function GET(request: NextRequest) {
     const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
     // ============================================
-    // 3. INTERCAMBIAR CODE POR SESIÓN (PKCE)
+    // 3. INTERCAMBIAR CODE/TOKEN POR SESIÓN
     // ============================================
-    console.log('[AuthCallback] Intercambiando code por sesión...');
     
-    const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    if (code) {
+      // PKCE flow (preferred)
+      console.log('[AuthCallback] Usando PKCE flow con code...');
+      
+      const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
 
-    if (exchangeError) {
-      console.error('[AuthCallback] Error en exchangeCodeForSession:', {
-        message: exchangeError.message,
-        status: exchangeError.status,
-        name: exchangeError.name,
+      if (exchangeError) {
+        console.error('[AuthCallback] Error en exchangeCodeForSession:', {
+          message: exchangeError.message,
+          status: exchangeError.status,
+          name: exchangeError.name,
+        });
+
+        const errorMessages: { [key: string]: string } = {
+          'invalid_code': 'El link de confirmación expiró o ya fue usado',
+          'access_denied': 'Acceso denegado. Intenta registrarte de nuevo',
+          'server_error': 'Error del servidor. Intenta más tarde',
+        };
+
+        const message = errorMessages[exchangeError.message] || exchangeError.message || 'Error al confirmar el correo';
+
+        return NextResponse.redirect(
+          new URL(`/login?error=auth_error&message=${encodeURIComponent(message)}`, origin)
+        );
+      }
+
+      if (!data?.session) {
+        console.warn('[AuthCallback] No session después del exchange');
+        return NextResponse.redirect(
+          new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
+        );
+      }
+    } else if (token && type) {
+      // Implicit flow fallback (deprecated pero soportado)
+      console.log('[AuthCallback] Usando implicit flow con token (deprecated)...');
+      
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: token,
+        type: type as any,
       });
 
-      const errorMessages: { [key: string]: string } = {
-        'invalid_code': 'El link de confirmación expiró o ya fue usado',
-        'access_denied': 'Acceso denegado. Intenta registrarte de nuevo',
-        'server_error': 'Error del servidor. Intenta más tarde',
-      };
+      if (verifyError) {
+        console.error('[AuthCallback] Error en verifyOtp:', verifyError);
+        return NextResponse.redirect(
+          new URL(`/login?error=auth_error&message=${encodeURIComponent('Token inválido o expirado')}`, origin)
+        );
+      }
 
-      const message = errorMessages[exchangeError.message] || exchangeError.message || 'Error al confirmar el correo';
-
-      return NextResponse.redirect(
-        new URL(`/login?error=auth_error&message=${encodeURIComponent(message)}`, origin)
-      );
+      if (!data?.session) {
+        console.warn('[AuthCallback] No session después de verifyOtp');
+        return NextResponse.redirect(
+          new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
+        );
+      }
     }
 
     // ============================================
-    // 4. VALIDAR SESIÓN
+    // 4. VERIFICAR SESIÓN ACTUAL
     // ============================================
-    if (!data?.session) {
-      console.warn('[AuthCallback] No session después del exchange');
+    const { data: sessionData } = await supabase.auth.getSession();
+    
+    if (!sessionData?.session) {
+      console.warn('[AuthCallback] No session activa');
       return NextResponse.redirect(
         new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
       );
     }
 
-    if (!data.user) {
-      console.warn('[AuthCallback] No user en session');
-      return NextResponse.redirect(
-        new URL(`/login?error=no_user&message=${encodeURIComponent('Usuario no encontrado')}`, origin)
-      );
-    }
+    const user = sessionData.session.user;
 
     console.log('[AuthCallback] ✓ Sesión establecida:', {
-      userId: data.user.id,
-      email: data.user.email,
-      emailConfirmed: data.user.email_confirmed_at ? 'sí' : 'no',
+      userId: user.id,
+      email: user.email,
+      emailConfirmed: user.email_confirmed_at ? 'sí' : 'no',
     });
 
     // ============================================
@@ -101,7 +135,7 @@ export async function GET(request: NextRequest) {
       const { data: existingProfile, error: fetchError } = await supabase
         .from('profiles')
         .select('id')
-        .eq('id', data.user.id)
+        .eq('id', user.id)
         .single();
 
       if (fetchError && fetchError.code !== 'PGRST116') {
@@ -113,16 +147,15 @@ export async function GET(request: NextRequest) {
         // Profile no existe, crear uno
         const { error: createError } = await supabase.from('profiles').insert([
           {
-            id: data.user.id,
-            email: data.user.email,
-            full_name: data.user.user_metadata?.full_name || '',
-            rut: data.user.user_metadata?.rut || '',
-            phone: data.user.user_metadata?.phone || '',
-            user_type: data.user.user_metadata?.user_type || 'standard',
-            seller_tier: data.user.user_metadata?.seller_tier || 'basic',
+            id: user.id,
+            email: user.email,
+            full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Usuario',
+            rut: user.user_metadata?.rut || null,
+            phone: user.user_metadata?.phone || null,
+            user_type: user.user_metadata?.user_type || 'user',
+            seller_tier: user.user_metadata?.seller_tier || 'free',
             email_confirmed: true,
             onboarding_completed: false,
-            created_at: new Date().toISOString(),
           },
         ]);
 
