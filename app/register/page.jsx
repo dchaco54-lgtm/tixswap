@@ -135,9 +135,6 @@ export default function RegisterPage() {
 
     // Si llegó aquí, todos los campos son válidos
     const normalized = normalizeFormData({ fullName, rut, email, phone });
-    
-    // Asegurar que phone esté sin espacios (E.164)
-    const phoneNormalized = phone.replace(/\s/g, "");
 
     try {
       setLoading(true);
@@ -176,7 +173,7 @@ export default function RegisterPage() {
           data: {
             full_name: normalized.fullName,
             rut: normalized.rut,
-            phone: phoneNormalized, // Sin espacios
+            phone: normalized.phone,
             user_type: DEFAULT_USER_TYPE,
             seller_tier: DEFAULT_SELLER_TIER,
           },
@@ -326,10 +323,9 @@ export default function RegisterPage() {
                 if (phone) {
                   const normalized = normalizePhoneCL(phone);
                   if (normalized) {
-                    // Mostrar con espacios para mejor UX: "+569XXXXXXXX" → "+56 9XXXXXXXX"
-                    const withSpaces = normalized.replace(/(\+56)(9)(\d{8})/, "$1 $2$3");
-                    setPhone(withSpaces);
-                    phoneToValidate = normalized; // Validar sin espacios
+                    // Guardar sin espacios en el state (E.164: +569XXXXXXXX)
+                    setPhone(normalized);
+                    phoneToValidate = normalized;
                   }
                 }
                 handleBlur("phone", phoneToValidate);
