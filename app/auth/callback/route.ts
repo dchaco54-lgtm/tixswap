@@ -51,6 +51,8 @@ export async function GET(request: NextRequest) {
     // 3. INTERCAMBIAR CODE/TOKEN POR SESIÓN
     // ============================================
     
+    let sessionData;
+    
     if (code) {
       // PKCE flow (preferred)
       console.log('[AuthCallback] Usando PKCE flow con code...');
@@ -83,6 +85,8 @@ export async function GET(request: NextRequest) {
           new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
         );
       }
+      
+      sessionData = data;
     } else if (token && type) {
       // Implicit flow fallback (deprecated pero soportado)
       console.log('[AuthCallback] Usando implicit flow con token (deprecated)...');
@@ -105,21 +109,23 @@ export async function GET(request: NextRequest) {
           new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
         );
       }
+      
+      sessionData = data;
     }
 
     // ============================================
     // 4. VERIFICAR SESIÓN ACTUAL
     // ============================================
-    const { data: sessionData } = await supabase.auth.getSession();
+    const { data: currentSessionData } = await supabase.auth.getSession();
     
-    if (!sessionData?.session) {
-      console.warn('[AuthCallback] No session activa');
+    if (!currentSessionData?.session) {
+      console.warn('[AuthCallback] No session activa después de exchange');
       return NextResponse.redirect(
         new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
       );
     }
 
-    const user = sessionData.session.user;
+    const user = currentSessionData.session.user;
 
     console.log('[AuthCallback] ✓ Sesión establecida:', {
       userId: user.id,
@@ -172,14 +178,16 @@ export async function GET(request: NextRequest) {
     }
 
     // ============================================
-    // 6. REDIRIGIR A DESTINO FINAL
+    // 6. REDIRIGIR A DESTINO FINAL (preservando cookies)
     // ============================================
     console.log('[AuthCallback] Redirigiendo a:', redirectTo);
 
     const redirectUrl = new URL(redirectTo, origin);
     redirectUrl.searchParams.set('confirmed', 'true');
 
-    return NextResponse.redirect(redirectUrl);
+    // Crear respuesta que preserve las cookies de Supabase
+    const response = NextResponse.redirect(redirectUrl);
+    return response;
 
   } catch (err) {
     console.error('[AuthCallback] Error inesperado:', {
