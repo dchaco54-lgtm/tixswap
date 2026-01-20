@@ -17,13 +17,15 @@ export function useOnboardingLogic(profile) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!profile) {
+    // Si no hay profile, no hacer nada
+    if (!profile || !profile.id) {
+      setShouldShow(false);
       setLoading(false);
       return;
     }
 
     // Si ya completó, nunca mostrar
-    if (profile.onboarding_completed) {
+    if (profile.onboarding_completed === true) {
       console.log('[Onboarding] Ya completado, no mostrar');
       setShouldShow(false);
       setLoading(false);
@@ -32,20 +34,28 @@ export function useOnboardingLogic(profile) {
 
     // Si fue dismissido hace poco, no mostrar
     if (profile.onboarding_dismissed_at) {
-      const dismissedAt = new Date(profile.onboarding_dismissed_at).getTime();
-      const now = Date.now();
-      const hoursAgo = (now - dismissedAt) / (1000 * 60 * 60);
+      try {
+        const dismissedAt = new Date(profile.onboarding_dismissed_at).getTime();
+        const now = Date.now();
+        const hoursAgo = (now - dismissedAt) / (1000 * 60 * 60);
 
-      console.log(`[Onboarding] Dismissido hace ${hoursAgo.toFixed(1)} horas`);
+        console.log(`[Onboarding] Dismissido hace ${hoursAgo.toFixed(1)} horas`);
 
-      if (hoursAgo < RATE_LIMIT_HOURS) {
-        console.log('[Onboarding] Rate limit activo, no mostrar');
+        if (hoursAgo < RATE_LIMIT_HOURS) {
+          console.log('[Onboarding] Rate limit activo, no mostrar');
+          setShouldShow(false);
+          setLoading(false);
+          return;
+        }
+
+        console.log('[Onboarding] Rate limit expirado, mostrar de nuevo');
+      } catch (err) {
+        console.error('[Onboarding] Error parseando dismissed_at:', err);
+        // Si hay error, no mostrar por seguridad
         setShouldShow(false);
         setLoading(false);
         return;
       }
-
-      console.log('[Onboarding] Rate limit expirado, mostrar de nuevo');
     }
 
     // Mostrar modal
