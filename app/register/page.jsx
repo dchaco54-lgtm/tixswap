@@ -135,6 +135,9 @@ export default function RegisterPage() {
 
     // Si llegó aquí, todos los campos son válidos
     const normalized = normalizeFormData({ fullName, rut, email, phone });
+    
+    // Asegurar que phone esté sin espacios (E.164)
+    const phoneNormalized = phone.replace(/\s/g, "");
 
     try {
       setLoading(true);
@@ -173,7 +176,7 @@ export default function RegisterPage() {
           data: {
             full_name: normalized.fullName,
             rut: normalized.rut,
-            phone: normalized.phone,
+            phone: phoneNormalized, // Sin espacios
             user_type: DEFAULT_USER_TYPE,
             seller_tier: DEFAULT_SELLER_TIER,
           },
@@ -319,14 +322,17 @@ export default function RegisterPage() {
               }}
               onBlur={() => {
                 // Normalizar teléfono al blur
+                let phoneToValidate = phone;
                 if (phone) {
                   const normalized = normalizePhoneCL(phone);
                   if (normalized) {
-                    // Mostrar con espacios para mejor UX
-                    setPhone(normalized.replace(/(\d)(\d{8})$/, "+56 $1$2"));
+                    // Mostrar con espacios para mejor UX: "+569XXXXXXXX" → "+56 9XXXXXXXX"
+                    const withSpaces = normalized.replace(/(\+56)(9)(\d{8})/, "$1 $2$3");
+                    setPhone(withSpaces);
+                    phoneToValidate = normalized; // Validar sin espacios
                   }
                 }
-                handleBlur("phone", phone);
+                handleBlur("phone", phoneToValidate);
               }}
               placeholder="+56 912345678"
               className={`w-full rounded-xl px-4 py-3 outline-none transition ${
