@@ -1,36 +1,13 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { cookies } from "next/headers";
 
-function getSessionClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) throw new Error("Supabase env missing");
-
-  const projectRef = supabaseUrl?.split("https://")[1]?.split(".")[0];
-  const tokenCookie = cookies().get(`sb-${projectRef}-auth-token`)?.value;
-
-  let accessToken;
-  try {
-    accessToken = tokenCookie ? JSON.parse(tokenCookie)?.access_token : undefined;
-  } catch (e) {
-    accessToken = undefined;
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false },
-    global: accessToken
-      ? { headers: { Authorization: `Bearer ${accessToken}` } }
-      : undefined,
-  });
-
-  return supabase;
-}
-
 export async function POST(request) {
   try {
-    const supabase = getSessionClient();
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+    
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
@@ -83,7 +60,9 @@ export async function POST(request) {
 
 export async function DELETE() {
   try {
-    const supabase = getSessionClient();
+    const cookieStore = cookies();
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+    
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: "No autenticado" }, { status: 401 });
