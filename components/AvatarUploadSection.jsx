@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { uploadAvatar, deleteAvatar } from '@/lib/profileActions';
 
 export default function AvatarUploadSection({ currentAvatarUrl, userId, onSuccess }) {
   const [uploading, setUploading] = useState(false);
@@ -17,17 +16,23 @@ export default function AvatarUploadSection({ currentAvatarUrl, userId, onSucces
     setUploading(true);
 
     try {
-      const result = await uploadAvatar(file, userId);
+      const formData = new FormData();
+      formData.append('file', file);
 
-      if (!result.success) {
-        setError(result.error);
-        return;
+      const res = await fetch('/api/profile/avatar', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || 'No se pudo subir el avatar');
       }
 
-      setPreview(result.avatarUrl);
-      onSuccess?.(result.avatarUrl);
+      setPreview(json.avatarUrl);
+      onSuccess?.(json.avatarUrl);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'No se pudo subir el avatar');
     } finally {
       setUploading(false);
     }
@@ -41,17 +46,16 @@ export default function AvatarUploadSection({ currentAvatarUrl, userId, onSucces
     setDeleting(true);
 
     try {
-      const result = await deleteAvatar(userId);
-
-      if (!result.success) {
-        setError(result.error);
-        return;
+      const res = await fetch('/api/profile/avatar', { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || 'No se pudo eliminar el avatar');
       }
 
       setPreview(null);
       onSuccess?.(null);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'No se pudo eliminar el avatar');
     } finally {
       setDeleting(false);
     }
@@ -97,7 +101,7 @@ export default function AvatarUploadSection({ currentAvatarUrl, userId, onSucces
           <label className="relative inline-flex items-center cursor-pointer">
             <input
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/*"
               onChange={handleFileChange}
               disabled={uploading || deleting}
               className="hidden"
@@ -107,7 +111,7 @@ export default function AvatarUploadSection({ currentAvatarUrl, userId, onSucces
             </span>
           </label>
           <p className="text-xs text-gray-500 mt-1">
-            JPG, PNG o WebP. Max 2MB.
+            Imágenes hasta 2MB (jpg, png, webp, gif, heic, etc.).
           </p>
         </div>
       </div>
