@@ -675,35 +675,11 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                     
                     {/* Avatar */}
                     <div className="px-5 py-4">
-                      {editing ? (
-                        <AvatarUploadSection 
-                          currentAvatarUrl={profile?.avatar_url}
-                          userId={user?.id}
-                          onSuccess={handleAvatarSuccess}
-                        />
-                      ) : (
-                        <div>
-                          <div className="text-xs font-bold text-slate-500 mb-3">Avatar</div>
-                          <div className="flex items-center gap-4">
-                            {profile?.avatar_url ? (
-                              <img
-                                src={profile.avatar_url}
-                                alt="Avatar"
-                                className="w-20 h-20 rounded-full object-cover border-2 border-slate-300"
-                              />
-                            ) : (
-                              <div className="w-20 h-20 rounded-full bg-slate-200 flex items-center justify-center text-slate-400 text-3xl">
-                                👤
-                              </div>
-                            )}
-                            {!editing && (
-                              <button onClick={startEdit} className="tix-btn-secondary text-sm">
-                                Cambiar
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                      <AvatarUploadSection 
+                        currentAvatarUrl={profile?.avatar_url}
+                        userId={user?.id}
+                        onSuccess={handleAvatarSuccess}
+                      />
                     </div>
 
                     {/* Nombre */}
