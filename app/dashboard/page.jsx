@@ -4,12 +4,13 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/hooks/useProfile";
+import { useOnboardingLogic } from "@/hooks/useOnboardingLogic";
 import WalletSection from "./WalletSection";
 import StarRating from "@/components/StarRating";
 import { normalizeRole, USER_TYPES } from "@/lib/roles";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
 import AvatarUploadSection from "@/components/AvatarUploadSection";
-import OnboardingModal from "@/components/OnboardingModal";
+import OnboardingWelcomeModal from "@/components/OnboardingWelcomeModal";
 import DashboardTour, { shouldShowTour } from "@/components/DashboardTour";
 import { 
   getCurrentProfile, 
@@ -258,9 +259,8 @@ function DashboardContent() {
   const [showChangeModal, setShowChangeModal] = useState(null); // null | 'email' | 'rut'
   const [openChangeTicket, setOpenChangeTicket] = useState(null);
 
-  // onboarding
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [showTour, setShowTour] = useState(false);
+  // Lógica de onboarding mejorada con rate limit
+  const { shouldShow: shouldShowOnboarding, loading: onboardingLoading, handleDismiss: dismissOnboarding, handleComplete: completeOnboarding } = useOnboardingLogic(profile);
 
   // ventas
   const [salesLoading, setSalesLoading] = useState(false);
@@ -307,18 +307,6 @@ function DashboardContent() {
   useEffect(() => {
     if (profile) {
       setDraftPhone((profile?.phone || "").trim());
-
-      // Mostrar onboarding si no tiene nombre y no lo ha omitido recientemente
-      const skipKey = 'tixswap_onboarding_skip_until';
-      const skipUntil = localStorage.getItem(skipKey);
-      const now = Date.now();
-      
-      // Si hay skip activo (menos de 7 días), no mostrar
-      const shouldSkip = skipUntil && parseInt(skipUntil, 10) > now;
-      
-      if (!profile?.full_name && !shouldSkip) {
-        setShowOnboarding(true);
-      }
     }
   }, [profile]);
 
@@ -1094,25 +1082,14 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
       {/* =======================
           MODAL ONBOARDING
       ======================= */}
-      {showOnboarding && (
-        <OnboardingModal
-          onComplete={() => {
-            setShowOnboarding(false);
-            setEditing(true);
-            // Después de completar, mostrar tour si corresponde
-            if (shouldShowTour()) {
-              setTimeout(() => setShowTour(true), 500);
-            }
+      {shouldShowOnboarding && !onboardingLoading && (
+        <OnboardingWelcomeModal
+          profile={profile}
+          onClose={() => {
+            dismissOnboarding();
           }}
-          onSkip={() => {
-            setShowOnboarding(false);
-            // Guardar skip por 7 días
-            const sevenDays = 7 * 24 * 60 * 60 * 1000;
-            localStorage.setItem('tixswap_onboarding_skip_until', String(Date.now() + sevenDays));
-            // Mostrar tour igual si corresponde
-            if (shouldShowTour()) {
-              setTimeout(() => setShowTour(true), 500);
-            }
+          onComplete={() => {
+            completeOnboarding();
           }}
         />
       )}
