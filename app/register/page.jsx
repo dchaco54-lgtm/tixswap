@@ -81,6 +81,23 @@ export default function RegisterPage() {
     try {
       setLoading(true);
 
+      // 0) Validar RUT en backend sin exponer lista completa
+      const rutCheckRes = await fetch("/api/auth/check-rut", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rut: rutNormalized }),
+      });
+
+      const rutCheck = await rutCheckRes.json();
+      if (!rutCheckRes.ok) {
+        throw new Error(rutCheck?.error || "No se pudo validar el RUT.");
+      }
+
+      if (rutCheck?.exists) {
+        setError("RUT ya registrado. Si necesitas ayuda, contáctanos por soporte.");
+        return;
+      }
+
       // Crear cuenta sin validaciones pre-signup
       // El trigger en la BD creará el profile con los metadatos
       // El UNIQUE constraint en email evitará duplicados
