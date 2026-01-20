@@ -33,7 +33,13 @@ function LoginContent() {
   // Verificar si ya hay sesión activa
   useEffect(() => {
     async function checkExistingSession() {
-      trconst { data, error } = await supabase.auth.getSession();
+      try {
+        const timeoutId = setTimeout(() => {
+          console.warn("[Login] Timeout verificando sesión");
+          setCheckingSession(false);
+        }, 5000);
+
+        const { data, error } = await supabase.auth.getSession();
         
         clearTimeout(timeoutId);
 
@@ -45,7 +51,6 @@ function LoginContent() {
 
         if (data?.session) {
           console.log("[Login] Sesión activa, redirigiendo a:", redirectTo);
-          // Ya hay sesión, redirigir inmediatamente
           router.replace(redirectTo);
         } else {
           setCheckingSession(false);
@@ -57,14 +62,7 @@ function LoginContent() {
     }
     
     checkExistingSession();
-  }, [router, redirectTo, supabase
-        console.error("[Login] Error verificando sesión:", err);
-        setCheckingSession(false);
-      }
-    }
-    
-    checkExistingSession();
-  }, [router, redirectTo, searchParams]);
+  }, [router, redirectTo, supabase]);
 
   const handleChange = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
