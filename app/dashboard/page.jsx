@@ -249,7 +249,6 @@ function DashboardContent() {
   const [draftEmail, setDraftEmail] = useState("");
   const [draftPhone, setDraftPhone] = useState("");
   const [draftFullName, setDraftFullName] = useState("");
-  const [draftStatus, setDraftStatus] = useState("online");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
@@ -318,7 +317,6 @@ function DashboardContent() {
       setDraftEmail((p?.email || u.email || "").trim());
       setDraftPhone((p?.phone || "").trim());
       setDraftFullName((p?.full_name || "").trim());
-      setDraftStatus(p?.status || "online");
 
       // Mostrar onboarding si no tiene nombre
       if (!p?.full_name) {
@@ -423,7 +421,6 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     setDraftEmail((profile?.email || user?.email || "").trim());
     setDraftPhone((profile?.phone || "").trim());
     setDraftFullName((profile?.full_name || "").trim());
-    setDraftStatus(profile?.status || "online");
     setEditing(true);
   };
 
@@ -432,7 +429,6 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     setDraftEmail((profile?.email || user?.email || "").trim());
     setDraftPhone((profile?.phone || "").trim());
     setDraftFullName((profile?.full_name || "").trim());
-    setDraftStatus(profile?.status || "online");
   };
 
   const saveProfile = async () => {
@@ -441,51 +437,15 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     setErr("");
 
     try {
-      const email = String(draftEmail || "").trim();
       const phone = String(draftPhone || "").trim();
-      const fullName = String(draftFullName || "").trim();
-      const status = String(draftStatus || "online").trim();
-
-      if (!email) throw new Error("El correo no puede estar vacío.");
-      
-      // Validar nombre (3-40 caracteres)
-      if (fullName && (fullName.length < 3 || fullName.length > 40)) {
-        throw new Error("El nombre debe tener entre 3 y 40 caracteres.");
-      }
-
-      // Validar status
-      const validStatuses = ['online', 'busy', 'away', 'invisible'];
-      if (!validStatuses.includes(status)) {
-        throw new Error("Estado inválido.");
-      }
-
-      // Actualizar perfil vía server action
-      const result = await updateProfile({
-        full_name: fullName,
-        email,
-        phone,
-        status
-      });
+      const result = await updateProfile({ phone });
 
       if (!result.success) {
         throw new Error(result.error);
       }
 
-      // Actualizar state local
       setProfile(result.profile);
-
-      // Si cambió email en la tabla, actualizar auth (puede pedir confirmación)
-      if ((user?.email || "").trim().toLowerCase() !== email.toLowerCase()) {
-        const { error: aErr } = await supabase.auth.updateUser({ email });
-        if (aErr) throw aErr;
-
-        setMsg(
-          "Listo ✅ Se actualizó tu perfil. Si el email cambió, revisa tu bandeja de entrada."
-        );
-      } else {
-        setMsg("Perfil actualizado ✅");
-      }
-
+      setMsg("Perfil actualizado ✅");
       setEditing(false);
     } catch (e) {
       setErr(e?.message || "No se pudo guardar.");
@@ -750,24 +710,12 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                           Nombre completo
                         </div>
 
-                        {!editing ? (
-                          <div className="text-sm font-extrabold text-slate-900 mt-1">
-                            {profile?.full_name || "Sin nombre (completa tu perfil)"}
-                          </div>
-                        ) : (
-                          <input
-                            className="tix-input mt-2"
-                            value={draftFullName}
-                            onChange={(e) => setDraftFullName(e.target.value)}
-                            placeholder="Tu nombre completo"
-                            maxLength="40"
-                          />
-                        )}
-                        {editing && (
-                          <div className="text-xs text-slate-500 mt-1">
-                            {draftFullName.length}/40 caracteres
-                          </div>
-                        )}
+                        <div className="text-sm font-extrabold text-slate-900 mt-1">
+                          {profile?.full_name || "Sin nombre (completa tu perfil)"}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Para cambiar tu nombre abre un ticket en soporte.
+                        </p>
                       </div>
                     </div>
 
@@ -776,28 +724,18 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                       <div className="w-full">
                         <div className="text-xs font-bold text-slate-500">Correo</div>
 
-                        {!editing ? (
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="text-sm font-extrabold text-slate-900 mt-1">
-                              {profile?.email || user?.email || "—"}
-                            </div>
-                            <button
-                              onClick={() => setShowChangeModal('email')}
-                              className="tix-btn-ghost text-xs"
-                              title="Crear solicitud de cambio"
-                            >
-                              Cambiar
-                            </button>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="text-sm font-extrabold text-slate-900 mt-1">
+                            {profile?.email || user?.email || "—"}
                           </div>
-                        ) : (
-                          <input
-                            className="tix-input mt-2"
-                            type="email"
-                            value={draftEmail}
-                            onChange={(e) => setDraftEmail(e.target.value)}
-                            placeholder="correo@ejemplo.com"
-                          />
-                        )}
+                          <button
+                            onClick={() => setShowChangeModal('email')}
+                            className="tix-btn-ghost text-xs"
+                            title="Crear solicitud de cambio"
+                          >
+                            Solicitar cambio
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -808,26 +746,18 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                           RUT
                         </div>
 
-                        {!editing ? (
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="text-sm font-extrabold text-slate-900 mt-1">
-                              {profile?.rut ? formatRutForDisplay(profile.rut) : "—"}
-                            </div>
-                            <button
-                              onClick={() => setShowChangeModal('rut')}
-                              className="tix-btn-ghost text-xs"
-                              title="Crear solicitud de cambio"
-                            >
-                              Cambiar
-                            </button>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="text-sm font-extrabold text-slate-900 mt-1">
+                            {profile?.rut ? formatRutForDisplay(profile.rut) : "—"}
                           </div>
-                        ) : (
-                          <div className="mt-1 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                            <p className="text-xs text-slate-600">
-                              El RUT no se puede editar directamente. Debes solicitar un cambio a través de soporte.
-                            </p>
-                          </div>
-                        )}
+                          <button
+                            onClick={() => setShowChangeModal('rut')}
+                            className="tix-btn-ghost text-xs"
+                            title="Crear solicitud de cambio"
+                          >
+                            Solicitar cambio
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -853,42 +783,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                       </div>
                     </div>
 
-                    {/* Estado */}
-                    {editing && (
-                      <div className="px-5 py-4 flex items-start justify-between gap-4">
-                        <div className="w-full">
-                          <div className="text-xs font-bold text-slate-500">
-                            Estado
-                          </div>
-                          <select
-                            className="tix-input mt-2"
-                            value={draftStatus}
-                            onChange={(e) => setDraftStatus(e.target.value)}
-                          >
-                            <option value="online">🟢 En línea</option>
-                            <option value="busy">🔴 Ocupado</option>
-                            <option value="away">🟡 Ausente</option>
-                            <option value="invisible">⚫ Invisible</option>
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    {!editing && (
-                      <div className="px-5 py-4 flex items-start justify-between gap-4">
-                        <div>
-                          <div className="text-xs font-bold text-slate-500">Estado</div>
-                          <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 rounded-full border border-slate-200 bg-slate-50">
-                            <span className="text-sm">
-                              {profile?.status === 'online' && '🟢 En línea'}
-                              {profile?.status === 'busy' && '🔴 Ocupado'}
-                              {profile?.status === 'away' && '🟡 Ausente'}
-                              {profile?.status === 'invisible' && '⚫ Invisible'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    {/* Estado removido del perfil visible */}
 
                     {/* Categoría (tier de segmentación) */}
                     <div className="px-5 py-4 flex items-start justify-between gap-4">
