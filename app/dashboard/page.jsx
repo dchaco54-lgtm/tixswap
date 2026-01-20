@@ -619,7 +619,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                 )}
 
                 {/* Onboarding pendiente */}
-                {showOnboarding && (
+                {shouldShowOnboarding && !onboardingLoading && (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 mb-6">
                     <div className="text-sm font-bold text-amber-800">
                       ⚠️ Perfil incompleto
