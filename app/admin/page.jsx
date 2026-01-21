@@ -20,6 +20,7 @@ export default function AdminPage() {
   useEffect(() => {
     const init = async () => {
       if (!supabase) {
+        console.error("❌ Supabase no inicializado");
         router.replace("/login");
         return;
       }
@@ -29,9 +30,12 @@ export default function AdminPage() {
       } = await supabase.auth.getUser();
 
       if (!user) {
+        console.error("❌ No hay usuario autenticado");
         router.replace("/login");
         return;
       }
+
+      console.log("📧 Usuario autenticado:", user.email);
 
       // Validar que el usuario sea admin en la BD
       const { data: profile, error: profileError } = await supabase
@@ -40,22 +44,27 @@ export default function AdminPage() {
         .eq("id", user.id)
         .single();
 
-      // Si hay error en la consulta, loguealo pero no bloquees aún
       if (profileError) {
-        console.error("Error cargando perfil:", profileError);
+        console.error("❌ Error cargando perfil:", profileError);
       }
+
+      console.log("👤 Perfil cargado:", { user_type: profile?.user_type, profileError });
 
       // Validar admin: por user_type en BD O por email específico de soporte
       const userType = profile?.user_type ? String(profile.user_type).toLowerCase().trim() : "";
       const isAdminByRole = userType === "admin";
       const isAdminByEmail = user.email?.toLowerCase() === "davidchacon_17@hotmail.com";
 
+      console.log("🔐 Validación:", { userType, isAdminByRole, email: user.email?.toLowerCase(), isAdminByEmail });
+
       if (!isAdminByRole && !isAdminByEmail) {
+        console.error("❌ Usuario NO es admin. Redirigiendo a dashboard.");
+        setCheckingAdmin(false);
         router.replace("/dashboard");
         return;
       }
 
-      console.log("✓ Admin autorizado:", { email: user.email, userType });
+      console.log("✅ Admin autorizado:", { email: user.email, userType });
       setIsAdmin(true);
       setCheckingAdmin(false);
 
@@ -67,7 +76,7 @@ export default function AdminPage() {
           .order("starts_at", { ascending: true });
 
         if (error) {
-          console.error("Error cargando eventos:", error);
+          console.error("❌ Error cargando eventos:", error);
         } else {
           setEvents(data || []);
         }
@@ -124,7 +133,20 @@ export default function AdminPage() {
   }
 
   if (!isAdmin) {
-    return null;
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-red-200 text-sm text-red-700 max-w-md">
+          <p className="font-semibold mb-2">❌ Acceso denegado</p>
+          <p className="mb-4">No tienes permisos de administrador para acceder a esta sección.</p>
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            Volver a mi cuenta
+          </button>
+        </div>
+      </main>
+    );
   }
 
   // Agrupar tickets por estado
