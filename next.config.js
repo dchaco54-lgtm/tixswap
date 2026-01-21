@@ -22,12 +22,10 @@ const nextConfig = {
   
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      // Marcar pdfjs-dist y @zxing como externos (no incluir en bundle)
-      // Ahora se cargan desde CDN en app/sell/file/page.jsx
+      // Marcar pdfjs-dist como externo (cargar desde CDN en runtime)
       config.externals = {
         ...config.externals,
         'pdfjs-dist': 'pdfjs-dist',
-        '@zxing/browser': '@zxing/browser',
       };
     }
     return config;

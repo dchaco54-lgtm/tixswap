@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { BrowserQRCodeReader } from "@zxing/browser";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1";
 
@@ -47,7 +48,7 @@ export default function SellFilePage() {
   const canContinue = useMemo(() => uploaded && !uploading, [uploaded, uploading]);
 
   async function decodeQrFromPdf(pdfFile) {
-    // Cargar pdfjs desde CDN para evitar que webpack intente incluir 'canvas' en el bundle
+    // Cargar pdfjs desde CDN
     const pdfjsLib = window.pdfjsLib || 
       await (async () => {
         if (!window.pdfjsLib) {
@@ -59,20 +60,7 @@ export default function SellFilePage() {
         return window.pdfjsLib;
       })();
 
-    // Cargar @zxing/browser desde CDN
-    const zxing = window.ZXing || 
-      await (async () => {
-        if (!window.ZXing) {
-          const script = document.createElement('script');
-          script.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
-          document.head.appendChild(script);
-          await new Promise(resolve => { script.onload = resolve; });
-        }
-        return window.ZXing;
-      })();
-
     const { getDocument } = pdfjsLib;
-    const { BrowserQRCodeReader } = zxing;
 
     // Configurar worker
     try {
@@ -91,6 +79,7 @@ export default function SellFilePage() {
 
     await page.render({ canvasContext: ctx, viewport }).promise;
 
+    // @zxing/browser se importó al inicio del archivo
     const reader = new BrowserQRCodeReader();
     const result = await reader.decodeFromCanvas(canvas).catch(() => null);
     return result?.getText?.() || result?.text || null;
