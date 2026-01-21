@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { BrowserQRCodeReader } from "@zxing/browser";
+import * as pdfjs from "pdfjs-dist";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1";
 
@@ -48,41 +49,33 @@ export default function SellFilePage() {
   const canContinue = useMemo(() => uploaded && !uploading, [uploaded, uploading]);
 
   async function decodeQrFromPdf(pdfFile) {
-    // Cargar pdfjs desde CDN
-    const pdfjsLib = window.pdfjsLib || 
-      await (async () => {
-        if (!window.pdfjsLib) {
-          const script = document.createElement('script');
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-          document.head.appendChild(script);
-          await new Promise(resolve => { script.onload = resolve; });
-        }
-        return window.pdfjsLib;
-      })();
-
-    const { getDocument } = pdfjsLib;
-
-    // Configurar worker
     try {
-      getDocument.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-    } catch {}
+      // pdfjs ya está importado arriba
+      const { getDocument } = pdfjs;
+      
+      // Configurar worker
+      getDocument.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
-    const buf = await pdfFile.arrayBuffer();
-    const pdf = await getDocument({ data: buf }).promise;
-    const page = await pdf.getPage(1);
+      const buf = await pdfFile.arrayBuffer();
+      const pdf = await getDocument({ data: buf }).promise;
+      const page = await pdf.getPage(1);
 
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
 
-    await page.render({ canvasContext: ctx, viewport }).promise;
+      await page.render({ canvasContext: ctx, viewport }).promise;
 
-    // @zxing/browser se importó al inicio del archivo
-    const reader = new BrowserQRCodeReader();
-    const result = await reader.decodeFromCanvas(canvas).catch(() => null);
-    return result?.getText?.() || result?.text || null;
+      // @zxing/browser ya está importado arriba
+      const reader = new BrowserQRCodeReader();
+      const result = await reader.decodeFromCanvas(canvas).catch(() => null);
+      return result?.getText?.() || result?.text || null;
+    } catch (err) {
+      console.error("Error en decodeQrFromPdf:", err);
+      return null;
+    }
   }
 
   async function handleValidateAndUpload() {

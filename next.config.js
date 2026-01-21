@@ -22,10 +22,14 @@ const nextConfig = {
   
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      // Marcar pdfjs-dist como externo (cargar desde CDN en runtime)
-      config.externals = {
-        ...config.externals,
-        'pdfjs-dist': 'pdfjs-dist',
+      // pdfjs-dist intenta importar 'canvas' (módulo Node.js) durante webpack bundling
+      // pero el navegador usa canvas nativo. Ignorar en el bundle del cliente.
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        canvas: false,
+        fs: false,
+        path: false,
+        stream: false,
       };
     }
     return config;
