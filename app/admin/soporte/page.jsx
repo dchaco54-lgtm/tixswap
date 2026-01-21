@@ -4,14 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-
-const STATUS = [
-  { v: "submitted", l: "Enviado" },
-  { v: "in_review", l: "En revisión" },
-  { v: "waiting_user", l: "Pendiente de antecedentes" },
-  { v: "rejected", l: "Rechazado" },
-  { v: "resolved", l: "Finalizado" },
-];
+import { statusLabel, statusBadgeClass, TICKET_STATUS, getNextValidStatuses } from "@/lib/support/status";
 
 const CATEGORY_LABEL = (c) => {
   if (c === "soporte") return "Soporte general";
@@ -19,24 +12,10 @@ const CATEGORY_LABEL = (c) => {
   if (c === "disputa_venta") return "Disputa por venta";
   if (c === "reclamo") return "Reclamo";
   if (c === "sugerencia") return "Sugerencia";
+  if (c === "cambio_datos") return "Cambio de datos";
   if (c === "otro") return "Otro";
   return c || "—";
 };
-
-function pillClass(status) {
-  const base = "px-3 py-1 rounded-full text-xs font-semibold border";
-  if (status === "resolved")
-    return base + " bg-emerald-50 text-emerald-700 border-emerald-200";
-  if (status === "rejected")
-    return base + " bg-rose-50 text-rose-700 border-rose-200";
-  if (status === "waiting_user")
-    return base + " bg-amber-50 text-amber-800 border-amber-200";
-  if (status === "in_review")
-    return base + " bg-blue-50 text-blue-700 border-blue-200";
-  if (status === "submitted")
-    return base + " bg-slate-50 text-slate-700 border-slate-200";
-  return base + " bg-slate-50 text-slate-700 border-slate-200";
-}
 
 function fmtCL(dt) {
   if (!dt) return "—";
@@ -104,11 +83,17 @@ export default function AdminSupportConsole() {
 
     const { data: prof } = await supabase
       .from("profiles")
-      .select("user_type")
+      .select("app_role, user_type, email")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (prof?.user_type !== "admin") return { ok: false };
+    // Verificar app_role (prioritario) o user_type (fallback) o email hardcoded
+    const isAdmin = 
+      prof?.app_role === 'admin' ||
+      prof?.user_type === 'admin' ||
+      prof?.email?.toLowerCase() === 'davidchacon_17@hotmail.com';
+
+    if (!isAdmin) return { ok: false };
     return { ok: true };
   };
 
@@ -427,8 +412,8 @@ export default function AdminSupportConsole() {
                       <div className="text-xs font-semibold text-slate-700">
                         TS-{t.ticket_number}
                       </div>
-                      <span className={pillClass(t.status)}>
-                        {STATUS.find((x) => x.v === t.status)?.l || t.status}
+                      <span className={statusBadgeClass(t.status)}>
+                        {statusLabel(t.status)}
                       </span>
                     </div>
 
@@ -476,9 +461,8 @@ export default function AdminSupportConsole() {
                     </p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className={pillClass(selected.status)}>
-                        {STATUS.find((x) => x.v === selected.status)?.l ||
-                          selected.status}
+                      <span className={statusBadgeClass(selected.status)}>
+                        {statusLabel(selected.status)}
                       </span>
                       <span className="text-xs text-slate-500">
                         {CATEGORY_LABEL(selected.category)}
