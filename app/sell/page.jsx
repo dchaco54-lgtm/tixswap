@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation"; // ✅ agregado (solo lógica)
 import { supabase } from "@/lib/supabaseClient";
+import BreadcrumbBar from "@/app/components/BreadcrumbBar";
 import { calculateSellerFee, calculateSellerPayout, formatPrice } from "@/lib/fees";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1"; // ✅ agregado (solo lógica)
@@ -268,15 +269,13 @@ export default function SellPage() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
-      <div className="mx-auto max-w-5xl">
-        {/* Stepper (sólido) */}
-        <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
-          <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-8 py-10">
-            {/* ✅ Link texto arriba, blanco y chico (como tú querías) */}
-            <a href="/" className="inline-flex items-center gap-2 text-sm font-medium text-white/90 hover:text-white">
-              <span aria-hidden>←</span>
-              Volver al inicio
+    <>
+      <BreadcrumbBar items={[{ label: 'Vender', href: '#' }]} />
+      <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
+        <div className="mx-auto max-w-5xl">
+          {/* Stepper (sólido) */}
+          <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
+            <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-8 py-10">
             </a>
 
             <h1 className="mt-3 text-4xl font-bold text-white">Vender entrada</h1>
@@ -663,5 +662,6 @@ export default function SellPage() {
         </div>
       </div>
     </div>
+    </>
   );
 }
