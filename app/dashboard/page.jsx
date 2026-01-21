@@ -1007,8 +1007,6 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                 </p>
               </div>
             )}
-          </div>
-        </div>
       </div>
 
       {/* =======================

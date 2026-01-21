@@ -276,9 +276,7 @@ export default function SellPage() {
           {/* Stepper (sólido) */}
           <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">
             <div className="bg-gradient-to-r from-blue-500 to-purple-500 px-8 py-10">
-            </a>
-
-            <h1 className="mt-3 text-4xl font-bold text-white">Vender entrada</h1>
+              <h1 className="mt-3 text-4xl font-bold text-white">Vender entrada</h1>
 
             <div className="mt-7 flex items-center">
               {steps.map((s, i) => {
