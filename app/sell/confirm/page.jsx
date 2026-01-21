@@ -101,22 +101,22 @@ export default function SellConfirmPage() {
         if (parsed?.saleType) setSaleType(parsed.saleType);
         if (parsed?.autoEmergencyAuction) setAutoEmergencyAuction(!!parsed.autoEmergencyAuction);
 
-        // Obtener rol del usuario
+        // Obtener tipo de cuenta del usuario (user_type)
         try {
           const { data: { user } } = await supabase.auth.getUser();
           if (user) {
             const { data: profile } = await supabase
               .from('profiles')
-              .select('role')
+              .select('user_type')
               .eq('id', user.id)
               .maybeSingle();
             
-            if (mounted && profile?.role) {
-              setUserRole(profile.role);
+            if (mounted) {
+              setUserRole(profile?.user_type || 'standard');
             }
           }
         } catch (err) {
-          console.error('Error obteniendo rol del usuario:', err);
+          console.error('Error obteniendo user_type del usuario:', err);
         }
       } catch {
         if (mounted) {
@@ -523,6 +523,20 @@ export default function SellConfirmPage() {
                     </p>
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Información de pago y Wallet */}
+            <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5">
+              <h3 className="text-lg font-semibold text-slate-900">Antes de publicar</h3>
+              <ul className="mt-2 text-sm text-slate-700 space-y-1">
+                <li>• Pago al vendedor: 3 a 5 días hábiles post evento.</li>
+                <li>• Configura tu Wallet para recibir pagos. Si no la configuras, el dinero quedará pendiente hasta que la actives.</li>
+                <li>• Publica solo tickets reales y no duplicados.</li>
+                <li>• Si la entrada es nominada, habrá chat comprador↔vendedor para coordinar la nominación.</li>
+              </ul>
+              <div className="mt-3">
+                <a href="/wallet" className="tix-btn-secondary">Configurar Wallet</a>
               </div>
             </div>
 

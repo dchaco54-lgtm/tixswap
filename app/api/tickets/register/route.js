@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
+import pdfParse from "pdf-parse";
+import { detectProviderAndParse, validateParsed } from "@/lib/ticket-parsers";
 
 export const runtime = "nodejs";
 
@@ -43,9 +45,15 @@ export async function POST(req) {
     const file = formData.get("file");
     const sellerId = formData.get("sellerId") || null;
     const isNominada = (formData.get("isNominada") || "false") === "true";
+    const qrPayload = formData.get("qr_payload") || "";
 
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Archivo inválido" }, { status: 400 });
+    }
+
+    const name = file.name || "ticket.pdf";
+    if (!name.toLowerCase().endsWith(".pdf")) {
+      return NextResponse.json({ error: "El archivo debe tener extensión .pdf" }, { status: 400 });
     }
 
     const maxBytes = 8 * 1024 * 1024; // 8MB
@@ -61,10 +69,72 @@ export async function POST(req) {
       return NextResponse.json({ error: "El archivo no parece ser un PDF válido." }, { status: 400 });
     }
 
+    // Extraer texto del PDF (para validar que no sea imagen escaneada)
+    let parsedPdf;
+    try {
+      parsedPdf = await pdfParse(bytes);
+    } catch (err) {
+      return NextResponse.json({ error: "No pudimos leer tu ticket, sube el PDF original descargado del proveedor (no escaneado)." }, { status: 400 });
+    }
+
+    const text = String(parsedPdf?.text || "");
+    if (text.replace(/\s+/g, " ").trim().length < 200) {
+      return NextResponse.json({ error: "No pudimos leer tu ticket, sube el PDF original descargado del proveedor (no escaneado)." }, { status: 400 });
+    }
+
+    // Detectar provider y parsear
+    const { provider, parsed } = detectProviderAndParse(text);
+    if (!provider) {
+      return NextResponse.json({ error: "Proveedor no soportado aún (por ahora solo PuntoTicket)." }, { status: 400 });
+    }
+
+    const validationErrors = validateParsed(provider, parsed);
+    if (validationErrors.length) {
+      return NextResponse.json({ error: "No se pudo validar el PDF", details: validationErrors.join("; ") }, { status: 400 });
+    }
+
+    // Validar QR payload (MVP)
+    const qrStr = String(qrPayload || "");
+    if (!qrStr || qrStr.length < 6) {
+      return NextResponse.json({ error: "No pudimos leer el QR. Sube el PDF original (descargado), sin capturas/escaneos." }, { status: 400 });
+    }
+
+    if (parsed.ticket_number && !qrStr.includes(parsed.ticket_number)) {
+      return NextResponse.json({ error: "PDF posiblemente alterado: el QR no coincide con los datos del ticket." }, { status: 400 });
+    }
+
+    // Dedupe principal por provider + ticket_number
+    if (parsed.ticket_number) {
+      const { data: dupe, error: dupeErr } = await supabase
+        .from("ticket_uploads")
+        .select("id, storage_bucket, storage_path")
+        .eq("provider", provider)
+        .eq("ticket_number", parsed.ticket_number)
+        .maybeSingle();
+
+      if (dupeErr) {
+        return NextResponse.json({ error: "DB error (dedupe provider+ticket)", details: dupeErr.message }, { status: 500 });
+      }
+
+      if (dupe?.id) {
+        const bucket = dupe.storage_bucket || "ticket-pdfs";
+        const path = dupe.storage_path;
+        const viewUrl = path ? await signViewUrl(supabase, bucket, path) : null;
+        return NextResponse.json(
+          {
+            error: "DUPLICATE",
+            message: "Este ticket ya fue subido antes.",
+            existing: { id: dupe.id, filePath: path || null, viewUrl },
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // Hash dedupe (adicional)
     const hash = crypto.createHash("sha256").update(bytes).digest("hex");
     const hashCol = await detectHashColumn(supabase);
 
-    // Dedupe
     const { data: existing, error: findErr } = await supabase
       .from("ticket_uploads")
       .select(`id, storage_bucket, storage_path, ${hashCol}`)
@@ -79,17 +149,12 @@ export async function POST(req) {
       const bucket = existing.storage_bucket || "ticket-pdfs";
       const path = existing.storage_path;
       const viewUrl = path ? await signViewUrl(supabase, bucket, path) : null;
-
       return NextResponse.json(
         {
           error: "DUPLICATE",
           message: "Entrada ya subida en Tixswap",
           sha256: hash,
-          existing: {
-            id: existing.id,
-            filePath: path || null,
-            viewUrl,
-          },
+          existing: { id: existing.id, filePath: path || null, viewUrl },
         },
         { status: 409 }
       );
@@ -97,7 +162,7 @@ export async function POST(req) {
 
     // Storage upload
     const bucket = "ticket-pdfs";
-    const safeName = (file.name || "ticket.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeName = name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const storagePath = `tickets/${hash}/${Date.now()}_${safeName}`;
 
     const { error: uploadErr } = await supabase.storage.from(bucket).upload(storagePath, bytes, {
@@ -114,16 +179,38 @@ export async function POST(req) {
       [hashCol]: hash,
       storage_bucket: bucket,
       storage_path: storagePath,
-      original_name: file.name || null,
+      original_name: name,
       mime_type: "application/pdf",
       file_size: bytes.length,
       status: "uploaded",
     };
 
+    const toSet = {
+      provider: provider,
+      ticket_number: parsed.ticket_number,
+      order_number: parsed.order_number,
+      event_name: parsed.event_name,
+      event_datetime: parsed.event_datetime_iso,
+      venue: parsed.venue,
+      sector: parsed.sector,
+      category: parsed.category,
+      attendee_name: parsed.attendee_name,
+      attendee_rut: parsed.attendee_rut,
+      producer_name: parsed.producer_name,
+      producer_rut: parsed.producer_rut,
+      qr_payload: qrStr,
+      validation_status: "validated",
+      validation_reason: null,
+    };
+
+    for (const [k, v] of Object.entries(toSet)) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await columnExists(supabase, "ticket_uploads", k)) insertPayload[k] = v;
+    }
+
     if (sellerId && (await columnExists(supabase, "ticket_uploads", "seller_id"))) {
       insertPayload.seller_id = sellerId;
     }
-
     if (await columnExists(supabase, "ticket_uploads", "is_nominada")) {
       insertPayload.is_nominada = isNominada;
     }
@@ -149,6 +236,16 @@ export async function POST(req) {
       viewUrl,
       createdAt: inserted.created_at || null,
       isNominada,
+      summary: {
+        provider,
+        ticket_number: parsed.ticket_number,
+        order_number: parsed.order_number,
+        event_name: parsed.event_name,
+        event_datetime_iso: parsed.event_datetime_iso,
+        venue: parsed.venue,
+        sector: parsed.sector,
+        category: parsed.category,
+      },
     });
   } catch (e) {
     return NextResponse.json({ error: "Server error", details: e?.message || String(e) }, { status: 500 });

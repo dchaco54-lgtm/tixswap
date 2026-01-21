@@ -14,7 +14,10 @@
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "transbank-sdk": "^6.1.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^3.11.174",
+    "@zxing/browser": "^0.1.3"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.14",

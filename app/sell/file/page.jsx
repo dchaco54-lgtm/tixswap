@@ -19,6 +19,8 @@ export default function SellFilePage() {
 
   const [viewUrl, setViewUrl] = useState(null);
   const [sha256, setSha256] = useState(null);
+  const [qrPayload, setQrPayload] = useState("");
+  const [summary, setSummary] = useState(null);
 
   const [error, setError] = useState("");
 
@@ -34,6 +36,7 @@ export default function SellFilePage() {
         setUploaded(true);
         setViewUrl(parsed?.ticketUpload?.viewUrl || null);
         setSha256(parsed?.ticketUpload?.sha256 || null);
+        setSummary(parsed?.ticketUpload?.summary || null);
       }
     } catch {
       // noop
@@ -43,10 +46,40 @@ export default function SellFilePage() {
   const canValidate = useMemo(() => !!file && !uploading && !uploaded, [file, uploading, uploaded]);
   const canContinue = useMemo(() => uploaded && !uploading, [uploaded, uploading]);
 
+  async function decodeQrFromPdf(pdfFile) {
+    const [{ getDocument }, { BrowserQRCodeReader }] = await Promise.all([
+      import("pdfjs-dist/build/pdf"),
+      import("@zxing/browser"),
+    ]);
+
+    // Configurar worker en runtime del navegador (opcional)
+    try {
+      // eslint-disable-next-line no-underscore-dangle
+      getDocument.GlobalWorkerOptions.workerSrc = "//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    } catch {}
+
+    const buf = await pdfFile.arrayBuffer();
+    const pdf = await getDocument({ data: buf }).promise;
+    const page = await pdf.getPage(1);
+
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const reader = new BrowserQRCodeReader();
+    const result = await reader.decodeFromCanvas(canvas).catch(() => null);
+    return result?.getText?.() || result?.text || null;
+  }
+
   async function handleValidateAndUpload() {
     setError("");
     setViewUrl(null);
     setSha256(null);
+    setSummary(null);
 
     if (!file) return setError("Selecciona un PDF primero.");
     if (file.type !== "application/pdf") return setError("El archivo debe ser PDF.");
@@ -55,6 +88,15 @@ export default function SellFilePage() {
     setUploading(true);
 
     try {
+      // Intentar leer el QR del PDF antes de enviar
+      const qr = await decodeQrFromPdf(file);
+      if (!qr || qr.length < 6) {
+        setError("No pudimos leer el QR. Sube el PDF original (descargado), sin capturas/escaneos.");
+        setUploading(false);
+        return;
+      }
+      setQrPayload(qr);
+
       // sacar user id si existe sesión
       let sellerId = null;
       try {
@@ -65,6 +107,7 @@ export default function SellFilePage() {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("isNominada", String(isNominada));
+      fd.append("qr_payload", qr);
       if (sellerId) fd.append("sellerId", sellerId);
 
       const res = await fetch("/api/tickets/register", { method: "POST", body: fd });
@@ -73,7 +116,7 @@ export default function SellFilePage() {
       if (!res.ok) {
         // duplicado
         if (res.status === 409 || data?.error === "DUPLICATE") {
-          setError(data?.message || "Entrada ya subida en Tixswap");
+          setError(data?.message || "Este ticket ya fue subido antes.");
           if (data?.existing?.viewUrl) setViewUrl(data.existing.viewUrl);
           if (data?.sha256) setSha256(data.sha256);
           return;
@@ -90,6 +133,7 @@ export default function SellFilePage() {
       setUploaded(true);
       setViewUrl(data?.viewUrl || null);
       setSha256(data?.sha256 || null);
+      setSummary(data?.summary || null);
 
       const nextDraft = {
         ...(draft || {}),
@@ -101,6 +145,7 @@ export default function SellFilePage() {
           filePath: data?.filePath || null,
           viewUrl: data?.viewUrl || null,
           createdAt: data?.createdAt || null,
+          summary: data?.summary || null,
         },
       };
 
@@ -120,6 +165,14 @@ export default function SellFilePage() {
 
   function handleBack() {
     router.push("/sell");
+  }
+
+  function handleReplace() {
+    setUploaded(false);
+    setViewUrl(null);
+    setSha256(null);
+    setSummary(null);
+    setFile(null);
   }
 
   return (
@@ -188,11 +241,25 @@ export default function SellFilePage() {
                     setUploaded(false);
                     setViewUrl(null);
                     setSha256(null);
+                    setSummary(null);
                     setFile(e.target.files?.[0] || null);
                   }}
-                  disabled={uploading}
+                  disabled={uploading || uploaded}
                 />
                 <div className="mt-2 text-xs text-slate-500">Máx 8MB. Validamos PDF real + anti-duplicado.</div>
+
+                {uploaded ? (
+                  <div className="mt-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                    Ticket ya cargado ✅
+                  </div>
+                ) : null}
+
+                {summary ? (
+                  <div className="mt-3 text-sm text-slate-700">
+                    <div className="font-semibold">{summary.event_name || "Evento"}</div>
+                    <div className="text-xs text-slate-500">{summary.venue || "Recinto"} · {summary.sector || "Sector"}</div>
+                  </div>
+                ) : null}
 
                 {viewUrl ? (
                   <div className="mt-3 text-sm">
@@ -200,6 +267,14 @@ export default function SellFilePage() {
                       Ver PDF (link temporal)
                     </a>
                     {sha256 ? <div className="mt-1 text-xs text-slate-500">Hash: {sha256.slice(0, 12)}…</div> : null}
+                  </div>
+                ) : null}
+
+                {uploaded ? (
+                  <div className="mt-3">
+                    <button type="button" className="tix-btn-secondary" onClick={handleReplace}>
+                      Reemplazar PDF
+                    </button>
                   </div>
                 ) : null}
               </div>
