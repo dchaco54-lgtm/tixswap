@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import MobileNavMenu from "./MobileNavMenu";
 
 export default function Header() {
   const router = useRouter();
@@ -107,36 +108,45 @@ export default function Header() {
 
         {/* Auth */}
         {!loadingUser && (
-          <>
-            {user ? (
-              <div className="flex items-center gap-2">
-                <span className="hidden sm:inline text-sm text-slate-600">
-                  Hola, {displayName}
-                </span>
+          <div className="flex items-center gap-2">
+            <>
+              {user ? (
+                <>
+                  <span className="hidden sm:inline text-sm text-slate-600">
+                    Hola, {displayName}
+                  </span>
 
-                <Link href="/dashboard" className="tix-btn-secondary">
-                  Ver mi cuenta
-                </Link>
+                  <Link href="/dashboard" className="tix-btn-secondary">
+                    Ver mi cuenta
+                  </Link>
 
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="tix-btn-primary"
-                >
-                  Cerrar sesión
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Link href="/login" className="tix-btn-secondary">
-                  Iniciar sesión
-                </Link>
-                <Link href="/register" className="tix-btn-primary">
-                  Crear cuenta
-                </Link>
-              </div>
-            )}
-          </>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="tix-btn-primary hidden sm:inline-block"
+                  >
+                    Cerrar sesión
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link href="/login" className="tix-btn-secondary hidden sm:inline-block">
+                    Iniciar sesión
+                  </Link>
+                  <Link href="/register" className="tix-btn-primary hidden sm:inline-block">
+                    Crear cuenta
+                  </Link>
+                </>
+              )}
+            </>
+
+            {/* Mobile menu */}
+            <MobileNavMenu
+              user={user}
+              displayName={displayName}
+              onLogout={handleLogout}
+            />
+          </div>
         )}
       </div>
     </header>
