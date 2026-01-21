@@ -16,92 +16,128 @@ export default function AdminPage() {
   const [tickets, setTickets] = useState([]);
   const [loadingTickets, setLoadingTickets] = useState(true);
 
-  // SOLO soporte@tixswap.cl entra acá
+  // VALIDAR ADMIN EN LA BD
   useEffect(() => {
-    const init = async () => {
-      if (!supabase) {
-        console.error("❌ Supabase no inicializado");
-        router.replace("/login");
-        return;
-      }
+    const checkAdminStatus = async () => {
+      try {
+        console.log("🔍 INICIANDO VALIDACIÓN DE ADMIN...");
+        
+        if (!supabase) {
+          console.error("❌ Supabase no inicializado");
+          setCheckingAdmin(false);
+          router.replace("/login");
+          return;
+        }
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        // Obtener usuario autenticado
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error("❌ Error obteniendo sesión:", sessionError);
+          setCheckingAdmin(false);
+          router.replace("/login");
+          return;
+        }
 
-      if (!user) {
-        console.error("❌ No hay usuario autenticado");
-        router.replace("/login");
-        return;
-      }
+        const user = sessionData?.session?.user;
 
-      console.log("📧 Usuario autenticado:", user.email);
+        if (!user) {
+          console.error("❌ No hay usuario autenticado en sesión");
+          setCheckingAdmin(false);
+          router.replace("/login");
+          return;
+        }
 
-      // Validar que el usuario sea admin en la BD
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("user_type")
-        .eq("id", user.id)
-        .single();
+        console.log("✅ Usuario autenticado:", user.email);
 
-      if (profileError) {
-        console.error("❌ Error cargando perfil:", profileError);
-      }
+        // Obtener perfil del usuario
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, user_type, email")
+          .eq("id", user.id)
+          .single();
 
-      console.log("👤 Perfil cargado:", { user_type: profile?.user_type, profileError });
+        if (profileError) {
+          console.error("❌ Error cargando perfil:", profileError);
+          console.log("   (Intentando con email como fallback)");
+        }
 
-      // Validar admin: por user_type en BD O por email específico de soporte
-      const userType = profile?.user_type ? String(profile.user_type).toLowerCase().trim() : "";
-      const isAdminByRole = userType === "admin";
-      const isAdminByEmail = user.email?.toLowerCase() === "davidchacon_17@hotmail.com";
+        const profileUserType = profile?.user_type ? String(profile.user_type).toLowerCase().trim() : "";
+        const userEmail = user.email?.toLowerCase() || "";
 
-      console.log("🔐 Validación:", { userType, isAdminByRole, email: user.email?.toLowerCase(), isAdminByEmail });
+        console.log("📊 Datos del perfil:", {
+          user_id: user.id,
+          user_type_raw: profile?.user_type,
+          user_type_normalized: profileUserType,
+          email: userEmail,
+          profileError: profileError?.message || "ninguno"
+        });
 
-      if (!isAdminByRole && !isAdminByEmail) {
-        console.error("❌ Usuario NO es admin. Redirigiendo a dashboard.");
+        // Validación: debe ser admin por rol O por email conocido
+        const isAdminByRole = profileUserType === "admin";
+        const isAdminByEmail = userEmail === "davidchacon_17@hotmail.com";
+
+        console.log("🔐 Resultado de validación:", {
+          isAdminByRole,
+          isAdminByEmail,
+          esAdmin: isAdminByRole || isAdminByEmail
+        });
+
+        if (!isAdminByRole && !isAdminByEmail) {
+          console.warn("⚠️ ACCESO DENEGADO: Usuario no es admin");
+          console.warn(`   user_type: "${profileUserType}" (esperado: "admin")`);
+          console.warn(`   email: "${userEmail}"`);
+          setCheckingAdmin(false);
+          // No hacer redirect inmediato, dejar que la UI muestre el error
+          setIsAdmin(false);
+          return;
+        }
+
+        console.log("✅✅✅ ADMIN AUTORIZADO - Cargando panel...");
+        setIsAdmin(true);
         setCheckingAdmin(false);
-        router.replace("/dashboard");
-        return;
-      }
 
-      console.log("✅ Admin autorizado:", { email: user.email, userType });
-      setIsAdmin(true);
-      setCheckingAdmin(false);
+        // Cargar eventos
+        try {
+          const { data, error } = await supabase
+            .from("events")
+            .select("id, title, starts_at, venue, city")
+            .order("starts_at", { ascending: true });
 
-      // Cargar eventos
-      try {
-        const { data, error } = await supabase
-          .from("events")
-          .select("id, title, starts_at, venue, city")
-          .order("starts_at", { ascending: true });
-
-        if (error) {
-          console.error("❌ Error cargando eventos:", error);
-        } else {
-          setEvents(data || []);
+          if (error) {
+            console.error("❌ Error cargando eventos:", error);
+          } else {
+            console.log("✅ Eventos cargados:", data?.length || 0);
+            setEvents(data || []);
+          }
+        } finally {
+          setLoadingEvents(false);
         }
-      } finally {
-        setLoadingEvents(false);
-      }
 
-      // Cargar tickets de soporte
-      try {
-        const { data, error } = await supabase
-          .from("support_tickets")
-          .select("id, email, subject, status, created_at")
-          .order("created_at", { ascending: false });
+        // Cargar tickets de soporte
+        try {
+          const { data, error } = await supabase
+            .from("support_tickets")
+            .select("id, email, subject, status, created_at")
+            .order("created_at", { ascending: false });
 
-        if (error) {
-          console.error("Error cargando tickets:", error);
-        } else {
-          setTickets(data || []);
+          if (error) {
+            console.error("❌ Error cargando tickets:", error);
+          } else {
+            console.log("✅ Tickets cargados:", data?.length || 0);
+            setTickets(data || []);
+          }
+        } finally {
+          setLoadingTickets(false);
         }
-      } finally {
-        setLoadingTickets(false);
+      } catch (err) {
+        console.error("❌ Error general en checkAdminStatus:", err);
+        setCheckingAdmin(false);
+        setIsAdmin(false);
       }
     };
 
-    init();
+    checkAdminStatus();
   }, [router]);
 
   // Redirigir a usuarios
