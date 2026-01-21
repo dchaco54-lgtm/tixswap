@@ -1,7 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useProfile } from '@/hooks/useProfile';
 import { normalizeRole, USER_TYPES } from '@/lib/roles';
 import { useEffect, useMemo, useState } from 'react';
@@ -14,6 +13,7 @@ import { useEffect, useMemo, useState } from 'react';
  * Marca activa la ruta actual
  */
 export default function DashboardSidebar() {
+  const router = useRouter();
   const pathname = usePathname();
   const { profile } = useProfile();
   const [mounted, setMounted] = useState(false);
@@ -51,6 +51,11 @@ export default function DashboardSidebar() {
     return false;
   };
 
+  const handleNavigate = (href) => {
+    console.log('🔗 Navegando a:', href);
+    router.push(href);
+  };
+
   if (!mounted) {
     return (
       <aside className="w-64 bg-white rounded-2xl shadow-sm p-4 h-fit">
@@ -72,11 +77,11 @@ export default function DashboardSidebar() {
         {menuItems.map((item) => {
           const active = isActive(item.href);
           return (
-            <Link
+            <button
               key={item.href}
-              href={item.href}
+              onClick={() => handleNavigate(item.href)}
               className={`
-                block px-4 py-2.5 rounded-lg font-medium text-sm transition
+                w-full text-left px-4 py-2.5 rounded-lg font-medium text-sm transition
                 ${active
                   ? 'bg-blue-600 text-white'
                   : 'text-slate-700 hover:bg-slate-100'
@@ -85,19 +90,19 @@ export default function DashboardSidebar() {
             >
               <span className="mr-2">{item.icon}</span>
               {item.label}
-            </Link>
+            </button>
           );
         })}
       </nav>
 
       {/* Link rápido al home */}
       <hr className="my-4 border-slate-200" />
-      <Link
-        href="/"
-        className="block px-4 py-2 rounded-lg font-medium text-sm text-slate-600 hover:bg-slate-100 transition"
+      <button
+        onClick={() => handleNavigate('/')}
+        className="w-full text-left px-4 py-2 rounded-lg font-medium text-sm text-slate-600 hover:bg-slate-100 transition"
       >
         🏠 Volver a Inicio
-      </Link>
+      </button>
     </aside>
   );
 }
