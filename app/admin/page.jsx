@@ -36,8 +36,18 @@ export default function AdminPage() {
       const isAdminByRole = userType === "admin";
       const isAdminByEmail = user.email?.toLowerCase() === "davidchacon_17@hotmail.com";
 
+      console.log("🔐 Validación Admin:", { 
+        user_type: profile?.user_type, 
+        userType, 
+        isAdminByRole, 
+        email: user.email, 
+        isAdminByEmail 
+      });
+
       if (!isAdminByRole && !isAdminByEmail) {
-        router.replace("/dashboard");
+        // NO redirigir, dejar que se muestre el mensaje de error
+        setIsAdmin(false);
+        setCheckingAdmin(false);
         return;
       }
 
