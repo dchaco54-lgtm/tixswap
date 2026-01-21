@@ -21,8 +21,8 @@ const nextConfig = {
   },
   
   webpack: (config, { isServer }) => {
-    // Ignorar módulos Node.js que pdfjs-dist intenta importar en cliente
     if (!isServer) {
+      // Ignorar módulos Node.js en cliente
       config.resolve.fallback = {
         ...config.resolve.fallback,
         canvas: false,
@@ -34,18 +34,14 @@ const nextConfig = {
         crypto: false,
       };
       
-      // Ignorar imports de canvas dentro de pdfjs-dist
-      config.module = config.module || {};
-      config.module.rules = config.module.rules || [];
-      config.module.rules.push({
-        test: /pdfjs-dist/,
-        resolve: {
-          fallback: {
-            canvas: false,
-            encoding: false,
-          }
-        }
-      });
+      // IgnorePlugin: Ignorar 'canvas' cuando lo importe pdfjs-dist
+      const { IgnorePlugin } = require('webpack');
+      config.plugins.push(
+        new IgnorePlugin({
+          resourceRegExp: /^canvas$/,
+          contextRegExp: /pdfjs-dist/,
+        })
+      );
     }
     return config;
   },
