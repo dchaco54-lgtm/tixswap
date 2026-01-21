@@ -81,13 +81,13 @@ export async function GET(req) {
     // Perfil actual (para upgrade automático)
     const { data: prof, error: profErr } = await admin
       .from("profiles")
-      .select("role")
+      .select("user_type")
       .eq("id", userId)
       .maybeSingle();
 
     if (profErr) throw profErr;
 
-    const roleRaw = String(prof?.role || "").trim().toLowerCase();
+    const roleRaw = String(prof?.user_type || "").trim().toLowerCase();
     const isPrivileged = roleRaw === "admin" || roleRaw === "seller";
     const currentRoleKey = isPrivileged ? roleRaw : normalizeRole(roleRaw);
 
