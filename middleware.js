@@ -21,7 +21,7 @@ export async function middleware(req) {
     return NextResponse.redirect(redirectUrl);
   }
   
-  // Si es admin route, verificar que tenga user_type admin
+  // Si es admin route, verificar que tenga user_type admin O email específico
   if (req.nextUrl.pathname.startsWith('/admin') && session) {
     const userType =
       session.user?.user_metadata?.user_type ||
@@ -29,10 +29,17 @@ export async function middleware(req) {
       session.user?.user_metadata?.role || // fallback legacy
       session.user?.app_metadata?.role;
 
-    if (userType !== 'admin') {
+    const userEmail = session.user?.email?.toLowerCase();
+    const isAdminByEmail = userEmail === 'davidchacon_17@hotmail.com';
+
+    // Permitir acceso si es admin por tipo O por email
+    if (userType !== 'admin' && !isAdminByEmail) {
+      console.log('🚫 Middleware bloqueando acceso admin:', { userType, userEmail, isAdminByEmail });
       // Redirigir a dashboard si no es admin
       return NextResponse.redirect(new URL('/dashboard', req.url));
     }
+    
+    console.log('✅ Middleware permitiendo acceso admin:', { userType, userEmail, isAdminByEmail });
   }
   
   return res;
