@@ -236,12 +236,9 @@ function SoporteContent() {
                   Respuesta en menos de 24 horas hábiles
                 </p>
               </div>
-            </divREAR */}
-          <div className="tix-card p-6">
-            <h2 className="text-xl font-extrabold text-slate-900">
-              Crear ticket
-            </h2>
-            <p className="text-slate-600 mt-1">
+            </div>
+
+            <p className="text-slate-600 mt-4">
               Mientras más claro, más rápido lo resolvemos 😉
             </p>
 
