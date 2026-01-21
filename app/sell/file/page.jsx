@@ -49,31 +49,63 @@ export default function SellFilePage() {
 
   async function decodeQrFromPdf(pdfFile) {
     try {
-      // Dynamic import de pdfjs solo en cliente, evita que webpack lo analice en build
-      const pdfModule = await import(/* webpackIgnore: true */ "pdfjs-dist");
-      const { getDocument } = pdfModule;
-      
-      // Configurar worker
-      getDocument.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+      // Cargar pdf.js desde CDN y usar el objeto global pdfjsLib
+      const pdfjsLib = window.pdfjsLib || (await (async () => {
+        const existing = document.querySelector('script[data-pdfjs-lib]');
+        if (!existing) {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+          script.async = true;
+          script.setAttribute('data-pdfjs-lib', '1');
+          document.head.appendChild(script);
+          await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('No se pudo cargar pdf.js desde CDN'));
+          });
+        }
+        return window.pdfjsLib;
+      })());
+
+      if (!pdfjsLib || !pdfjsLib.getDocument) {
+        console.warn('pdfjsLib no disponible o getDocument ausente');
+        return null;
+      }
+
+      // Configurar worker (necesario para render)
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      } catch (e) {
+        // noop
+      }
 
       const buf = await pdfFile.arrayBuffer();
-      const pdf = await getDocument({ data: buf }).promise;
-      const page = await pdf.getPage(1);
+      const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
 
-      const viewport = page.getViewport({ scale: 2 });
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      await page.render({ canvasContext: ctx, viewport }).promise;
-
-      // @zxing/browser ya está importado arriba
+      // Intentar las primeras 3 páginas por si el QR no está en la primera
+      const pagesToTry = Math.min(pdf.numPages || 1, 3);
       const reader = new BrowserQRCodeReader();
-      const result = await reader.decodeFromCanvas(canvas).catch(() => null);
-      return result?.getText?.() || result?.text || null;
+
+      for (let i = 1; i <= pagesToTry; i += 1) {
+        try {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 3 });
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({ canvasContext: ctx, viewport }).promise;
+
+          const result = await reader.decodeFromCanvas(canvas).catch(() => null);
+          const text = result?.getText?.() || result?.text || null;
+          if (text && text.length > 6) return text;
+        } catch (perPageErr) {
+          console.warn('QR no detectado en página', i, perPageErr?.message);
+        }
+      }
+
+      return null;
     } catch (err) {
-      console.error("Error en decodeQrFromPdf:", err);
+      console.error('Error en decodeQrFromPdf:', err);
       return null;
     }
   }
