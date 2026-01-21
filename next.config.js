@@ -21,13 +21,31 @@ const nextConfig = {
   },
   
   webpack: (config, { isServer }) => {
-    // Ignorar 'canvas' en el cliente (pdfjs-dist lo intenta importar pero no lo usa en browser)
+    // Ignorar módulos Node.js que pdfjs-dist intenta importar en cliente
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
         canvas: false,
         encoding: false,
+        fs: false,
+        path: false,
+        stream: false,
+        zlib: false,
+        crypto: false,
       };
+      
+      // Ignorar imports de canvas dentro de pdfjs-dist
+      config.module = config.module || {};
+      config.module.rules = config.module.rules || [];
+      config.module.rules.push({
+        test: /pdfjs-dist/,
+        resolve: {
+          fallback: {
+            canvas: false,
+            encoding: false,
+          }
+        }
+      });
     }
     return config;
   },
