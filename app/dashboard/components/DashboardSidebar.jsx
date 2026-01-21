@@ -52,7 +52,6 @@ export default function DashboardSidebar() {
   };
 
   const handleNavigate = (href) => {
-    console.log('🔗 Navegando a:', href);
     router.push(href);
   };
 
