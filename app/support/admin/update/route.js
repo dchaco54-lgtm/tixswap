@@ -32,13 +32,27 @@ export async function POST(req) {
     const { data: u } = await supabaseAdmin.auth.getUser(token);
     if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
 
-    const { data: prof } = await supabaseAdmin
+    // Validar admin usando app_role (con fallback a user_type)
+    const { data: prof, error: profErr } = await supabaseAdmin
       .from("profiles")
-      .select("role")
+      .select("app_role, user_type, email")
       .eq("id", u.user.id)
       .maybeSingle();
 
-    if (prof?.role !== "admin") return json({ error: "FORBIDDEN" }, 403);
+    if (profErr) {
+      console.error("Error loading profile:", profErr);
+      return json({ error: "FORBIDDEN" }, 403);
+    }
+
+    // Verificar permisos: app_role='admin' OR user_type='admin' OR email específico
+    const isAdmin = 
+      prof?.app_role === 'admin' || 
+      prof?.user_type === 'admin' ||
+      prof?.email?.toLowerCase() === 'davidchacon_17@hotmail.com';
+
+    if (!isAdmin) {
+      return json({ error: "FORBIDDEN - Not admin" }, 403);
+    }
 
     const body = await req.json().catch(() => ({}));
     const ticket_id = body?.ticket_id;

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { statusLabel, statusBadgeClass } from "@/lib/support/status";
 
 const CATEGORY_LABEL = (c) => {
   if (c === "soporte") return "Soporte general";
@@ -10,6 +11,7 @@ const CATEGORY_LABEL = (c) => {
   if (c === "disputa_venta") return "Disputa por venta";
   if (c === "reclamo") return "Reclamo";
   if (c === "sugerencia") return "Sugerencia";
+  if (c === "cambio_datos") return "Cambio de datos";
   if (c === "otro") return "Otro";
   return c || "—";
 };
@@ -146,16 +148,23 @@ function SoporteContent() {
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "No se pudo crear el ticket");
 
-      setMsg(`Ticket creado ✅ TS-${json.ticket?.ticket_number || "—"}`);
+      // Mostrar mensaje de éxito con código del ticket
+      const ticketCode = json.ticket?.code || `TS-${json.ticket?.ticket_number || "—"}`;
+      setMsg(`Ticket ${ticketCode} creado exitosamente ✅`);
+      
+      // Limpiar formulario
       setSubject("");
       setMessage("");
       setCategory("soporte");
 
       await loadTickets();
 
-      // te mando directo a "Mis tickets" para verlo conversacional
+      // Redirigir automáticamente a la conversación del ticket creado
       if (json.ticket?.id) {
-        router.push(`/dashboard/tickets?open=${encodeURIComponent(json.ticket.id)}`);
+        // Pequeño delay para que el usuario vea el mensaje de éxito
+        setTimeout(() => {
+          router.push(`/dashboard/tickets?open=${encodeURIComponent(json.ticket.id)}`);
+        }, 800);
       }
     } catch (e) {
       setErr(e?.message || "No se pudo crear el ticket.");
@@ -204,14 +213,23 @@ function SoporteContent() {
             )}
             {err && (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold mt-3">
-                {err}
+                {errTICKET */}
+          <div className="tix-card p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
               </div>
-            )}
-          </div>
-        )}
-
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* CREAR */}
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-900">
+                  Crear nuevo ticket
+                </h2>
+                <p className="text-xs text-slate-600">
+                  Respuesta en menos de 24 horas hábiles
+                </p>
+              </div>
+            </divREAR */}
           <div className="tix-card p-6">
             <h2 className="text-xl font-extrabold text-slate-900">
               Crear ticket
