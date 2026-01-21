@@ -20,6 +20,18 @@ const nextConfig = {
     ],
   },
   
+  webpack: (config, { isServer }) => {
+    // Ignorar 'canvas' en el cliente (pdfjs-dist lo intenta importar pero no lo usa en browser)
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        canvas: false,
+        encoding: false,
+      };
+    }
+    return config;
+  },
+  
   async headers() {
     return [
       {
