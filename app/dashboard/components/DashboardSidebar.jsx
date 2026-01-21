@@ -52,7 +52,12 @@ export default function DashboardSidebar() {
   };
 
   const handleNavigate = (href) => {
-    router.push(href);
+    // Para rutas fuera de dashboard, usar navegación absoluta
+    if (href === '/admin') {
+      window.location.href = '/admin';
+    } else {
+      router.push(href);
+    }
   };
 
   if (!mounted) {
