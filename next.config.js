@@ -22,14 +22,16 @@ const nextConfig = {
   
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      // pdfjs-dist intenta importar 'canvas' (módulo Node.js) durante webpack bundling
-      // pero el navegador usa canvas nativo. Ignorar en el bundle del cliente.
+      // Ignorar módulos Node.js que pdfjs intenta importar
       config.resolve.fallback = {
         ...config.resolve.fallback,
         canvas: false,
         fs: false,
         path: false,
         stream: false,
+        http: false,
+        https: false,
+        zlib: false,
       };
     }
     return config;

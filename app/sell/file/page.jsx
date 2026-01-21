@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { BrowserQRCodeReader } from "@zxing/browser";
-import * as pdfjs from "pdfjs-dist";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1";
 
@@ -50,8 +49,9 @@ export default function SellFilePage() {
 
   async function decodeQrFromPdf(pdfFile) {
     try {
-      // pdfjs ya está importado arriba
-      const { getDocument } = pdfjs;
+      // Dynamic import de pdfjs solo en cliente, evita que webpack lo analice en build
+      const pdfModule = await import(/* webpackIgnore: true */ "pdfjs-dist");
+      const { getDocument } = pdfModule;
       
       // Configurar worker
       getDocument.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
