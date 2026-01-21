@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { statusLabel, statusBadgeClass, TICKET_STATUS, getNextValidStatuses } from "@/lib/support/status";
 
+// Array de estados para el dropdown (compatible con STATUS anterior)
+const STATES_FILTER = Object.entries(TICKET_STATUS).map(([key, value]) => ({
+  v: value,
+  l: statusLabel(value),
+}));
+
 const CATEGORY_LABEL = (c) => {
   if (c === "soporte") return "Soporte general";
   if (c === "disputa_compra") return "Disputa por compra";
@@ -384,7 +390,7 @@ export default function AdminSupportConsole() {
                 className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
               >
                 <option value="all">Todos</option>
-                {STATUS.map((s) => (
+                {STATES_FILTER.map((s) => (
                   <option key={s.v} value={s.v}>
                     {s.l}
                   </option>
