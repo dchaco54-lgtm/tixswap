@@ -22,26 +22,13 @@ const nextConfig = {
   
   webpack: (config, { isServer }) => {
     if (!isServer) {
-      // Ignorar módulos Node.js en cliente
-      config.resolve.fallback = {
-        ...config.resolve.fallback,
-        canvas: false,
-        encoding: false,
-        fs: false,
-        path: false,
-        stream: false,
-        zlib: false,
-        crypto: false,
+      // Marcar pdfjs-dist y @zxing como externos (no incluir en bundle)
+      // Ahora se cargan desde CDN en app/sell/file/page.jsx
+      config.externals = {
+        ...config.externals,
+        'pdfjs-dist': 'pdfjs-dist',
+        '@zxing/browser': '@zxing/browser',
       };
-      
-      // IgnorePlugin: Ignorar 'canvas' cuando lo importe pdfjs-dist
-      const { IgnorePlugin } = require('webpack');
-      config.plugins.push(
-        new IgnorePlugin({
-          resourceRegExp: /^canvas$/,
-          contextRegExp: /pdfjs-dist/,
-        })
-      );
     }
     return config;
   },

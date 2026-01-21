@@ -47,15 +47,36 @@ export default function SellFilePage() {
   const canContinue = useMemo(() => uploaded && !uploading, [uploaded, uploading]);
 
   async function decodeQrFromPdf(pdfFile) {
-    const [{ getDocument }, { BrowserQRCodeReader }] = await Promise.all([
-      import("pdfjs-dist/build/pdf"),
-      import("@zxing/browser"),
-    ]);
+    // Cargar pdfjs desde CDN para evitar que webpack intente incluir 'canvas' en el bundle
+    const pdfjsLib = window.pdfjsLib || 
+      await (async () => {
+        if (!window.pdfjsLib) {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+          document.head.appendChild(script);
+          await new Promise(resolve => { script.onload = resolve; });
+        }
+        return window.pdfjsLib;
+      })();
 
-    // Configurar worker en runtime del navegador (opcional)
+    // Cargar @zxing/browser desde CDN
+    const zxing = window.ZXing || 
+      await (async () => {
+        if (!window.ZXing) {
+          const script = document.createElement('script');
+          script.src = 'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js';
+          document.head.appendChild(script);
+          await new Promise(resolve => { script.onload = resolve; });
+        }
+        return window.ZXing;
+      })();
+
+    const { getDocument } = pdfjsLib;
+    const { BrowserQRCodeReader } = zxing;
+
+    // Configurar worker
     try {
-      // eslint-disable-next-line no-underscore-dangle
-      getDocument.GlobalWorkerOptions.workerSrc = "//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      getDocument.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
     } catch {}
 
     const buf = await pdfFile.arrayBuffer();
