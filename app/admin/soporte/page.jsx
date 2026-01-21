@@ -104,11 +104,11 @@ export default function AdminSupportConsole() {
 
     const { data: prof } = await supabase
       .from("profiles")
-      .select("role")
+      .select("user_type")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (prof?.role !== "admin") return { ok: false };
+    if (prof?.user_type !== "admin") return { ok: false };
     return { ok: true };
   };
 

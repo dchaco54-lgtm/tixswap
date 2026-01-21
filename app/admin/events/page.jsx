@@ -131,11 +131,11 @@ export default function AdminEventsPage() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role")
+        .select("user_type")
         .eq("id", data.session.user.id)
         .single();
 
-      const role = profile?.role;
+      const role = profile?.user_type;
       if (role && role !== "admin") {
         router.push("/dashboard");
       } else {
@@ -178,13 +178,13 @@ export default function AdminEventsPage() {
 
       const { data: prof } = await supabase
         .from("profiles")
-        .select("role")
+        .select("user_type")
         .eq("id", user.id)
         .maybeSingle();
 
-      setUserRole(prof?.role || "user");
+      setUserRole(prof?.user_type || "user");
 
-      if (prof?.role !== "admin") {
+      if (prof?.user_type !== "admin") {
         router.push("/dashboard");
         return;
       }
