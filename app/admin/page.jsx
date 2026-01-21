@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function AdminPage() {
+  console.log("🚀🚀🚀 COMPONENTE ADMINPAGE SE ESTÁ EJECUTANDO 🚀🚀🚀");
+  
   const router = useRouter();
 
   const [checkingAdmin, setCheckingAdmin] = useState(true);
