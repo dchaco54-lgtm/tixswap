@@ -556,50 +556,23 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
   });
 
   return (
-    <div className="min-h-screen bg-[#f4f7ff]">
-      <div className="tix-container py-10">
-        {(msg || err) && (
-          <div className="mb-6">
-            {msg && (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800 font-semibold">
-                {msg}
-              </div>
-            )}
-            {err && (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold mt-3">
-                {err}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="grid lg:grid-cols-[260px_1fr] gap-6">
-          {/* SIDEBAR */}
-          <div className="tix-card p-4">
-            <div className="text-sm font-extrabold text-slate-900 px-2">Panel</div>
-            <div className="mt-3 space-y-1">
-              {navItems.map((it) => {
-                const active = it.href ? false : tab === it.id;
-                return (
-                  <button
-                    key={it.id}
-                    onClick={() => goTab(it.id, it.href)}
-                    data-tour-id={it.tourId}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-sm font-semibold transition ${
-                      active
-                        ? "bg-blue-600 text-white"
-                        : "text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    {it.label}
-                  </button>
-                );
-              })}
+    <>
+      {(msg || err) && (
+        <div className="mb-6">
+          {msg && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800 font-semibold">
+              {msg}
             </div>
-          </div>
+          )}
+          {err && (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold mt-3">
+              {err}
+            </div>
+          )}
+        </div>
+      )}
 
-          {/* CONTENT */}
-          <div className="space-y-6">
+      <div className="space-y-6">
             {/* =======================
                 MIS DATOS
             ======================= */}
@@ -1165,7 +1138,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }
 
