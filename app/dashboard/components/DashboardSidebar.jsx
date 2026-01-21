@@ -2,31 +2,67 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useProfile } from '@/hooks/useProfile';
+import { normalizeRole, USER_TYPES } from '@/lib/roles';
+import { useEffect, useMemo, useState } from 'react';
 
 /**
  * DashboardSidebar: menú lateral consistente para todas las rutas /dashboard/*
  * 
  * Muestra opciones: Mis datos, Mis compras, Wallet, Vender, etc.
+ * Incluye opción Admin si el usuario es admin
  * Marca activa la ruta actual
  */
 export default function DashboardSidebar() {
   const pathname = usePathname();
+  const { profile } = useProfile();
+  const [mounted, setMounted] = useState(false);
 
-  const menuItems = [
-    { label: 'Mis datos', href: '/dashboard', icon: '👤' },
-    { label: 'Mis compras', href: '/dashboard/purchases', icon: '🎟️' },
-    { label: 'Mis ventas', href: '/dashboard?tab=mis_ventas', icon: '💰' },
-    { label: 'Wallet', href: '/dashboard?tab=wallet', icon: '💳' },
-    { label: 'Vender', href: '/sell', icon: '📤' },
-    { label: 'Mis tickets', href: '/dashboard/tickets', icon: '🎫' },
-    { label: 'Soporte', href: '/dashboard/soporte', icon: '🆘' },
-  ];
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const isAdmin = useMemo(() => {
+    if (!profile) return false;
+    return normalizeRole(profile?.user_type) === USER_TYPES.ADMIN;
+  }, [profile]);
+
+  const menuItems = useMemo(() => {
+    const base = [
+      { label: 'Mis datos', href: '/dashboard', icon: '👤' },
+      { label: 'Mis compras', href: '/dashboard/purchases', icon: '🎟️' },
+      { label: 'Mis ventas', href: '/dashboard?tab=mis_ventas', icon: '💰' },
+      { label: 'Wallet', href: '/dashboard?tab=wallet', icon: '💳' },
+      { label: 'Vender', href: '/sell', icon: '📤' },
+      { label: 'Mis tickets', href: '/dashboard/tickets', icon: '🎫' },
+      { label: 'Soporte', href: '/dashboard/soporte', icon: '🆘' },
+    ];
+
+    if (isAdmin) {
+      base.push({ label: 'Admin', href: '/admin', icon: '⚙️' });
+    }
+
+    return base;
+  }, [isAdmin]);
 
   const isActive = (href) => {
     if (href === '/dashboard' && pathname === '/dashboard') return true;
     if (href !== '/dashboard' && pathname.startsWith(href)) return true;
     return false;
   };
+
+  if (!mounted) {
+    return (
+      <aside className="w-64 bg-white rounded-2xl shadow-sm p-4 h-fit">
+        <h3 className="text-lg font-bold text-slate-900 mb-4">Panel</h3>
+        <div className="space-y-2">
+          {[...Array(7)].map((_, i) => (
+            <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+          ))}
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="w-64 bg-white rounded-2xl shadow-sm p-4 h-fit">

@@ -31,8 +31,8 @@ export default function ProfileChangeModal({ field, currentValue, onClose, onSuc
     }
   };
 
-  const fieldLabel = field === 'email' ? 'Email' : 'RUT';
-  const placeholder = field === 'email' ? 'nuevo@email.com' : '12.345.678-K';
+  const fieldLabel = field === 'email' ? 'Email' : field === 'name' ? 'Nombre' : 'RUT';
+  const placeholder = field === 'email' ? 'nuevo@email.com' : field === 'name' ? 'Juan Pérez' : '12.345.678-K';
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -97,6 +97,8 @@ export default function ProfileChangeModal({ field, currentValue, onClose, onSuc
         <p className="text-xs text-gray-500 mt-4">
           {field === 'email'
             ? 'Se enviará una solicitud a nuestro equipo. Te notificaremos cuando sea procesada.'
+            : field === 'name'
+            ? 'Se enviará una solicitud a nuestro equipo para verificar tu identidad.'
             : 'Se enviará una solicitud a nuestro equipo. Deberás verificar tu nuevo RUT.'}
         </p>
       </div>

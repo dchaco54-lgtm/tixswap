@@ -662,12 +662,18 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                           Nombre completo
                         </div>
 
-                        <div className="text-sm font-extrabold text-slate-900 mt-1">
-                          {profile?.full_name || "Sin nombre (completa tu perfil)"}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="text-sm font-extrabold text-slate-900 mt-1">
+                            {profile?.full_name || "Sin nombre (completa tu perfil)"}
+                          </div>
+                          <button
+                            onClick={() => setShowChangeModal('name')}
+                            className="tix-btn-ghost text-xs"
+                            title="Crear solicitud de cambio"
+                          >
+                            Solicitar cambio
+                          </button>
                         </div>
-                        <p className="text-xs text-slate-500 mt-1">
-                          Para cambiar tu nombre abre un ticket en soporte.
-                        </p>
                       </div>
                     </div>
 
