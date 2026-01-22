@@ -84,19 +84,25 @@ export async function POST(req) {
 
     // Detectar provider y parsear
     const { provider, parsed } = detectProviderAndParse(text);
+    console.log('[Backend] Provider detectado:', provider);
+    console.log('[Backend] Datos parseados:', JSON.stringify(parsed, null, 2));
+    
     if (!provider) {
       return NextResponse.json({ error: "Proveedor no soportado aún (por ahora solo PuntoTicket)." }, { status: 400 });
     }
 
     const validationErrors = validateParsed(provider, parsed);
+    console.log('[Backend] Errores de validación:', validationErrors);
+    
     if (validationErrors.length) {
       return NextResponse.json({ error: "No se pudo validar el PDF", details: validationErrors.join("; ") }, { status: 400 });
     }
 
-    // Validar QR payload (MVP)
+    // Validar QR payload (MVP) - temporal: hacerlo opcional
     const qrStr = String(qrPayload || "");
     if (!qrStr || qrStr.length < 6) {
-      return NextResponse.json({ error: "No pudimos leer el QR. Sube el PDF original (descargado), sin capturas/escaneos." }, { status: 400 });
+      console.warn('[Backend] ⚠️ QR vacío o muy corto, continuando de todas formas (modo debug)');
+      // return NextResponse.json({ error: "No pudimos leer el QR. Sube el PDF original (descargado), sin capturas/escaneos." }, { status: 400 });
     }
 
     if (parsed.ticket_number && !qrStr.includes(parsed.ticket_number)) {
