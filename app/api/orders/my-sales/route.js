@@ -20,14 +20,11 @@ function computeRoleFromSales(soldCount) {
   }
   return best;
 }
-    const userTypeRaw = String(prof?.user_type || "").trim().toLowerCase();
-    const sellerTierRaw = String(prof?.seller_tier || "basic").trim().toLowerCase();
 function getBearerToken(req) {
-    const currentTierKey = isPrivileged ? sellerTierRaw : normalizeRole(sellerTierRaw);
+  const h = req.headers.get("authorization") || "";
   const [type, token] = h.split(" ");
   if ((type || "").toLowerCase() !== "bearer") return null;
   return token || null;
-    let effectiveTierKey = currentTierKey || "basic";
 
 function isPaid(order) {
   const s = String(order?.status || "").toLowerCase();
