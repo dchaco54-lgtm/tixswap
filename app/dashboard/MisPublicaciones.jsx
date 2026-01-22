@@ -2,15 +2,10 @@
 "use client";
 
 
-// Estado para sección vendidas y pagos
-// (debe ir antes del componente)
-
-// --- dentro del componente ---
-
-// ...existing code...
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
 export default function MisPublicaciones() {
-  // ...existing code...
   // Estado para sección vendidas y pagos
   const [sales, setSales] = useState([]);
   const [salesLoading, setSalesLoading] = useState(false);
@@ -32,9 +27,6 @@ export default function MisPublicaciones() {
       setSalesLoading(false);
     }
   }
-
-import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabaseClient";
 
 /* =========================
    Helpers
