@@ -147,8 +147,6 @@ export async function GET(req) {
     const { data: orders, error: oErr } = await admin
       .from("orders")
       .select(
-        `id,status,payment_state,created_at,paid_at,total_amount,total_paid_clp,amount_clp,buyer_id,user_id,ticket_id,
-         ticket:ticket_id(id,price,sector,notes,status,
            event:events(id,title,starts_at,venue,city)
          )`
       )
