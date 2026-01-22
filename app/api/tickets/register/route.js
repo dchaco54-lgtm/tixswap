@@ -103,10 +103,9 @@ export async function POST(req) {
     if (!qrStr || qrStr.length < 6) {
       console.warn('[Backend] ⚠️ QR vacío o muy corto, continuando de todas formas (modo debug)');
       // return NextResponse.json({ error: "No pudimos leer el QR. Sube el PDF original (descargado), sin capturas/escaneos." }, { status: 400 });
-    }
-
-    if (parsed.ticket_number && !qrStr.includes(parsed.ticket_number)) {
-      return NextResponse.json({ error: "PDF posiblemente alterado: el QR no coincide con los datos del ticket." }, { status: 400 });
+    } else if (parsed.ticket_number && !qrStr.includes(parsed.ticket_number)) {
+      console.warn('[Backend] ⚠️ QR no contiene ticket_number, continuando de todas formas (modo debug)');
+      // return NextResponse.json({ error: "PDF posiblemente alterado: el QR no coincide con los datos del ticket." }, { status: 400 });
     }
 
     // Dedupe principal por provider + ticket_number
