@@ -56,8 +56,6 @@ function buildLastMonths(count) {
     out.push({
       year: d.getFullYear(),
       month: d.getMonth(),
-                row_label: o.ticket.row_label,
-                seat_label: o.ticket.seat_label,
     });
   }
   return out;
