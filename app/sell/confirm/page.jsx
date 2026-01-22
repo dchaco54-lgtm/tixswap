@@ -536,7 +536,12 @@ export default function SellConfirmPage() {
                 <li>• Si la entrada es nominada, habrá chat comprador↔vendedor para coordinar la nominación.</li>
               </ul>
               <div className="mt-3">
-                <a href="/wallet" className="tix-btn-secondary">Configurar Wallet</a>
+                <a 
+                  href="/dashboard?tab=wallet&return=/sell/confirm" 
+                  className="tix-btn-secondary inline-block text-center"
+                >
+                  Configurar Wallet
+                </a>
               </div>
             </div>
 
