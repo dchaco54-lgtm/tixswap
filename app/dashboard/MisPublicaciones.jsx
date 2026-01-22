@@ -2,8 +2,64 @@
 "use client";
 
 
+
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
+
+// Helpers deben ir antes del export default
+function formatCLP(n) {
+  const num = Number(n) || 0;
+  return new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  }).format(num);
+}
+
+function formatDateShort(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("es-CL", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("es-CL", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function statusBadgeClass(status) {
+  const s = String(status || "").toLowerCase();
+  const base = "inline-flex items-center rounded-full px-2 py-1 text-[11px] font-extrabold";
+  if (s === "active") return `${base} bg-blue-50 text-blue-700`;
+  if (s === "paused") return `${base} bg-amber-50 text-amber-800`;
+  if (s === "sold") return `${base} bg-emerald-50 text-emerald-700`;
+  if (s === "cancelled") return `${base} bg-rose-50 text-rose-700`;
+  return `${base} bg-slate-100 text-slate-600`;
+}
+
+function statusLabel(status) {
+  const s = String(status || "").toLowerCase();
+  const map = { active: "Activa", paused: "Pausada", sold: "Vendida", cancelled: "Cancelada" };
+  return map[s] || s || "—";
+}
+
+function safeText(v, fallback = "—") {
+  const t = String(v ?? "").trim();
+  return t ? t : fallback;
+}
 
 export default function MisPublicaciones() {
   // Estado para sección vendidas y pagos
