@@ -25,6 +25,7 @@ function getBearerToken(req) {
   const [type, token] = h.split(" ");
   if ((type || "").toLowerCase() !== "bearer") return null;
   return token || null;
+}
 
 function isPaid(order) {
   const s = String(order?.status || "").toLowerCase();
@@ -77,7 +78,6 @@ export async function GET(req) {
     const { data: prof, error: profErr } = await admin
       .from("profiles")
       .select("user_type")
-      computedTier: isPrivileged ? (sellerTierRaw || "basic") : effectiveTierKey,
       .maybeSingle();
 
     if (profErr) throw profErr;
