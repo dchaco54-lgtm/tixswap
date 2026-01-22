@@ -141,10 +141,11 @@ export async function GET(req) {
     // 2) Orders de esos tickets (schema-safe)
     const { data: orders, error: oErr } = await admin
       .from("orders")
-      .select(
-           event:events(id,title,starts_at,venue,city)
-         )`
-      )
+      .select(`id,status,payment_state,created_at,paid_at,total_amount,total_paid_clp,amount_clp,buyer_id,user_id,ticket_id,
+        ticket:ticket_id(id,price,sector,row_label,seat_label,notes,status,
+          event:events(id,title,starts_at,venue,city)
+        )
+      `)
       .in("ticket_id", ticketIds)
       .gte("created_at", startISO)
       .order("created_at", { ascending: false })
