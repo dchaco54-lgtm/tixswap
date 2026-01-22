@@ -270,56 +270,7 @@ export default function MisPublicaciones() {
           </div>
         )}
 
-        {/* Cards resumen */}
-        <div className="mt-6 grid md:grid-cols-4 gap-4">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-xs font-bold text-slate-500">
-              Publicaciones activas
-            </div>
-            <div className="mt-2 text-3xl font-extrabold text-slate-900">
-              {loading ? "—" : summary.active}
-            </div>
-            <div className="mt-2 text-xs text-slate-400">
-              Disponibles para vender
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-xs font-bold text-slate-500">
-              Publicaciones pausadas
-            </div>
-            <div className="mt-2 text-3xl font-extrabold text-slate-900">
-              {loading ? "—" : summary.paused}
-            </div>
-            <div className="mt-2 text-xs text-slate-400">
-              Ocultas temporalmente
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-xs font-bold text-slate-500">
-              Vendidas (90 días)
-            </div>
-            <div className="mt-2 text-3xl font-extrabold text-slate-900">
-              {loading ? "—" : summary.sold}
-            </div>
-            <div className="mt-2 text-xs text-slate-400">
-              Tickets completados
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-xs font-bold text-slate-500">
-              Pagos pendientes
-            </div>
-            <div className="mt-2 text-3xl font-extrabold text-slate-900">
-              {loading ? "—" : "—"}
-            </div>
-            <div className="mt-2 text-xs text-slate-400">
-              Próximamente
-            </div>
-          </div>
-        </div>
+        {/* Cards resumen eliminadas para simplificar UI y dejar espacio a la nueva administración de publicaciones */}
 
         {/* Empty state */}
         {!loading && filteredListings.length === 0 && !searchQuery && statusFilter === "all" && (

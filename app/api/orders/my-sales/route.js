@@ -20,20 +20,21 @@ function computeRoleFromSales(soldCount) {
   }
   return best;
 }
-
+    const userTypeRaw = String(prof?.user_type || "").trim().toLowerCase();
+    const sellerTierRaw = String(prof?.seller_tier || "basic").trim().toLowerCase();
 function getBearerToken(req) {
-  const h = req.headers.get("authorization") || "";
+    const currentTierKey = isPrivileged ? sellerTierRaw : normalizeRole(sellerTierRaw);
   const [type, token] = h.split(" ");
   if ((type || "").toLowerCase() !== "bearer") return null;
   return token || null;
-}
+    let effectiveTierKey = currentTierKey || "basic";
 
 function isPaid(order) {
-  const s = String(order?.status || "").toLowerCase();
-  const ps = String(order?.payment_state || "").toLowerCase();
-  return s === "paid" || ps === "paid";
-}
-
+    if (!isPrivileged && roleRank(computedKey) > roleRank(currentTierKey || "basic")) {
+      const { error: upErr } = await admin
+        .from("profiles")
+        .update({ seller_tier: computedKey })
+        .eq("id", userId);
 function normalizeBuyerId(order) {
   return order?.buyer_id || order?.user_id || null;
 }
@@ -59,8 +60,8 @@ function buildLastMonths(count) {
     out.push({
       year: d.getFullYear(),
       month: d.getMonth(),
-      key: monthKey(d),
-      label: monthLabel(d),
+                row_label: o.ticket.row_label,
+                seat_label: o.ticket.seat_label,
     });
   }
   return out;
@@ -82,7 +83,7 @@ export async function GET(req) {
     const { data: prof, error: profErr } = await admin
       .from("profiles")
       .select("user_type")
-      .eq("id", userId)
+      computedTier: isPrivileged ? (sellerTierRaw || "basic") : effectiveTierKey,
       .maybeSingle();
 
     if (profErr) throw profErr;

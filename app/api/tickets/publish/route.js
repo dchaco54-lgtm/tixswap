@@ -38,7 +38,7 @@ export async function POST(request) {
     // Obtener perfil del usuario con su rol
     const { data: profile, error: profErr } = await supabase
       .from('profiles')
-      .select('full_name, email, user_type')
+      .select('full_name, email, user_type, seller_tier')
       .eq('id', sellerId)
       .maybeSingle();
 
@@ -47,6 +47,7 @@ export async function POST(request) {
     }
 
     const userRole = profile?.user_type || 'standard'; // default: standard
+    const sellerTier = profile?.seller_tier || 'basic';
 
     // Calcular fee del vendedor según su tipo usando los helpers
     const originalPrice = Number(price);

@@ -87,19 +87,20 @@ export default function SellPage() {
           return;
         }
 
-        // Obtener rol del usuario desde profiles
+        // Obtener user_type y seller_tier del usuario desde profiles
         try {
           const { data: profile } = await supabase
             .from('profiles')
-            .select('role')
+            .select('user_type, seller_tier')
             .eq('id', user.id)
             .maybeSingle();
-          
-          if (profile?.role) {
-            setUserRole(profile.role);
+          if (profile?.user_type) {
+            setUserRole(profile.user_type);
+          } else {
+            setUserRole('standard');
           }
         } catch (err) {
-          console.error('Error obteniendo rol del usuario:', err);
+          console.error('Error obteniendo user_type del usuario:', err);
         }
         
         setCheckingAuth(false);

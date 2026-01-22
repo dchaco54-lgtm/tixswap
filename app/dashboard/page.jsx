@@ -338,7 +338,7 @@ function DashboardContent() {
 
     return [
       { id: "mis_datos", label: "Mis datos" },
-      { id: "mis_ventas", label: "Mis publicaciones", tourId: "sales" },
+      { id: "mis_publicaciones", label: "Mis publicaciones", tourId: "sales" },
       { id: "wallet", label: "Wallet", tourId: "wallet" },
       { id: "vender", label: "🎫 Vender", href: "/sell", tourId: "sell" },
 
@@ -503,10 +503,10 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     }
   };
 
-  // cuando entras a Mis ventas, carga todo
+  // cuando entras a Mis publicaciones, carga todo
   useEffect(() => {
     if (!user?.id) return;
-    if (tab !== "mis_ventas") return;
+    if (tab !== "mis_publicaciones") return;
 
     loadSales();
     loadReputation(user.id);
@@ -780,10 +780,10 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
             {/* =======================
                 MIS PUBLICACIONES
             ======================= */}
-            {tab === "mis_ventas" && <MisPublicaciones />}
+            {tab === "mis_publicaciones" && <MisPublicaciones />}
 
             {/* Fallback */}
-            {tab !== "mis_datos" && tab !== "wallet" && tab !== "mis_ventas" && (
+            {tab !== "mis_datos" && tab !== "wallet" && tab !== "mis_publicaciones" && (
               <div className="tix-card p-6">
                 <h2 className="text-xl font-extrabold text-slate-900">Sección</h2>
                 <p className="text-slate-600 mt-2">

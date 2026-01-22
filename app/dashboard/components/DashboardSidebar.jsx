@@ -31,15 +31,16 @@ export default function DashboardSidebar() {
     const base = [
       { label: 'Mis datos', href: '/dashboard', icon: '👤' },
       { label: 'Mis compras', href: '/dashboard/purchases', icon: '🎟️' },
-      { label: 'Mis ventas', href: '/dashboard?tab=mis_ventas', icon: '💰' },
+      { label: 'Mis publicaciones', href: '/dashboard?tab=mis_publicaciones', icon: '💰' },
       { label: 'Wallet', href: '/dashboard?tab=wallet', icon: '💳' },
       { label: 'Vender', href: '/sell', icon: '📤' },
-      { label: 'Mis tickets', href: '/dashboard/tickets', icon: '🎫' },
+      // { label: 'Mis tickets', href: '/dashboard/tickets', icon: '🎫' }, // Eliminado para usuarios normales
       { label: 'Soporte', href: '/dashboard/soporte', icon: '🆘' },
     ];
 
+    // Solo admin ve Soporte Admin
     if (isAdmin) {
-      base.push({ label: 'Admin', href: '/admin', icon: '⚙️' });
+      base.push({ label: 'Soporte Admin', href: '/admin/soporte', icon: '🛠️' });
     }
 
     return base;

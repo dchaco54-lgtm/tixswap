@@ -107,12 +107,12 @@ export default function SellConfirmPage() {
           if (user) {
             const { data: profile } = await supabase
               .from('profiles')
-              .select('user_type')
+              .select('user_type, seller_tier')
               .eq('id', user.id)
               .maybeSingle();
-            
             if (mounted) {
               setUserRole(profile?.user_type || 'standard');
+              // Si necesitas seller_tier, puedes guardarlo en otro state
             }
           }
         } catch (err) {
