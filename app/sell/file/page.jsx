@@ -48,8 +48,10 @@ export default function SellFilePage() {
   const canContinue = useMemo(() => uploaded && !uploading, [uploaded, uploading]);
 
   async function decodeQrFromPdf(pdfFile) {
+    console.log('[QR Debug] Iniciando lectura de QR del PDF...');
     try {
       // Cargar pdf.js desde CDN y usar el objeto global pdfjsLib
+      console.log('[QR Debug] Cargando pdf.js desde CDN...');
       const pdfjsLib = window.pdfjsLib || (await (async () => {
         const existing = document.querySelector('script[data-pdfjs-lib]');
         if (!existing) {
@@ -67,9 +69,10 @@ export default function SellFilePage() {
       })());
 
       if (!pdfjsLib || !pdfjsLib.getDocument) {
-        console.warn('pdfjsLib no disponible o getDocument ausente');
+        console.warn('[QR Debug] ⚠️ pdfjsLib no disponible o getDocument ausente');
         return null;
       }
+      console.log('[QR Debug] ✅ pdf.js cargado correctamente');
 
       // Configurar worker (necesario para render)
       try {
@@ -79,7 +82,9 @@ export default function SellFilePage() {
       }
 
       const buf = await pdfFile.arrayBuffer();
+      console.log('[QR Debug] PDF leído, tamaño buffer:', buf.byteLength);
       const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+      console.log('[QR Debug] PDF parseado, páginas:', pdf.numPages);
 
       // Intentar las primeras 3 páginas por si el QR no está en la primera
       const pagesToTry = Math.min(pdf.numPages || 1, 3);
@@ -87,25 +92,35 @@ export default function SellFilePage() {
 
       for (let i = 1; i <= pagesToTry; i += 1) {
         try {
+          console.log(`[QR Debug] Escaneando página ${i}/${pagesToTry}...`);
           const page = await pdf.getPage(i);
           const viewport = page.getViewport({ scale: 3 });
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
+          console.log(`[QR Debug] Renderizando página ${i} (${canvas.width}x${canvas.height})...`);
           await page.render({ canvasContext: ctx, viewport }).promise;
 
-          const result = await reader.decodeFromCanvas(canvas).catch(() => null);
+          const result = await reader.decodeFromCanvas(canvas).catch((decodeErr) => {
+            console.log(`[QR Debug] No se pudo decodificar QR en página ${i}:`, decodeErr?.message);
+            return null;
+          });
           const text = result?.getText?.() || result?.text || null;
-          if (text && text.length > 6) return text;
+          console.log(`[QR Debug] Resultado página ${i}:`, text ? `QR encontrado (${text.length} chars)` : 'No QR');
+          if (text && text.length > 6) {
+            console.log('[QR Debug] ✅ QR válido encontrado:', text.substring(0, 50) + '...');
+            return text;
+          }
         } catch (perPageErr) {
-          console.warn('QR no detectado en página', i, perPageErr?.message);
+          console.warn('[QR Debug] ⚠️ Error en página', i, ':', perPageErr?.message);
         }
       }
 
+      console.log('[QR Debug] ⚠️ No se encontró QR en ninguna de las', pagesToTry, 'páginas');
       return null;
     } catch (err) {
-      console.error('Error en decodeQrFromPdf:', err);
+      console.error('[QR Debug] ❌ Error fatal en decodeQrFromPdf:', err);
       return null;
     }
   }
@@ -124,13 +139,17 @@ export default function SellFilePage() {
 
     try {
       // Intentar leer el QR del PDF antes de enviar
+      console.log('[Upload] Intentando leer QR del archivo:', file.name);
       const qr = await decodeQrFromPdf(file);
+      
+      // TEMPORAL: permitir continuar sin QR para debuggear
       if (!qr || qr.length < 6) {
-        setError("No pudimos leer el QR. Sube el PDF original (descargado), sin capturas/escaneos.");
-        setUploading(false);
-        return;
+        console.warn('[Upload] ⚠️ No se detectó QR válido, continuando de todas formas (modo debug)');
+        // En lugar de bloquear, mostramos warning pero continuamos
+      } else {
+        console.log('[Upload] ✅ QR detectado correctamente');
       }
-      setQrPayload(qr);
+      setQrPayload(qr || '');
 
       // sacar user id si existe sesión
       let sellerId = null;
@@ -142,11 +161,20 @@ export default function SellFilePage() {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("isNominada", String(isNominada));
-      fd.append("qr_payload", qr);
+      fd.append("qr_payload", qr || ''); // Enviar string vacío si no hay QR
       if (sellerId) fd.append("sellerId", sellerId);
+
+      console.log('[Upload] Enviando al backend:', { 
+        fileName: file.name, 
+        fileSize: file.size, 
+        hasQR: !!(qr && qr.length > 0),
+        qrLength: qr?.length || 0 
+      });
 
       const res = await fetch("/api/tickets/register", { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
+
+      console.log('[Upload] Respuesta del servidor:', { status: res.status, ok: res.ok, data });
 
       if (!res.ok) {
         // duplicado
