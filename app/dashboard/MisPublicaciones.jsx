@@ -1,0 +1,651 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabaseClient";
+
+/* =========================
+   Helpers
+========================= */
+function formatCLP(n) {
+  const num = Number(n) || 0;
+  return new Intl.NumberFormat("es-CL", {
+    style: "currency",
+    currency: "CLP",
+    maximumFractionDigits: 0,
+  }).format(num);
+}
+
+function formatDateShort(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("es-CL", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("es-CL", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function statusBadgeClass(status) {
+  const s = String(status || "").toLowerCase();
+  const base = "inline-flex items-center rounded-full px-2 py-1 text-[11px] font-extrabold";
+  
+  if (s === "active") {
+    return `${base} bg-blue-50 text-blue-700`;
+  }
+  if (s === "paused") {
+    return `${base} bg-amber-50 text-amber-800`;
+  }
+  if (s === "sold") {
+    return `${base} bg-emerald-50 text-emerald-700`;
+  }
+  if (s === "cancelled") {
+    return `${base} bg-rose-50 text-rose-700`;
+  }
+
+  return `${base} bg-slate-100 text-slate-600`;
+}
+
+function statusLabel(status) {
+  const s = String(status || "").toLowerCase();
+  const map = {
+    active: "Activa",
+    paused: "Pausada",
+    sold: "Vendida",
+    cancelled: "Cancelada",
+  };
+  return map[s] || s || "—";
+}
+
+function safeText(v, fallback = "—") {
+  const t = String(v ?? "").trim();
+  return t ? t : fallback;
+}
+
+/* =========================
+   Main Component
+========================= */
+export default function MisPublicaciones() {
+  const [listings, setListings] = useState([]);
+  const [summary, setSummary] = useState({ total: 0, active: 0, paused: 0, sold: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Filtros
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all"); // all, active, paused, sold
+
+  // Modal edición
+  const [editingListing, setEditingListing] = useState(null);
+  const [editPrice, setEditPrice] = useState("");
+  const [editStatus, setEditStatus] = useState("active");
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState(null);
+  const [editSuccess, setEditSuccess] = useState(false);
+
+  // Analytics colapsado
+  const [showAnalytics, setShowAnalytics] = useState(false);
+
+  useEffect(() => {
+    loadListings();
+  }, []);
+
+  async function loadListings() {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("No hay sesión");
+
+      const res = await fetch("/api/tickets/my-listings", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Error al cargar publicaciones");
+      }
+
+      const data = await res.json();
+      setListings(data.tickets || []);
+      setSummary(data.summary || { total: 0, active: 0, paused: 0, sold: 0 });
+    } catch (err) {
+      console.error(err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function openEditModal(listing) {
+    setEditingListing(listing);
+    setEditPrice(String(listing.price || ""));
+    setEditStatus(listing.status || "active");
+    setEditError(null);
+    setEditSuccess(false);
+  }
+
+  function closeEditModal() {
+    setEditingListing(null);
+    setEditPrice("");
+    setEditStatus("active");
+    setEditError(null);
+    setEditSuccess(false);
+  }
+
+  async function handleSaveEdit() {
+    if (!editingListing) return;
+
+    const price = Number(editPrice);
+    if (!price || price <= 0) {
+      setEditError("El precio debe ser mayor a 0");
+      return;
+    }
+
+    setEditLoading(true);
+    setEditError(null);
+    setEditSuccess(false);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("No hay sesión");
+
+      const res = await fetch("/api/tickets/listing", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          ticket_id: editingListing.id,
+          price,
+          status: editStatus,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Error al actualizar");
+      }
+
+      setEditSuccess(true);
+      setTimeout(() => {
+        closeEditModal();
+        loadListings();
+      }, 1000);
+    } catch (err) {
+      console.error(err);
+      setEditError(err.message);
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  async function handleDelete(listing) {
+    if (!confirm(`¿Eliminar publicación "${listing.event?.title || 'sin título'}"?`)) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("No hay sesión");
+
+      const res = await fetch("/api/tickets/listing", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ ticket_id: listing.id }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Error al eliminar");
+      }
+
+      alert("Publicación eliminada");
+      loadListings();
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+    }
+  }
+
+  // Aplicar filtros
+  const filteredListings = listings.filter((l) => {
+    // Filtro de búsqueda
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const eventTitle = (l.event?.title || "").toLowerCase();
+      const venue = (l.event?.venue || "").toLowerCase();
+      const city = (l.event?.city || "").toLowerCase();
+      if (!eventTitle.includes(q) && !venue.includes(q) && !city.includes(q)) {
+        return false;
+      }
+    }
+
+    // Filtro de estado
+    if (statusFilter !== "all") {
+      if (l.status !== statusFilter) return false;
+    }
+
+    return true;
+  });
+
+  return (
+    <>
+      <div className="tix-card p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-900">
+              Mis publicaciones
+            </h1>
+            <p className="text-slate-600 mt-1">
+              Administra tus entradas publicadas (ver, editar, pausar, eliminar).
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button onClick={loadListings} className="tix-btn-ghost">
+              Recargar
+            </button>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold">
+            {error}
+          </div>
+        )}
+
+        {/* Cards resumen */}
+        <div className="mt-6 grid md:grid-cols-4 gap-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="text-xs font-bold text-slate-500">
+              Publicaciones activas
+            </div>
+            <div className="mt-2 text-3xl font-extrabold text-slate-900">
+              {loading ? "—" : summary.active}
+            </div>
+            <div className="mt-2 text-xs text-slate-400">
+              Disponibles para vender
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="text-xs font-bold text-slate-500">
+              Publicaciones pausadas
+            </div>
+            <div className="mt-2 text-3xl font-extrabold text-slate-900">
+              {loading ? "—" : summary.paused}
+            </div>
+            <div className="mt-2 text-xs text-slate-400">
+              Ocultas temporalmente
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="text-xs font-bold text-slate-500">
+              Vendidas (90 días)
+            </div>
+            <div className="mt-2 text-3xl font-extrabold text-slate-900">
+              {loading ? "—" : summary.sold}
+            </div>
+            <div className="mt-2 text-xs text-slate-400">
+              Tickets completados
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="text-xs font-bold text-slate-500">
+              Pagos pendientes
+            </div>
+            <div className="mt-2 text-3xl font-extrabold text-slate-900">
+              {loading ? "—" : "—"}
+            </div>
+            <div className="mt-2 text-xs text-slate-400">
+              Próximamente
+            </div>
+          </div>
+        </div>
+
+        {/* Empty state */}
+        {!loading && filteredListings.length === 0 && !searchQuery && statusFilter === "all" && (
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-12 text-center">
+            <div className="mx-auto w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
+              <svg className="w-8 h-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-extrabold text-slate-900">
+              Aún no tienes publicaciones
+            </h3>
+            <p className="text-slate-600 mt-2 max-w-md mx-auto">
+              Publica tu primera entrada y acá podrás editarla, pausarla o eliminarla.
+            </p>
+            <a
+              href="/sell"
+              className="inline-block mt-6 px-6 py-3 bg-gradient-to-r from-blue-600 to-teal-500 text-white font-extrabold rounded-full hover:shadow-lg transition-all"
+            >
+              Publicar una entrada
+            </a>
+          </div>
+        )}
+
+        {/* Tabla publicaciones */}
+        {(filteredListings.length > 0 || searchQuery || statusFilter !== "all") && (
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-white overflow-hidden">
+            <div className="p-5">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <div className="text-lg font-extrabold text-slate-900">
+                    Mis publicaciones
+                  </div>
+                  <div className="text-sm text-slate-600 mt-1">
+                    {filteredListings.length} entrada(s) encontrada(s)
+                  </div>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-3">
+                  {/* Buscador */}
+                  <input
+                    type="text"
+                    placeholder="Buscar evento, lugar..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+
+                  {/* Filtro estado */}
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">Todos los estados</option>
+                    <option value="active">Activas</option>
+                    <option value="paused">Pausadas</option>
+                    <option value="sold">Vendidas</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className="text-xs text-slate-500 mb-2 text-center md:hidden">
+                ← Desliza para ver más →
+              </div>
+              <table className="min-w-full text-left">
+                <thead className="bg-slate-50 border-y border-slate-200">
+                  <tr className="text-xs font-extrabold text-slate-600">
+                    <th className="px-5 py-3">Fecha pub.</th>
+                    <th className="px-5 py-3">Evento</th>
+                    <th className="px-5 py-3">Fecha evento</th>
+                    <th className="px-5 py-3">Lugar</th>
+                    <th className="px-5 py-3">Precio</th>
+                    <th className="px-5 py-3">Estado</th>
+                    <th className="px-5 py-3 text-right">Acciones</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td className="px-5 py-4 text-slate-600" colSpan={7}>
+                        Cargando publicaciones…
+                      </td>
+                    </tr>
+                  ) : filteredListings.length === 0 ? (
+                    <tr>
+                      <td className="px-5 py-6 text-slate-600 text-center" colSpan={7}>
+                        No se encontraron publicaciones con los filtros aplicados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredListings.map((listing) => {
+                      const eventTitle = listing.event?.title || "—";
+                      const eventDate = listing.event?.event_datetime || "—";
+                      const venue = listing.event?.venue || "—";
+                      const city = listing.event?.city || "";
+
+                      return (
+                        <tr key={listing.id} className="hover:bg-slate-50">
+                          <td className="px-5 py-4 text-sm font-semibold text-slate-700">
+                            {formatDateShort(listing.created_at)}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="text-sm font-extrabold text-slate-900">
+                              {eventTitle}
+                            </div>
+                            {listing.sector && (
+                              <div className="text-xs text-slate-500 mt-1">
+                                {listing.sector}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="px-5 py-4 text-sm text-slate-700">
+                            {formatDateTime(eventDate)}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="text-sm text-slate-800">
+                              {safeText(venue, "—")}
+                            </div>
+                            {city && (
+                              <div className="text-xs text-slate-500 mt-1">
+                                {city}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <div className="text-sm font-extrabold text-slate-900">
+                              {formatCLP(listing.price)}
+                            </div>
+                          </td>
+
+                          <td className="px-5 py-4">
+                            <span className={statusBadgeClass(listing.status)}>
+                              {statusLabel(listing.status)}
+                            </span>
+                          </td>
+
+                          <td className="px-5 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => openEditModal(listing)}
+                                className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 font-extrabold rounded-full hover:bg-blue-100 transition-colors"
+                                disabled={listing.status === "sold"}
+                              >
+                                Editar
+                              </button>
+
+                              {listing.status === "active" && (
+                                <button
+                                  onClick={() => {
+                                    openEditModal(listing);
+                                    setEditStatus("paused");
+                                  }}
+                                  className="text-xs px-3 py-1.5 bg-amber-50 text-amber-700 font-extrabold rounded-full hover:bg-amber-100 transition-colors"
+                                >
+                                  Pausar
+                                </button>
+                              )}
+
+                              {listing.status === "paused" && (
+                                <button
+                                  onClick={() => {
+                                    openEditModal(listing);
+                                    setEditStatus("active");
+                                  }}
+                                  className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 font-extrabold rounded-full hover:bg-blue-100 transition-colors"
+                                >
+                                  Activar
+                                </button>
+                              )}
+
+                              {listing.status !== "sold" && (
+                                <button
+                                  onClick={() => handleDelete(listing)}
+                                  className="text-xs px-3 py-1.5 bg-rose-50 text-rose-700 font-extrabold rounded-full hover:bg-rose-100 transition-colors"
+                                >
+                                  Eliminar
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Analítica colapsable (botón) */}
+        {summary.total > 0 && (
+          <div className="mt-6">
+            <button
+              onClick={() => setShowAnalytics(!showAnalytics)}
+              className="w-full text-left px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-extrabold text-slate-700 hover:bg-slate-100 transition-colors flex items-center justify-between"
+            >
+              <span>
+                {showAnalytics ? "Ocultar" : "Ver"} analítica de ventas
+              </span>
+              <svg
+                className={`w-5 h-5 transition-transform ${showAnalytics ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {showAnalytics && (
+              <div className="mt-4 p-5 bg-white border border-slate-200 rounded-2xl">
+                <p className="text-slate-600 text-sm">
+                  Próximamente: gráfico de ventas, ingresos mensuales, etc.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Modal de edición */}
+      {editingListing && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-extrabold text-slate-900">
+                Editar publicación
+              </h3>
+              <button
+                onClick={closeEditModal}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <div className="text-sm font-semibold text-slate-900">
+                {editingListing.event?.title || "Sin título"}
+              </div>
+              <div className="text-xs text-slate-500 mt-1">
+                {editingListing.event?.venue || "—"} · {formatDateTime(editingListing.event?.event_datetime)}
+              </div>
+            </div>
+
+            {editError && (
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 text-sm font-semibold">
+                {editError}
+              </div>
+            )}
+
+            {editSuccess && (
+              <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800 text-sm font-semibold">
+                ✅ Cambios guardados
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Precio
+                </label>
+                <input
+                  type="number"
+                  value={editPrice}
+                  onChange={(e) => setEditPrice(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="0"
+                  min="0"
+                  disabled={editLoading || editSuccess}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Estado
+                </label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={editLoading || editSuccess || editingListing.status === "sold"}
+                >
+                  <option value="active">Activa</option>
+                  <option value="paused">Pausada</option>
+                  {editingListing.status === "sold" && <option value="sold">Vendida</option>}
+                </select>
+                {editingListing.status === "sold" && (
+                  <div className="mt-2 text-xs text-slate-500">
+                    No puedes cambiar el estado de una entrada vendida
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 mt-6">
+              <button
+                onClick={handleSaveEdit}
+                disabled={editLoading || editSuccess}
+                className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-teal-500 text-white font-extrabold rounded-full hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {editLoading ? "Guardando..." : editSuccess ? "¡Guardado!" : "Guardar cambios"}
+              </button>
+
+              <button
+                onClick={closeEditModal}
+                disabled={editLoading}
+                className="px-4 py-3 bg-slate-100 text-slate-700 font-extrabold rounded-full hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

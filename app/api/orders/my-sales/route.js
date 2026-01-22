@@ -146,12 +146,12 @@ export async function GET(req) {
     const listStartMonth = buildLastMonths(listMonths)[0];
     const listStartISO = new Date(listStartMonth.year, listStartMonth.month, 1).toISOString();
 
-    // 2) Orders de esos tickets
+    // 2) Orders de esos tickets (schema-safe)
     const { data: orders, error: oErr } = await admin
       .from("orders")
       .select(
         `id,status,payment_state,created_at,paid_at,total_amount,total_paid_clp,amount_clp,buyer_id,user_id,ticket_id,
-         ticket:ticket_id(id,price,sector,row,seat,notes,status,
+         ticket:ticket_id(id,price,sector,notes,status,
            event:events(id,title,starts_at,venue,city)
          )`
       )

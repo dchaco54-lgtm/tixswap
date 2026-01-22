@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/hooks/useProfile";
 import { useOnboardingLogic } from "@/hooks/useOnboardingLogic";
 import WalletSection from "./WalletSection";
+import MisPublicaciones from "./MisPublicaciones";
 import StarRating from "@/components/StarRating";
 import { normalizeRole, USER_TYPES } from "@/lib/roles";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
@@ -337,7 +338,7 @@ function DashboardContent() {
 
     return [
       { id: "mis_datos", label: "Mis datos" },
-      { id: "mis_ventas", label: "Mis ventas", tourId: "sales" },
+      { id: "mis_ventas", label: "Mis publicaciones", tourId: "sales" },
       { id: "wallet", label: "Wallet", tourId: "wallet" },
       { id: "vender", label: "🎫 Vender", href: "/sell", tourId: "sell" },
 
@@ -777,232 +778,9 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
             )}
 
             {/* =======================
-                MIS VENTAS
+                MIS PUBLICACIONES
             ======================= */}
-            {tab === "mis_ventas" && (
-              <div className="tix-card p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h1 className="text-2xl font-extrabold text-slate-900">
-                      Mis ventas
-                    </h1>
-                    <p className="text-slate-600 mt-1">
-                      Resumen + historial (últimos 3 meses) + gráfico (6 meses).
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        loadSales();
-                        if (user?.id) loadReputation(user.id);
-                      }}
-                      className="tix-btn-ghost"
-                    >
-                      Recargar
-                    </button>
-                  </div>
-                </div>
-
-                {(salesErr || repErr) && (
-                  <div className="mt-4">
-                    {salesErr ? (
-                      <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold">
-                        {salesErr}
-                      </div>
-                    ) : null}
-                    {repErr ? (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 font-semibold mt-3">
-                        {repErr}
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-
-                {/* Cards */}
-                <div className="mt-6 grid md:grid-cols-4 gap-4">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-xs font-bold text-slate-500">
-                      Tickets vendidos (sold)
-                    </div>
-                    <div className="mt-2 text-3xl font-extrabold text-slate-900">
-                      {salesLoading ? "—" : soldCount}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      (Base para subir de nivel)
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-xs font-bold text-slate-500">
-                      Pagadas (últ. 90 días)
-                    </div>
-                    <div className="mt-2 text-3xl font-extrabold text-slate-900">
-                      {salesLoading ? "—" : paid90dCount}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      Total: {salesLoading ? "—" : formatCLP(paid90dTotal)}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-xs font-bold text-slate-500">Faltan para subir</div>
-                    <div className="mt-2 text-3xl font-extrabold text-slate-900">
-                      {salesLoading ? "—" : tierProgress.missing}
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400">
-                      Próximo: {salesLoading ? "—" : tierProgress.nextLabel}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-xs font-bold text-slate-500">Calificación</div>
-
-                    <div className="mt-2">
-                      {repLoading ? (
-                        <div className="text-slate-600 font-semibold">Cargando…</div>
-                      ) : rep?.score ? (
-                        <StarRating
-                          value={rep.score}
-                          text={`${rep.score} (${rep.sales_count ?? soldCount} ventas)`}
-                        />
-                      ) : (
-                        <div className="text-sm font-extrabold text-slate-900">
-                          Usuario nuevo
-                          <div className="text-xs text-slate-400 mt-1">
-                            (Menos de 5 ventas)
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-2 text-xs text-slate-400">
-                      Comentarios: <span className="font-semibold">pronto</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Chart */}
-                <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-lg font-extrabold text-slate-900">
-                        Ventas últimos 6 meses
-                      </div>
-                      <div className="text-sm text-slate-600">
-                        Cantidad de operaciones pagadas por mes.
-                      </div>
-                    </div>
-
-                    <div className="text-xs text-slate-500">
-                      (simple, pero pro 😄)
-                    </div>
-                  </div>
-
-                  {salesLoading ? (
-                    <div className="mt-4 text-slate-600">Cargando gráfico…</div>
-                  ) : (
-                    <MiniBarChart items={salesData?.monthly || []} />
-                  )}
-                </div>
-
-                {/* List */}
-                <div className="mt-6 rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                  <div className="p-5">
-                    <div className="text-lg font-extrabold text-slate-900">
-                      Ventas recientes (máx 3 meses)
-                    </div>
-                    <div className="text-sm text-slate-600 mt-1">
-                      Puedes abrir el detalle y pedir ayuda a soporte si algo sale raro.
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <div className="text-xs text-slate-500 mb-2 text-center md:hidden">
-                      ← Desliza para ver más →
-                    </div>
-                    <table className="min-w-full text-left">
-                      <thead className="bg-slate-50 border-y border-slate-200">
-                        <tr className="text-xs font-extrabold text-slate-600">
-                          <th className="px-5 py-3">Fecha</th>
-                          <th className="px-5 py-3">Evento</th>
-                          <th className="px-5 py-3">Comprador</th>
-                          <th className="px-5 py-3">Monto</th>
-                          <th className="px-5 py-3">Estado</th>
-                          <th className="px-5 py-3 text-right">Acción</th>
-                        </tr>
-                      </thead>
-
-                      <tbody className="divide-y divide-slate-100">
-                        {salesLoading ? (
-                          <tr>
-                            <td className="px-5 py-4 text-slate-600" colSpan={6}>
-                              Cargando ventas…
-                            </td>
-                          </tr>
-                        ) : (salesData?.recentSales || []).length === 0 ? (
-                          <tr>
-                            <td className="px-5 py-6 text-slate-600" colSpan={6}>
-                              Aún no tienes ventas pagadas en este período.
-                            </td>
-                          </tr>
-                        ) : (
-                          (salesData?.recentSales || []).slice(0, 200).map((s) => {
-                            const when = s.paid_at || s.created_at;
-                            const buyer = s?.buyer?.full_name || s?.buyer?.email || "—";
-                            const eventTitle = s?.ticket?.event?.title || "—";
-                            const total = Number(s.total_paid_clp ?? s.total_clp ?? 0) || 0;
-
-                            return (
-                              <tr key={s.id} className="hover:bg-slate-50">
-                                <td className="px-5 py-4 text-sm font-semibold text-slate-700">
-                                  {formatDateShort(when)}
-                                </td>
-
-                                <td className="px-5 py-4">
-                                  <div className="text-sm font-extrabold text-slate-900">
-                                    {eventTitle}
-                                  </div>
-                                  <div className="text-xs text-slate-500 mt-1">
-                                    {safeText(s?.ticket?.event?.venue, "")}
-                                    {s?.ticket?.event?.city ? ` · ${s.ticket.event.city}` : ""}
-                                  </div>
-                                </td>
-
-                                <td className="px-5 py-4">
-                                  <div className="text-sm font-semibold text-slate-800">
-                                    {buyer}
-                                  </div>
-                                </td>
-
-                                <td className="px-5 py-4">
-                                  <div className="text-sm font-extrabold text-slate-900">
-                                    {formatCLP(total)}
-                                  </div>
-                                </td>
-
-                                <td className="px-5 py-4">
-                                  {statusPill(s.status, s.payment_state)}
-                                </td>
-
-                                <td className="px-5 py-4 text-right">
-                                  <button
-                                    className="tix-btn-primary"
-                                    onClick={() => setOpenSale(s)}
-                                  >
-                                    Ver detalle
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
+            {tab === "mis_ventas" && <MisPublicaciones />}
 
             {/* Fallback */}
             {tab !== "mis_datos" && tab !== "wallet" && tab !== "mis_ventas" && (
