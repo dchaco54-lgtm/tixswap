@@ -1,3 +1,24 @@
+  // Estado para sección vendidas y pagos
+  const [sales, setSales] = useState([]);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [showSales, setShowSales] = useState(false);
+  const [walletConfigured, setWalletConfigured] = useState(true); // Simulación, reemplazar por lógica real
+
+  // Cargar ventas (últimos 90 días)
+  async function loadSales() {
+    setSalesLoading(true);
+    try {
+      const res = await fetch("/api/orders/my-sales");
+      const data = await res.json();
+      setSales(data.recentSales || []);
+      // Simulación wallet: si falta, mostrar banner
+      setWalletConfigured(false); // Cambia según lógica real
+    } catch (err) {
+      setSales([]);
+    } finally {
+      setSalesLoading(false);
+    }
+  }
 "use client";
 
 import { useState, useEffect } from "react";
@@ -249,28 +270,18 @@ export default function MisPublicaciones() {
       <div className="tix-card p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">
-              Mis publicaciones
-            </h1>
-            <p className="text-slate-600 mt-1">
-              Administra tus entradas publicadas (ver, editar, pausar, eliminar).
-            </p>
+            <h1 className="text-2xl font-extrabold text-slate-900">Mis publicaciones</h1>
+            <p className="text-slate-600 mt-1">Administra tus entradas publicadas (ver, editar, pausar, eliminar).</p>
           </div>
-
           <div className="flex items-center gap-2">
-            <button onClick={loadListings} className="tix-btn-ghost">
-              Recargar
-            </button>
+            <a href="/sell" className="tix-btn-primary">Publicar nueva entrada</a>
+            <button onClick={loadListings} className="tix-btn-ghost">Recargar</button>
           </div>
         </div>
 
         {error && (
-          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold">
-            {error}
-          </div>
+          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold">{error}</div>
         )}
-
-        {/* Cards resumen eliminadas para simplificar UI y dejar espacio a la nueva administración de publicaciones */}
 
         {/* Empty state */}
         {!loading && filteredListings.length === 0 && !searchQuery && statusFilter === "all" && (
@@ -280,185 +291,97 @@ export default function MisPublicaciones() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
               </svg>
             </div>
-            <h3 className="text-lg font-extrabold text-slate-900">
-              Aún no tienes publicaciones
-            </h3>
-            <p className="text-slate-600 mt-2 max-w-md mx-auto">
-              Publica tu primera entrada y acá podrás editarla, pausarla o eliminarla.
-            </p>
-            <a
-              href="/sell"
-              className="inline-block mt-6 px-6 py-3 bg-gradient-to-r from-blue-600 to-teal-500 text-white font-extrabold rounded-full hover:shadow-lg transition-all"
-            >
-              Publicar una entrada
-            </a>
+            <h3 className="text-lg font-extrabold text-slate-900">Aún no tienes publicaciones</h3>
+            <p className="text-slate-600 mt-2 max-w-md mx-auto">Publica tu primera entrada y acá podrás editarla, pausarla o eliminarla.</p>
+            <a href="/sell" className="inline-block mt-6 px-6 py-3 bg-gradient-to-r from-blue-600 to-teal-500 text-white font-extrabold rounded-full hover:shadow-lg transition-all">Publicar mi primera entrada</a>
+            <a href="/events" className="block mt-2 text-blue-600 underline">Ver eventos</a>
           </div>
         )}
 
         {/* Tabla publicaciones */}
         {(filteredListings.length > 0 || searchQuery || statusFilter !== "all") && (
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white overflow-hidden">
-            <div className="p-5">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                  <div className="text-lg font-extrabold text-slate-900">
-                    Mis publicaciones
-                  </div>
-                  <div className="text-sm text-slate-600 mt-1">
-                    {filteredListings.length} entrada(s) encontrada(s)
-                  </div>
-                </div>
-
-                <div className="flex flex-col md:flex-row gap-3">
-                  {/* Buscador */}
-                  <input
-                    type="text"
-                    placeholder="Buscar evento, lugar..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-
-                  {/* Filtro estado */}
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">Todos los estados</option>
-                    <option value="active">Activas</option>
-                    <option value="paused">Pausadas</option>
-                    <option value="sold">Vendidas</option>
-                  </select>
-                </div>
+            {/* Barra superior de filtros y orden */}
+            <div className="p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="text-lg font-extrabold text-slate-900">Mis publicaciones</div>
+                <div className="text-sm text-slate-600 mt-1">{filteredListings.length} entrada(s) encontrada(s)</div>
+              </div>
+              <div className="flex flex-col md:flex-row gap-3">
+                <input type="text" placeholder="Buscar por evento, lugar, ciudad…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="all">Todos</option>
+                  <option value="active">Activas</option>
+                  <option value="paused">Pausadas</option>
+                  <option value="sold">Vendidas</option>
+                  <option value="review">En revisión</option>
+                </select>
+                {/* Orden simple */}
+                <select className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="recent">Más recientes</option>
+                  <option value="event">Próximo a ocurrir</option>
+                  <option value="price">Mayor precio</option>
+                </select>
               </div>
             </div>
+            {/* ...existing table code... */}
+          </div>
+        )}
 
-            <div className="overflow-x-auto">
-              <div className="text-xs text-slate-500 mb-2 text-center md:hidden">
-                ← Desliza para ver más →
-              </div>
+        {/* Sección colapsable Vendidas y pagos */}
+        <div className="mt-8">
+          <button onClick={() => { setShowSales(!showSales); if (!sales.length) loadSales(); }} className="w-full text-left px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-extrabold text-slate-700 hover:bg-slate-100 transition-colors flex items-center justify-between">
+            <span>{showSales ? "Ocultar" : "Ver"} vendidas y pagos</span>
+            <svg className={`w-5 h-5 transition-transform ${showSales ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          {showSales && (
+            <div className="mt-4 p-5 bg-white border border-slate-200 rounded-2xl">
+              {!walletConfigured && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 text-sm font-semibold">
+                  Te falta configurar tu Wallet para poder pagarte. <a href="/dashboard?tab=wallet" className="underline text-blue-600">Configurar ahora</a>
+                </div>
+              )}
               <table className="min-w-full text-left">
                 <thead className="bg-slate-50 border-y border-slate-200">
                   <tr className="text-xs font-extrabold text-slate-600">
-                    <th className="px-5 py-3">Fecha pub.</th>
+                    <th className="px-5 py-3">Fecha venta</th>
                     <th className="px-5 py-3">Evento</th>
-                    <th className="px-5 py-3">Fecha evento</th>
-                    <th className="px-5 py-3">Lugar</th>
-                    <th className="px-5 py-3">Precio</th>
+                    <th className="px-5 py-3">Comprador</th>
+                    <th className="px-5 py-3">Monto venta</th>
                     <th className="px-5 py-3">Estado</th>
-                    <th className="px-5 py-3 text-right">Acciones</th>
+                    <th className="px-5 py-3">Pago estimado</th>
                   </tr>
                 </thead>
-
                 <tbody className="divide-y divide-slate-100">
-                  {loading ? (
-                    <tr>
-                      <td className="px-5 py-4 text-slate-600" colSpan={7}>
-                        Cargando publicaciones…
-                      </td>
-                    </tr>
-                  ) : filteredListings.length === 0 ? (
-                    <tr>
-                      <td className="px-5 py-6 text-slate-600 text-center" colSpan={7}>
-                        No se encontraron publicaciones con los filtros aplicados.
-                      </td>
-                    </tr>
+                  {salesLoading ? (
+                    <tr><td colSpan={6} className="px-5 py-4 text-slate-600">Cargando ventas…</td></tr>
+                  ) : sales.length === 0 ? (
+                    <tr><td colSpan={6} className="px-5 py-6 text-slate-600 text-center">No tienes ventas en los últimos 90 días.</td></tr>
                   ) : (
-                    filteredListings.map((listing) => {
-                      const eventTitle = listing.event?.title || "—";
-                      const eventDate = listing.event?.event_datetime || "—";
-                      const venue = listing.event?.venue || "—";
-                      const city = listing.event?.city || "";
-
+                    sales.map((sale) => {
+                      // Calcular pago estimado: 48–72h post evento, saltando fin de semana
+                      const eventDate = new Date(sale.ticket?.event?.starts_at);
+                      let minDate = new Date(eventDate);
+                      let maxDate = new Date(eventDate);
+                      minDate.setDate(minDate.getDate() + 2);
+                      maxDate.setDate(maxDate.getDate() + 3);
+                      // Si cae sábado, pasa a lunes
+                      if (minDate.getDay() === 6) minDate.setDate(minDate.getDate() + 2);
+                      if (minDate.getDay() === 0) minDate.setDate(minDate.getDate() + 1);
+                      if (maxDate.getDay() === 6) maxDate.setDate(maxDate.getDate() + 2);
+                      if (maxDate.getDay() === 0) maxDate.setDate(maxDate.getDate() + 1);
+                      const pagoEstimado = `${formatDateShort(minDate)} a ${formatDateShort(maxDate)}`;
                       return (
-                        <tr key={listing.id} className="hover:bg-slate-50">
-                          <td className="px-5 py-4 text-sm font-semibold text-slate-700">
-                            {formatDateShort(listing.created_at)}
-                          </td>
-
+                        <tr key={sale.id} className="hover:bg-slate-50">
+                          <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatDateShort(sale.paid_at || sale.created_at)}</td>
                           <td className="px-5 py-4">
-                            <div className="text-sm font-extrabold text-slate-900">
-                              {eventTitle}
-                            </div>
-                            {listing.sector && (
-                              <div className="text-xs text-slate-500 mt-1">
-                                {listing.sector}
-                              </div>
-                            )}
+                            <div className="text-sm font-extrabold text-slate-900">{sale.ticket?.event?.title || "—"}</div>
+                            <div className="text-xs text-slate-500 mt-1">{sale.ticket?.event?.venue || "—"} {sale.ticket?.event?.city ? `· ${sale.ticket.event.city}` : ""}</div>
                           </td>
-
-                          <td className="px-5 py-4 text-sm text-slate-700">
-                            {formatDateTime(eventDate)}
-                          </td>
-
-                          <td className="px-5 py-4">
-                            <div className="text-sm text-slate-800">
-                              {safeText(venue, "—")}
-                            </div>
-                            {city && (
-                              <div className="text-xs text-slate-500 mt-1">
-                                {city}
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="px-5 py-4">
-                            <div className="text-sm font-extrabold text-slate-900">
-                              {formatCLP(listing.price)}
-                            </div>
-                          </td>
-
-                          <td className="px-5 py-4">
-                            <span className={statusBadgeClass(listing.status)}>
-                              {statusLabel(listing.status)}
-                            </span>
-                          </td>
-
-                          <td className="px-5 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => openEditModal(listing)}
-                                className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 font-extrabold rounded-full hover:bg-blue-100 transition-colors"
-                                disabled={listing.status === "sold"}
-                              >
-                                Editar
-                              </button>
-
-                              {listing.status === "active" && (
-                                <button
-                                  onClick={() => {
-                                    openEditModal(listing);
-                                    setEditStatus("paused");
-                                  }}
-                                  className="text-xs px-3 py-1.5 bg-amber-50 text-amber-700 font-extrabold rounded-full hover:bg-amber-100 transition-colors"
-                                >
-                                  Pausar
-                                </button>
-                              )}
-
-                              {listing.status === "paused" && (
-                                <button
-                                  onClick={() => {
-                                    openEditModal(listing);
-                                    setEditStatus("active");
-                                  }}
-                                  className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 font-extrabold rounded-full hover:bg-blue-100 transition-colors"
-                                >
-                                  Activar
-                                </button>
-                              )}
-
-                              {listing.status !== "sold" && (
-                                <button
-                                  onClick={() => handleDelete(listing)}
-                                  className="text-xs px-3 py-1.5 bg-rose-50 text-rose-700 font-extrabold rounded-full hover:bg-rose-100 transition-colors"
-                                >
-                                  Eliminar
-                                </button>
-                              )}
-                            </div>
-                          </td>
+                          <td className="px-5 py-4 text-sm text-slate-700">{sale.buyer?.full_name || sale.buyer?.email || "—"}</td>
+                          <td className="px-5 py-4"><div className="text-sm font-extrabold text-slate-900">{formatCLP(sale.total_paid_clp ?? sale.total_clp)}</div></td>
+                          <td className="px-5 py-4">{statusBadgeClass(sale.status)}</td>
+                          <td className="px-5 py-4 text-xs text-slate-700">{pagoEstimado}</td>
                         </tr>
                       );
                     })
@@ -466,38 +389,10 @@ export default function MisPublicaciones() {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Analítica colapsable (botón) */}
-        {summary.total > 0 && (
-          <div className="mt-6">
-            <button
-              onClick={() => setShowAnalytics(!showAnalytics)}
-              className="w-full text-left px-5 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-extrabold text-slate-700 hover:bg-slate-100 transition-colors flex items-center justify-between"
-            >
-              <span>
-                {showAnalytics ? "Ocultar" : "Ver"} analítica de ventas
-              </span>
-              <svg
-                className={`w-5 h-5 transition-transform ${showAnalytics ? "rotate-180" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-
-            {showAnalytics && (
-              <div className="mt-4 p-5 bg-white border border-slate-200 rounded-2xl">
-                <p className="text-slate-600 text-sm">
-                  Próximamente: gráfico de ventas, ingresos mensuales, etc.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+        {/* ...existing code for modal edición... */}
       </div>
 
       {/* Modal de edición */}
