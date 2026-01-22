@@ -30,11 +30,10 @@ function getBearerToken(req) {
     let effectiveTierKey = currentTierKey || "basic";
 
 function isPaid(order) {
-    if (!isPrivileged && roleRank(computedKey) > roleRank(currentTierKey || "basic")) {
-      const { error: upErr } = await admin
-        .from("profiles")
-        .update({ seller_tier: computedKey })
-        .eq("id", userId);
+  const s = String(order?.status || "").toLowerCase();
+  const ps = String(order?.payment_state || "").toLowerCase();
+  return s === "paid" || ps === "paid";
+}
 function normalizeBuyerId(order) {
   return order?.buyer_id || order?.user_id || null;
 }
@@ -108,21 +107,18 @@ export async function GET(req) {
     const soldCount = (tickets || []).filter((t) => String(t.status || "").toLowerCase() === "sold").length;
 
     // 🔥 CATEGORÍA AUTOMÁTICA
-    const computedKey = computeRoleFromSales(soldCount);
-
+    const computedTier = computeRoleFromSales(soldCount);
     let upgraded = false;
-    let effectiveRoleKey = currentRoleKey || "basic";
-
+    let effectiveTierKey = currentRoleKey || "basic";
     // Solo sube nivel (no baja) y no pisa admin/seller
-    if (!isPrivileged && roleRank(computedKey) > roleRank(currentRoleKey || "basic")) {
+    if (!isPrivileged && roleRank(computedTier) > roleRank(currentRoleKey || "basic")) {
       const { error: upErr } = await admin
         .from("profiles")
-        .update({ role: computedKey })
+        .update({ seller_tier: computedTier })
         .eq("id", userId);
-
       if (!upErr) {
         upgraded = true;
-        effectiveRoleKey = computedKey;
+        effectiveTierKey = computedTier;
       }
     }
 
