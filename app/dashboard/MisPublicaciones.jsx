@@ -1,25 +1,8 @@
-  // Estado para sección vendidas y pagos
-  const [sales, setSales] = useState([]);
-  const [salesLoading, setSalesLoading] = useState(false);
-  const [showSales, setShowSales] = useState(false);
-  const [walletConfigured, setWalletConfigured] = useState(true); // Simulación, reemplazar por lógica real
 
-  // Cargar ventas (últimos 90 días)
-  async function loadSales() {
-    setSalesLoading(true);
-    try {
-      const res = await fetch("/api/orders/my-sales");
-      const data = await res.json();
-      setSales(data.recentSales || []);
-      // Simulación wallet: si falta, mostrar banner
-      setWalletConfigured(false); // Cambia según lógica real
-    } catch (err) {
-      setSales([]);
-    } finally {
-      setSalesLoading(false);
-    }
-  }
 "use client";
+
+// Estado para sección vendidas y pagos
+// ...existing code for state and loadSales...
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
