@@ -65,12 +65,13 @@ export default function MisPublicaciones() {
     // Estado para publicaciones
     const [listings, setListings] = useState([]);
     const [summary, setSummary] = useState({ total: 0, active: 0, paused: 0, sold: 0 });
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
     // Filtros
     const [searchQuery, setSearchQuery] = useState("");
-    const [statusFilter, setStatusFilter] = useState("all"); // all, active, paused, sold
+    const [statusFilter, setStatusFilter] = useState("all");
+    const [sortOrder, setSortOrder] = useState("recent");
 
     // Modal edición
     const [editingListing, setEditingListing] = useState(null);
@@ -80,9 +81,6 @@ export default function MisPublicaciones() {
     const [editError, setEditError] = useState(null);
     const [editSuccess, setEditSuccess] = useState(false);
 
-    // Analytics colapsado
-    const [showAnalytics, setShowAnalytics] = useState(false);
-
     useEffect(() => {
       loadListings();
     }, []);
@@ -91,17 +89,15 @@ export default function MisPublicaciones() {
       setLoading(true);
       setError(null);
       try {
-        // Usar endpoint unificado que trae datos completos del evento y ubicación
         const res = await fetch("/api/tickets/my-publications");
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || "Error al cargar publicaciones");
+          throw new Error(errData.error || "No pudimos cargar tus entradas. Reintentar.");
         }
         const data = await res.json();
         setListings(data.tickets || []);
         setSummary({ total: (data.tickets || []).length });
       } catch (err) {
-        console.error(err);
         setError(err.message);
       } finally {
         setLoading(false);
@@ -226,9 +222,8 @@ export default function MisPublicaciones() {
     }
   }
 
-  // Aplicar filtros
-  const filteredListings = listings.filter((l) => {
-    // Filtro de búsqueda
+  // Aplicar filtros y orden
+  let filteredListings = listings.filter((l) => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const eventTitle = (l.event?.title || "").toLowerCase();
@@ -238,31 +233,52 @@ export default function MisPublicaciones() {
         return false;
       }
     }
-
-    // Filtro de estado
     if (statusFilter !== "all") {
       if (l.status !== statusFilter) return false;
     }
-
     return true;
   });
+  if (sortOrder === "price") {
+    filteredListings = filteredListings.slice().sort((a, b) => (b.price || 0) - (a.price || 0));
+  } else if (sortOrder === "event") {
+    filteredListings = filteredListings.slice().sort((a, b) => {
+      const da = new Date(a.event?.starts_at || 0);
+      const db = new Date(b.event?.starts_at || 0);
+      return da - db;
+    });
+  } else {
+    filteredListings = filteredListings.slice().sort((a, b) => {
+      const da = new Date(a.created_at || 0);
+      const db = new Date(b.created_at || 0);
+      return db - da;
+    });
+  }
 
   return (
     <>
       <div className="tix-card p-6">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 sticky top-0 z-10 bg-white pb-2 mb-2">
           <div>
             <h1 className="text-2xl font-extrabold text-slate-900">Mis publicaciones</h1>
-            <p className="text-slate-600 mt-1">Administra tus entradas publicadas (ver, editar, pausar, eliminar).</p>
+            <p className="text-slate-600 mt-1">Administra tus entradas: ver, editar, pausar o eliminar.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <a href="/sell" className="tix-btn-primary">Publicar nueva entrada</a>
+          <div className="flex items-center gap-2 mt-2 md:mt-0">
+            <a href="/sell" className="tix-btn">Publicar nueva entrada</a>
             <button onClick={loadListings} className="tix-btn-ghost">Recargar</button>
           </div>
         </div>
 
         {error && (
           <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 font-semibold">{error}</div>
+        )}
+
+        {/* Loading skeleton */}
+        {loading && (
+          <div className="mt-6 space-y-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-16 bg-slate-100 rounded-xl animate-pulse" />
+            ))}
+          </div>
         )}
 
         {/* Empty state */}
@@ -281,10 +297,10 @@ export default function MisPublicaciones() {
         )}
 
         {/* Tabla publicaciones */}
-        {(filteredListings.length > 0 || searchQuery || statusFilter !== "all") && (
+        {(filteredListings.length > 0 || searchQuery || statusFilter !== "all") && !loading && (
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white overflow-hidden">
             {/* Barra superior de filtros y orden */}
-            <div className="p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4 sticky top-0 z-10 bg-white border-b border-slate-100">
               <div>
                 <div className="text-lg font-extrabold text-slate-900">Mis publicaciones</div>
                 <div className="text-sm text-slate-600 mt-1">{filteredListings.length} entrada(s) encontrada(s)</div>
@@ -298,8 +314,7 @@ export default function MisPublicaciones() {
                   <option value="sold">Vendidas</option>
                   <option value="review">En revisión</option>
                 </select>
-                {/* Orden simple */}
-                <select className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} className="px-4 py-2 border border-slate-300 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="recent">Más recientes</option>
                   <option value="event">Próximo a ocurrir</option>
                   <option value="price">Mayor precio</option>
@@ -322,11 +337,7 @@ export default function MisPublicaciones() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {loading ? (
-                    <tr>
-                      <td className="px-5 py-4 text-slate-600" colSpan={7}>Cargando publicaciones…</td>
-                    </tr>
-                  ) : filteredListings.length === 0 ? (
+                  {filteredListings.length === 0 ? (
                     <tr>
                       <td className="px-5 py-6 text-slate-600 text-center" colSpan={7}>No se encontraron publicaciones con los filtros aplicados.</td>
                     </tr>
@@ -336,15 +347,15 @@ export default function MisPublicaciones() {
                       const eventDate = listing.event?.starts_at || "—";
                       const venue = listing.event?.venue || "—";
                       const city = listing.event?.city || "";
-                      const row = listing.row_label || listing.row || "";
-                      const seat = listing.seat_label || listing.seat || "";
+                      const row = listing.row || "";
+                      const seat = listing.seat || "";
                       return (
                         <tr key={listing.id} className="hover:bg-slate-50">
                           <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatDateShort(listing.created_at)}</td>
                           <td className="px-5 py-4">
                             <div className="text-sm font-extrabold text-slate-900">{eventTitle}</div>
                             <div className="text-xs text-slate-500 mt-1">
-                              {listing.section_label || listing.section || ""}
+                              {listing.section || ""}
                               {row && ` · Fila ${row}`}
                               {seat && ` · Asiento ${seat}`}
                             </div>
