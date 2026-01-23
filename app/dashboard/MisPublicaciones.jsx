@@ -1,3 +1,5 @@
+"use client";
+
 // Helper para sumar días hábiles (excluye sábado/domingo)
 function addBusinessDays(date, n) {
   let d = new Date(date);
@@ -9,8 +11,6 @@ function addBusinessDays(date, n) {
   }
   return d;
 }
-
-"use client";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
