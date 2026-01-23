@@ -62,6 +62,57 @@ function safeText(v, fallback = "—") {
 }
 
 export default function MisPublicaciones() {
+    // Estado para publicaciones
+    const [listings, setListings] = useState([]);
+    const [summary, setSummary] = useState({ total: 0, active: 0, paused: 0, sold: 0 });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    // Filtros
+    const [searchQuery, setSearchQuery] = useState("");
+    const [statusFilter, setStatusFilter] = useState("all"); // all, active, paused, sold
+
+    // Modal edición
+    const [editingListing, setEditingListing] = useState(null);
+    const [editPrice, setEditPrice] = useState("");
+    const [editStatus, setEditStatus] = useState("active");
+    const [editLoading, setEditLoading] = useState(false);
+    const [editError, setEditError] = useState(null);
+    const [editSuccess, setEditSuccess] = useState(false);
+
+    // Analytics colapsado
+    const [showAnalytics, setShowAnalytics] = useState(false);
+
+    useEffect(() => {
+      loadListings();
+    }, []);
+
+    async function loadListings() {
+      setLoading(true);
+      setError(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) throw new Error("No hay sesión");
+
+        const res = await fetch("/api/tickets/my-listings", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "Error al cargar publicaciones");
+        }
+
+        const data = await res.json();
+        setListings(data.tickets || []);
+        setSummary(data.summary || { total: 0, active: 0, paused: 0, sold: 0 });
+      } catch (err) {
+        console.error(err);
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
   // Estado para sección vendidas y pagos
   const [sales, setSales] = useState([]);
   const [salesLoading, setSalesLoading] = useState(false);
