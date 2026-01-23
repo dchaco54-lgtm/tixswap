@@ -121,10 +121,10 @@ export async function POST(req) {
     if (sellerId) {
       const { data: sellerProfile } = await sb
         .from('profiles')
-        .select('role')
+        .select('user_type, seller_tier, role') // role legacy
         .eq('id', sellerId)
         .single();
-      sellerRole = sellerProfile?.role ?? 'basic';
+      sellerRole = sellerProfile?.user_type || sellerProfile?.seller_tier || sellerProfile?.role || 'basic';
     }
     
     // Calcular fee basado en rol del vendedor
