@@ -1,7 +1,16 @@
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+import { buildTicketSelect, detectTicketColumns, normalizeTicket } from '@/lib/db/ticketSchema';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !supabaseServiceKey) {
+	throw new Error('Missing Supabase env vars');
+}
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+	auth: { persistSession: false },
+});
 
 // GET /api/tickets/my-publications?status=...&q=...&sort=...
 // Alias: este endpoint reusa la lógica de my-listings para robustez y shape único
@@ -9,37 +18,24 @@ import { buildTicketSelect, detectTicketColumns, normalizeTicket } from '@/lib/d
 
 export async function GET(request) {
 	try {
-		const supabase = createClient();
-		let userId = null;
-		let token = null;
-
-		// Next.js App Router: cookies ya están en el contexto
-		const { data: { user }, error: userError } = await supabase.auth.getUser();
-		if (user && !userError) {
-			userId = user.id;
+		// Auth con bearer token
+		const authHeader = request.headers.get('authorization');
+		if (!authHeader?.startsWith('Bearer ')) {
+			return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
 		}
 
-		// 2. Si no hay userId, intentar por header Authorization
-		if (!userId) {
-			const authHeader = request.headers.get('authorization');
-			if (authHeader?.startsWith('Bearer ')) {
-				token = authHeader.replace('Bearer ', '');
-				const { data: authData, error: authErr } = await supabase.auth.getUser(token);
-				if (authData?.user && !authErr) {
-					userId = authData.user.id;
-				}
-			}
+		const token = authHeader.replace('Bearer ', '');
+		const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+		if (authErr || !authData?.user) {
+			return NextResponse.json({ error: 'Sesión inválida' }, { status: 401 });
 		}
 
-		if (!userId) {
-			console.error('[my-publications] No autorizado. userId:', userId);
-			return NextResponse.json({ error: 'No autorizado', debug: { userId } }, { status: 401 });
-		}
+		const userId = authData.user.id;
 
-		// 3. Detectar columnas y armar select robusto
-		const columns = await detectTicketColumns(supabase);
+		// Detectar columnas y armar select robusto
+		const columns = await detectTicketColumns(supabaseAdmin);
 		const selectStr = buildTicketSelect(columns);
-		const { data: tickets, error: ticketsErr } = await supabase
+		const { data: tickets, error: ticketsErr } = await supabaseAdmin
 			.from('tickets')
 			.select(selectStr)
 			.eq('seller_id', userId)
@@ -47,7 +43,6 @@ export async function GET(request) {
 			.limit(100);
 
 		if (ticketsErr) {
-			console.error('[my-publications] Error al obtener publicaciones:', ticketsErr);
 			return NextResponse.json({ error: 'Error al obtener publicaciones', details: ticketsErr.message }, { status: 500 });
 		}
 
@@ -68,7 +63,6 @@ export async function GET(request) {
 			},
 		});
 	} catch (err) {
-		console.error('[my-publications] Fatal error:', err);
 		return NextResponse.json({ error: 'Error inesperado', details: err?.message, stack: err?.stack }, { status: 500 });
 	}
 }
