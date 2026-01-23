@@ -6,4 +6,5 @@ import { createClient } from '@/lib/supabase/server';
 // Alias: este endpoint reusa la lógica de my-listings para robustez y shape único
 import * as myListings from '../my-listings/route.js';
 
+// ...existing code...
 export const GET = myListings.GET;
