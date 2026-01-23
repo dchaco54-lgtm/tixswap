@@ -91,21 +91,15 @@ export default function MisPublicaciones() {
       setLoading(true);
       setError(null);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) throw new Error("No hay sesión");
-
-        const res = await fetch("/api/tickets/my-listings", {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-
+        // Usar endpoint unificado que trae datos completos del evento y ubicación
+        const res = await fetch("/api/tickets/my-publications");
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.error || "Error al cargar publicaciones");
         }
-
         const data = await res.json();
         setListings(data.tickets || []);
-        setSummary(data.summary || { total: 0, active: 0, paused: 0, sold: 0 });
+        setSummary({ total: (data.tickets || []).length });
       } catch (err) {
         console.error(err);
         setError(err.message);
@@ -339,15 +333,21 @@ export default function MisPublicaciones() {
                   ) : (
                     filteredListings.map((listing) => {
                       const eventTitle = listing.event?.title || "—";
-                      const eventDate = listing.event?.event_datetime || "—";
+                      const eventDate = listing.event?.starts_at || "—";
                       const venue = listing.event?.venue || "—";
                       const city = listing.event?.city || "";
+                      const row = listing.row_label || listing.row || "";
+                      const seat = listing.seat_label || listing.seat || "";
                       return (
                         <tr key={listing.id} className="hover:bg-slate-50">
                           <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatDateShort(listing.created_at)}</td>
                           <td className="px-5 py-4">
                             <div className="text-sm font-extrabold text-slate-900">{eventTitle}</div>
-                            {listing.sector && (<div className="text-xs text-slate-500 mt-1">{listing.sector}</div>)}
+                            <div className="text-xs text-slate-500 mt-1">
+                              {listing.section_label || listing.section || ""}
+                              {row && ` · Fila ${row}`}
+                              {seat && ` · Asiento ${seat}`}
+                            </div>
                           </td>
                           <td className="px-5 py-4 text-sm text-slate-700">{formatDateTime(eventDate)}</td>
                           <td className="px-5 py-4">
