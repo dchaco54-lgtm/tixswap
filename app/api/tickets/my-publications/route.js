@@ -1,40 +1,31 @@
+
 export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { buildTicketSelect, detectTicketColumns, normalizeTicket } from '@/lib/db/ticketSchema';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!supabaseUrl || !supabaseServiceKey) {
-	throw new Error('Missing Supabase env vars');
-}
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-	auth: { persistSession: false },
-});
+import { createClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
 
 // GET /api/tickets/my-publications?status=...&q=...&sort=...
 // Alias: este endpoint reusa la lógica de my-listings para robustez y shape único
 
 export async function GET(request) {
 	try {
-		// Auth con bearer token
-		const authHeader = request.headers.get('authorization');
-		if (!authHeader?.startsWith('Bearer ')) {
+		const supabase = createClient(cookies());
+		const { data: { user }, error: userError } = await supabase.auth.getUser();
+		if (userError || !user) {
 			return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
 		}
-
-		const token = authHeader.replace('Bearer ', '');
-		const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-		if (authErr || !authData?.user) {
-			return NextResponse.json({ error: 'Sesión inválida' }, { status: 401 });
-		}
-
-		const userId = authData.user.id;
+		const userId = user.id;
 
 		// Detectar columnas y armar select robusto
-		const columns = await detectTicketColumns(supabaseAdmin);
+		let columns;
+		try {
+			columns = await detectTicketColumns(supabase);
+		} catch (colErr) {
+			return NextResponse.json({ error: 'Error al detectar columnas', details: colErr?.message }, { status: 500 });
+		}
 		const selectStr = buildTicketSelect(columns);
-		const { data: tickets, error: ticketsErr } = await supabaseAdmin
+		const { data: tickets, error: ticketsErr } = await supabase
 			.from('tickets')
 			.select(selectStr)
 			.eq('seller_id', userId)
@@ -62,6 +53,7 @@ export async function GET(request) {
 			},
 		});
 	} catch (err) {
+		console.error('Error en GET /api/tickets/my-publications:', err);
 		return NextResponse.json({ error: 'Error inesperado', details: err?.message, stack: err?.stack }, { status: 500 });
 	}
 }
