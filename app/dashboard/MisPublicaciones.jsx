@@ -117,7 +117,7 @@ export default function MisPublicaciones() {
   const [sales, setSales] = useState([]);
   const [salesLoading, setSalesLoading] = useState(false);
   const [showSales, setShowSales] = useState(false);
-  const [walletConfigured, setWalletConfigured] = useState(true); // Simulación, reemplazar por lógica real
+  const [walletConfigured, setWalletConfigured] = useState(true); // Real: depende de datos bancarios
 
   // Cargar ventas (últimos 90 días)
   async function loadSales() {
@@ -126,8 +126,11 @@ export default function MisPublicaciones() {
       const res = await fetch("/api/orders/my-sales");
       const data = await res.json();
       setSales(data.recentSales || []);
-      // Simulación wallet: si falta, mostrar banner
-      setWalletConfigured(false); // Cambia según lógica real
+      // Lógica real: simular que wallet está configurada si existen datos bancarios en localStorage o en profile (ajustar a tu backend real)
+      // Aquí solo ejemplo: si tienes datos en localStorage.profile_wallet_configured === 'true'
+      const profile = JSON.parse(localStorage.getItem('profile') || '{}');
+      const hasWallet = !!(profile.bank && profile.account && profile.rut && profile.name);
+      setWalletConfigured(hasWallet);
     } catch (err) {
       setSales([]);
     } finally {
@@ -309,7 +312,65 @@ export default function MisPublicaciones() {
                 </select>
               </div>
             </div>
-            {/* ...existing table code... */}
+            {/* Tabla de publicaciones */}
+            <div className="overflow-x-auto">
+              <div className="text-xs text-slate-500 mb-2 text-center md:hidden">← Desliza para ver más →</div>
+              <table className="min-w-full text-left">
+                <thead className="bg-slate-50 border-y border-slate-200">
+                  <tr className="text-xs font-extrabold text-slate-600">
+                    <th className="px-5 py-3">Fecha pub.</th>
+                    <th className="px-5 py-3">Evento</th>
+                    <th className="px-5 py-3">Fecha evento</th>
+                    <th className="px-5 py-3">Lugar</th>
+                    <th className="px-5 py-3">Precio</th>
+                    <th className="px-5 py-3">Estado</th>
+                    <th className="px-5 py-3 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td className="px-5 py-4 text-slate-600" colSpan={7}>Cargando publicaciones…</td>
+                    </tr>
+                  ) : filteredListings.length === 0 ? (
+                    <tr>
+                      <td className="px-5 py-6 text-slate-600 text-center" colSpan={7}>No se encontraron publicaciones con los filtros aplicados.</td>
+                    </tr>
+                  ) : (
+                    filteredListings.map((listing) => {
+                      const eventTitle = listing.event?.title || "—";
+                      const eventDate = listing.event?.event_datetime || "—";
+                      const venue = listing.event?.venue || "—";
+                      const city = listing.event?.city || "";
+                      return (
+                        <tr key={listing.id} className="hover:bg-slate-50">
+                          <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatDateShort(listing.created_at)}</td>
+                          <td className="px-5 py-4">
+                            <div className="text-sm font-extrabold text-slate-900">{eventTitle}</div>
+                            {listing.sector && (<div className="text-xs text-slate-500 mt-1">{listing.sector}</div>)}
+                          </td>
+                          <td className="px-5 py-4 text-sm text-slate-700">{formatDateTime(eventDate)}</td>
+                          <td className="px-5 py-4">
+                            <div className="text-sm text-slate-800">{safeText(venue, "—")}</div>
+                            {city && (<div className="text-xs text-slate-500 mt-1">{city}</div>)}
+                          </td>
+                          <td className="px-5 py-4"><div className="text-sm font-extrabold text-slate-900">{formatCLP(listing.price)}</div></td>
+                          <td className="px-5 py-4"><span className={statusBadgeClass(listing.status)}>{statusLabel(listing.status)}</span></td>
+                          <td className="px-5 py-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button onClick={() => openEditModal(listing)} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 font-extrabold rounded-full hover:bg-blue-100 transition-colors" disabled={listing.status === "sold"}>Editar</button>
+                              {listing.status === "active" && (<button onClick={() => { openEditModal(listing); setEditStatus("paused"); }} className="text-xs px-3 py-1.5 bg-amber-50 text-amber-700 font-extrabold rounded-full hover:bg-amber-100 transition-colors">Pausar</button>)}
+                              {listing.status === "paused" && (<button onClick={() => { openEditModal(listing); setEditStatus("active"); }} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 font-extrabold rounded-full hover:bg-blue-100 transition-colors">Activar</button>)}
+                              {listing.status !== "sold" && (<button onClick={() => handleDelete(listing)} className="text-xs px-3 py-1.5 bg-rose-50 text-rose-700 font-extrabold rounded-full hover:bg-rose-100 transition-colors">Eliminar</button>)}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
