@@ -15,6 +15,10 @@ export async function GET(req) {
   const q = searchParams.get('q');
   const sort = searchParams.get('sort');
 
+
+  // Solo seleccionar columnas que existen (robusto a schema)
+  // Si alguna columna no existe, no la selecciones
+  // Para MVP, asume que currency, row_label, seat_label, section_label existen tras migración
   let query = supabase
     .from('tickets')
     .select(`
@@ -42,10 +46,12 @@ export async function GET(req) {
     query = query.order('created_at', { ascending: false });
   }
 
-  const { data, error } = await query;
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  try {
+    const { data, error } = await query;
+    if (error) throw error;
+    return NextResponse.json({ tickets: data });
+  } catch (err) {
+    console.error("[my-publications]", err);
+    return NextResponse.json({ error: "No se pudo cargar tus publicaciones. Intenta de nuevo." }, { status: 500 });
   }
-
-  return NextResponse.json({ tickets: data });
 }
