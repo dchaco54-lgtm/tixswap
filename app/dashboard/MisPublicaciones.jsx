@@ -94,24 +94,31 @@ export default function MisPublicaciones() {
       loadListings();
     }, []);
 
-    async function loadListings() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/tickets/my-publications");
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || "No pudimos cargar tus entradas. Reintentar.");
+      async function loadListings() {
+        setLoading(true);
+        setError(null);
+        try {
+          // Obtener el token del usuario autenticado desde Supabase
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
+          const res = await fetch("/api/tickets/my-publications", {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || "No pudimos cargar tus entradas. Reintentar.");
+          }
+          const data = await res.json();
+          setListings(data.tickets || []);
+          setSummary({ total: (data.tickets || []).length });
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setLoading(false);
         }
-        const data = await res.json();
-        setListings(data.tickets || []);
-        setSummary({ total: (data.tickets || []).length });
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
       }
-    }
   // Estado para sección vendidas y pagos
   const [sales, setSales] = useState([]);
   const [salesLoading, setSalesLoading] = useState(false);
