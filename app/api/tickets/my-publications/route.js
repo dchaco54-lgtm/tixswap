@@ -14,7 +14,6 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
 
 // GET /api/tickets/my-publications?status=...&q=...&sort=...
 // Alias: este endpoint reusa la lógica de my-listings para robustez y shape único
-import { buildTicketSelect, detectTicketColumns, normalizeTicket } from '@/lib/db/ticketSchema';
 
 export async function GET(request) {
 	try {
