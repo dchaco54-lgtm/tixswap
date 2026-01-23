@@ -7,4 +7,3 @@ import { createClient } from '@/lib/supabase/server';
 import * as myListings from '../my-listings/route.js';
 
 export const GET = myListings.GET;
-}

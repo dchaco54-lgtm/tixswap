@@ -1,3 +1,14 @@
+// Helper para sumar días hábiles (excluye sábado/domingo)
+function addBusinessDays(date, n) {
+  let d = new Date(date);
+  let added = 0;
+  while (added < n) {
+    d.setDate(d.getDate() + 1);
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) added++;
+  }
+  return d;
+}
 
 "use client";
 
@@ -405,7 +416,7 @@ export default function MisPublicaciones() {
                     <th className="px-5 py-3">Evento</th>
                     <th className="px-5 py-3">Comprador</th>
                     <th className="px-5 py-3">Monto venta</th>
-                    <th className="px-5 py-3">Estado</th>
+                    <th className="px-5 py-3">Estado pago</th>
                     <th className="px-5 py-3">Pago estimado</th>
                   </tr>
                 </thead>
@@ -416,18 +427,18 @@ export default function MisPublicaciones() {
                     <tr><td colSpan={6} className="px-5 py-6 text-slate-600 text-center">No tienes ventas en los últimos 90 días.</td></tr>
                   ) : (
                     sales.map((sale) => {
-                      // Calcular pago estimado: 48–72h post evento, saltando fin de semana
-                      const eventDate = new Date(sale.ticket?.event?.starts_at);
-                      let minDate = new Date(eventDate);
-                      let maxDate = new Date(eventDate);
-                      minDate.setDate(minDate.getDate() + 2);
-                      maxDate.setDate(maxDate.getDate() + 3);
-                      // Si cae sábado, pasa a lunes
-                      if (minDate.getDay() === 6) minDate.setDate(minDate.getDate() + 2);
-                      if (minDate.getDay() === 0) minDate.setDate(minDate.getDate() + 1);
-                      if (maxDate.getDay() === 6) maxDate.setDate(maxDate.getDate() + 2);
-                      if (maxDate.getDay() === 0) maxDate.setDate(maxDate.getDate() + 1);
-                      const pagoEstimado = `${formatDateShort(minDate)} a ${formatDateShort(maxDate)}`;
+                      // Calcular pago estimado: 48–72h hábiles post evento
+                      const eventDate = sale.ticket?.event?.starts_at ? new Date(sale.ticket.event.starts_at) : null;
+                      let minDate = eventDate ? addBusinessDays(eventDate, 2) : null;
+                      let maxDate = eventDate ? addBusinessDays(eventDate, 3) : null;
+                      const pagoEstimado = (minDate && maxDate)
+                        ? `${formatDateShort(minDate)} a ${formatDateShort(maxDate)}`
+                        : "—";
+                      // Estado pago
+                      let estadoPago = "En custodia";
+                      if (!walletConfigured) estadoPago = "Pendiente de wallet";
+                      else if (sale.payment_state === "released") estadoPago = "Pagado";
+                      else if (sale.payment_state === "releasing") estadoPago = "Liberación en curso";
                       return (
                         <tr key={sale.id} className="hover:bg-slate-50">
                           <td className="px-5 py-4 text-sm font-semibold text-slate-700">{formatDateShort(sale.paid_at || sale.created_at)}</td>
@@ -437,7 +448,7 @@ export default function MisPublicaciones() {
                           </td>
                           <td className="px-5 py-4 text-sm text-slate-700">{sale.buyer?.full_name || sale.buyer?.email || "—"}</td>
                           <td className="px-5 py-4"><div className="text-sm font-extrabold text-slate-900">{formatCLP(sale.total_paid_clp ?? sale.total_clp)}</div></td>
-                          <td className="px-5 py-4">{statusBadgeClass(sale.status)}</td>
+                          <td className="px-5 py-4 text-xs text-slate-700">{estadoPago}</td>
                           <td className="px-5 py-4 text-xs text-slate-700">{pagoEstimado}</td>
                         </tr>
                       );
