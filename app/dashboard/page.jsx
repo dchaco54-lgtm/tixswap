@@ -362,7 +362,18 @@ function DashboardContent() {
     }
 
     setTab(id);
-    router.replace(`/dashboard?tab=${encodeURIComponent(id)}`);
+    // Navegación por ruta real (no tabs)
+    if (id === 'mis_publicaciones') {
+      router.replace('/dashboard/publicaciones');
+    } else if (id === 'mis_ventas') {
+      router.replace('/dashboard/purchases');
+    } else if (id === 'wallet') {
+      router.replace('/dashboard/wallet');
+    } else if (id === 'soporte') {
+      router.replace('/dashboard/soporte');
+    } else {
+      router.replace('/dashboard');
+    }
   };
 
   const requestChangeTicket = (field) => {
@@ -464,7 +475,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
       const token = sessionRes?.session?.access_token;
 
       if (!token) {
-        router.replace(`/login?redirectTo=${encodeURIComponent("/dashboard?tab=mis_ventas")}`);
+        router.replace(`/login?redirectTo=${encodeURIComponent("/dashboard/purchases")}`);
         return;
       }
 

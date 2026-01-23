@@ -54,7 +54,7 @@ export default function PublicationDetailPage() {
   }, [id]);
 
   function handleEdit() {
-    router.push(`/sell/confirm?editTicketId=${id}&returnTo=/dashboard?tab=mis_publicaciones`);
+    router.push(`/sell/confirm?editTicketId=${id}&returnTo=/dashboard/publicaciones`);
   }
 
   async function handlePauseReactivate() {
@@ -91,7 +91,7 @@ export default function PublicationDetailPage() {
       const res = await fetch(`/api/tickets/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Error al eliminar publicación");
-      router.push("/dashboard?tab=mis_publicaciones");
+      router.push("/dashboard/publicaciones");
     } catch (err) {
       setActionError(err.message);
     } finally {
@@ -105,7 +105,7 @@ export default function PublicationDetailPage() {
       <main className="flex-1 tix-container py-10">
         <button
           className="mb-6 px-4 py-2 rounded-full bg-slate-100 text-slate-700 font-semibold hover:bg-slate-200"
-          onClick={() => router.push("/dashboard?tab=mis_publicaciones")}
+          onClick={() => router.push("/dashboard/publicaciones")}
         >
           ← Volver al panel
         </button>

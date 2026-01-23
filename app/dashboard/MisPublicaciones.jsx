@@ -384,7 +384,7 @@ export default function MisPublicaciones() {
             <div className="mt-4 p-5 bg-white border border-slate-200 rounded-2xl">
               {!walletConfigured && (
                 <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 text-sm font-semibold">
-                  Te falta configurar tu Wallet para poder pagarte. <a href="/dashboard?tab=wallet" className="underline text-blue-600">Configurar ahora</a>
+                  Te falta configurar tu Wallet para poder pagarte. <a href="/dashboard/wallet" className="underline text-blue-600">Configurar ahora</a>
                 </div>
               )}
               <table className="min-w-full text-left">
