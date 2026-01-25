@@ -1,9 +1,10 @@
 // app/api/tickets/listing/route.js
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { calculateFees } from "@/lib/fees";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -12,59 +13,64 @@ if (!supabaseUrl || !supabaseServiceKey) {
   throw new Error("Missing Supabase env vars");
 }
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+const admin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { persistSession: false },
 });
 
-function getBearerToken(req) {
-  const authHeader = req.headers.get("authorization") || "";
-  const [type, token] = authHeader.split(" ");
-  if ((type || "").toLowerCase() !== "bearer") return null;
-  return token || null;
-}
-
-function calcPlatformFeeCLP(priceCLP) {
-  const p = Math.round(Number(priceCLP) || 0);
-  if (!p || p <= 0) return 0;
-  return Math.max(Math.round(p * 0.025), 1200);
-}
-
-async function getTicketColumns() {
-  // Traemos solo las columnas que nos importan (schema-safe)
-  const { data, error } = await supabaseAdmin
+async function getTicketsColumnSet() {
+  const { data, error } = await admin
     .from("information_schema.columns")
     .select("column_name")
     .eq("table_schema", "public")
-    .eq("table_name", "tickets")
-    .in("column_name", ["price", "price_clp", "platform_fee", "notes", "status", "deleted_at"]);
+    .eq("table_name", "tickets");
 
-  if (error) throw error;
+  if (error) return new Set();
+  return new Set((data || []).map((x) => x.column_name));
+}
 
-  const set = new Set((data || []).map((c) => c.column_name));
-  return set;
+function normalizeStatus(input) {
+  const s = String(input || "").trim().toLowerCase();
+  // soporta strings “humanos” por si el front manda algo raro
+  const map = {
+    activa: "active",
+    activo: "active",
+    disponible: "available",
+    pausada: "paused",
+    pausado: "paused",
+    vendida: "sold",
+    cancelada: "cancelled",
+  };
+  return map[s] || s;
+}
+
+function buildOwnerOrClause(cols, userId) {
+  const ownerCols = ["seller_id", "owner_id", "user_id"].filter((c) => cols.has(c));
+  if (!ownerCols.length) return null;
+  return ownerCols.map((c) => `${c}.eq.${userId}`).join(",");
 }
 
 /**
  * PATCH /api/tickets/listing
- * Editar una publicación (precio, estado)
  * Body: { ticketId, price?, status?, notes? }
  */
 export async function PATCH(request) {
   try {
     // Auth
-    const token = getBearerToken(request);
-    if (!token) {
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    const token = authHeader.replace("Bearer ", "");
+    const { data: authData, error: authErr } = await admin.auth.getUser(token);
     if (authErr || !authData?.user) {
       return NextResponse.json({ error: "Sesión inválida" }, { status: 401 });
     }
-
     const userId = authData.user.id;
 
-    // Parse body
+    const cols = await getTicketsColumnSet();
+
+    // Body
     const body = await request.json().catch(() => ({}));
     const { ticketId, price, status, notes } = body || {};
 
@@ -72,114 +78,93 @@ export async function PATCH(request) {
       return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
     }
 
-    // Verificar ownership
-    const { data: ticket, error: fetchErr } = await supabaseAdmin
+    // Fetch ticket (sin asumir columnas)
+    const selectFields = ["id", "status", "seller_id", "owner_id", "user_id"].filter((f) => cols.has(f));
+    const sel = selectFields.length ? selectFields.join(",") : "id";
+
+    const { data: ticket, error: fetchErr } = await admin
       .from("tickets")
-      .select("id, seller_id, status, price, price_clp")
+      .select(sel)
       .eq("id", ticketId)
-      .single();
+      .maybeSingle();
 
     if (fetchErr || !ticket) {
       return NextResponse.json({ error: "Publicación no encontrada" }, { status: 404 });
     }
 
-    if (ticket.seller_id !== userId) {
-      return NextResponse.json(
-        { error: "No tienes permiso para editar esta publicación" },
-        { status: 403 }
-      );
+    // Ownership (seller/owner/user)
+    const ownerOr = buildOwnerOrClause(cols, userId);
+    if (ownerOr) {
+      // validamos ownership “de verdad”
+      const { data: ownRow } = await admin
+        .from("tickets")
+        .select("id")
+        .eq("id", ticketId)
+        .or(ownerOr)
+        .maybeSingle();
+
+      if (!ownRow) {
+        return NextResponse.json({ error: "No tienes permiso para editar esta publicación" }, { status: 403 });
+      }
     }
 
-    // Schema-safe: detectamos columnas dentro del handler (IMPORTANTE: no fuera, por el build)
-    let cols;
-    try {
-      cols = await getTicketColumns();
-    } catch (schemaErr) {
-      console.error("[listing PATCH] Schema detection error:", schemaErr);
-      return NextResponse.json({ error: "Error interno" }, { status: 500 });
-    }
-
-    const hasPrice = cols.has("price");
-    const hasPriceClp = cols.has("price_clp");
-    const hasPlatformFee = cols.has("platform_fee");
-    const hasNotes = cols.has("notes");
-    const hasStatus = cols.has("status");
-
-    // Construir updates
     const updates = {};
 
-    // Precio
+    // Price update (actualiza price y/o price_clp si existen)
     if (price !== undefined) {
-      const parsedPrice = Math.round(Number(price) || 0);
-      if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      const numPrice = Math.round(Number(price));
+      if (!Number.isFinite(numPrice) || numPrice <= 0) {
         return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
       }
 
-      // ✅ Sincroniza price y price_clp si existen
-      if (hasPrice) updates.price = parsedPrice;
-      if (hasPriceClp) updates.price_clp = parsedPrice;
+      if (cols.has("price")) updates.price = numPrice;
+      if (cols.has("price_clp")) updates.price_clp = numPrice;
 
-      if (!hasPrice && !hasPriceClp) {
-        return NextResponse.json(
-          { error: "No existe columna de precio (price/price_clp) en tickets" },
-          { status: 500 }
-        );
-      }
-
-      // ✅ Fee correcto: 2.5% con mínimo 1200
-      if (hasPlatformFee) {
-        updates.platform_fee = calcPlatformFeeCLP(parsedPrice);
-      }
+      // Fee fijo: 2.5% min 1200
+      const fees = calculateFees(numPrice);
+      if (cols.has("platform_fee")) updates.platform_fee = fees.platformFee;
+      if (cols.has("platform_fee_clp")) updates.platform_fee_clp = fees.platformFee;
     }
 
-    // Estado
+    // Status update
     if (status !== undefined) {
-      if (!hasStatus) {
+      const norm = normalizeStatus(status);
+      const valid = ["active", "available", "paused", "sold", "cancelled"];
+      if (!valid.includes(norm)) {
         return NextResponse.json(
-          { error: "La tabla tickets no tiene columna status" },
-          { status: 500 }
-        );
-      }
-
-      const validStatuses = ["active", "available", "paused", "sold", "cancelled", "held"];
-      if (!validStatuses.includes(status)) {
-        return NextResponse.json(
-          { error: "Estado inválido. Usa: active, available, paused, sold, cancelled, held" },
+          { error: "Estado inválido. Usa: active, available, paused, sold, cancelled" },
           { status: 400 }
         );
       }
-      updates.status = status;
+      if (cols.has("status")) updates.status = norm;
     }
 
-    // Notas
-    if (notes !== undefined) {
-      if (hasNotes) {
-        updates.notes = String(notes || "").substring(0, 500);
-      }
-      // si no existe notes, lo ignoramos para no romper schema
+    // Notes update
+    if (notes !== undefined && cols.has("notes")) {
+      updates.notes = String(notes || "").substring(0, 500);
     }
 
-    if (Object.keys(updates).length === 0) {
+    // updated_at si existe
+    if (cols.has("updated_at")) {
+      updates.updated_at = new Date().toISOString();
+    }
+
+    if (!Object.keys(updates).length) {
       return NextResponse.json({ error: "No hay cambios para aplicar" }, { status: 400 });
     }
 
-    // Update
-    const { data: updated, error: updateErr } = await supabaseAdmin
-      .from("tickets")
-      .update(updates)
-      .eq("id", ticketId)
-      .select()
-      .single();
+    // Update + ownership filter
+    let q = admin.from("tickets").update(updates).eq("id", ticketId);
+    if (ownerOr) q = q.or(ownerOr);
 
-    if (updateErr) {
-      console.error("[listing PATCH] Update error:", updateErr);
-      return NextResponse.json(
-        { error: "Error al actualizar publicación", details: updateErr.message },
-        { status: 500 }
-      );
+    const { data: updated, error: upErr } = await q.select("*").maybeSingle();
+
+    if (upErr) {
+      console.error("[listing PATCH] Update error:", upErr);
+      return NextResponse.json({ error: "Error al actualizar publicación", details: upErr.message }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, ticket: updated }, { status: 200 });
+    return NextResponse.json({ ticket: updated });
   } catch (err) {
     console.error("[listing PATCH] Unexpected error:", err);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
@@ -188,99 +173,87 @@ export async function PATCH(request) {
 
 /**
  * DELETE /api/tickets/listing
- * Eliminar una publicación
  * Body: { ticketId }
  */
 export async function DELETE(request) {
   try {
     // Auth
-    const token = getBearerToken(request);
-    if (!token) {
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    const token = authHeader.replace("Bearer ", "");
+    const { data: authData, error: authErr } = await admin.auth.getUser(token);
     if (authErr || !authData?.user) {
       return NextResponse.json({ error: "Sesión inválida" }, { status: 401 });
     }
-
     const userId = authData.user.id;
 
-    // Parse body
+    const cols = await getTicketsColumnSet();
+
     const body = await request.json().catch(() => ({}));
     const { ticketId } = body || {};
-
     if (!ticketId) {
       return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
     }
 
-    // Verificar ownership y estado
-    const { data: ticket, error: fetchErr } = await supabaseAdmin
-      .from("tickets")
-      .select("id, seller_id, status")
-      .eq("id", ticketId)
-      .single();
+    const ownerOr = buildOwnerOrClause(cols, userId);
+
+    // Fetch ticket status (para bloquear sold)
+    const selectFields = ["id", "status"].filter((f) => cols.has(f));
+    const sel = selectFields.length ? selectFields.join(",") : "id";
+
+    let qFetch = admin.from("tickets").select(sel).eq("id", ticketId);
+    if (ownerOr) qFetch = qFetch.or(ownerOr);
+
+    const { data: ticket, error: fetchErr } = await qFetch.maybeSingle();
 
     if (fetchErr || !ticket) {
-      return NextResponse.json({ error: "Publicación no encontrada" }, { status: 404 });
+      return NextResponse.json({ error: "Publicación no encontrada o sin permisos" }, { status: 404 });
     }
 
-    if (ticket.seller_id !== userId) {
-      return NextResponse.json(
-        { error: "No tienes permiso para eliminar esta publicación" },
-        { status: 403 }
-      );
-    }
-
-    // Bloquear eliminación si está vendida
-    if (ticket.status === "sold") {
+    if (String(ticket.status || "").toLowerCase() === "sold") {
       return NextResponse.json(
         { error: "No puedes eliminar una publicación vendida. Contacta a soporte si necesitas ayuda." },
         { status: 400 }
       );
     }
 
-    // Detectar deleted_at (soft delete)
-    let cols;
-    try {
-      cols = await getTicketColumns();
-    } catch (schemaErr) {
-      console.error("[listing DELETE] Schema detection error:", schemaErr);
-      return NextResponse.json({ error: "Error interno" }, { status: 500 });
-    }
-
+    // Soft delete si existe deleted_at, si no hard delete
     const hasDeletedAt = cols.has("deleted_at");
-    const hasStatus = cols.has("status");
 
     if (hasDeletedAt) {
-      const updates = { deleted_at: new Date().toISOString() };
-      if (hasStatus) updates.status = "cancelled";
-
-      const { error: softDeleteErr } = await supabaseAdmin
+      let qSoft = admin
         .from("tickets")
-        .update(updates)
+        .update({ deleted_at: new Date().toISOString(), status: cols.has("status") ? "cancelled" : undefined })
         .eq("id", ticketId);
 
-      if (softDeleteErr) {
-        console.error("[listing DELETE] Soft delete error:", softDeleteErr);
+      if (ownerOr) qSoft = qSoft.or(ownerOr);
+
+      const { error: sErr } = await qSoft;
+
+      if (sErr) {
+        console.error("[listing DELETE] Soft delete error:", sErr);
         return NextResponse.json({ error: "Error al eliminar publicación" }, { status: 500 });
       }
     } else {
-      const { error: deleteErr } = await supabaseAdmin
-        .from("tickets")
-        .delete()
-        .eq("id", ticketId);
+      let qDel = admin.from("tickets").delete().eq("id", ticketId);
+      if (ownerOr) qDel = qDel.or(ownerOr);
 
-      if (deleteErr) {
-        console.error("[listing DELETE] Hard delete error:", deleteErr);
+      const { error: dErr } = await qDel;
+
+      if (dErr) {
+        console.error("[listing DELETE] Hard delete error:", dErr);
         return NextResponse.json({ error: "Error al eliminar publicación" }, { status: 500 });
       }
     }
 
-    return NextResponse.json({ success: true, message: "Publicación eliminada" }, { status: 200 });
+    return NextResponse.json({ success: true, message: "Publicación eliminada" });
   } catch (err) {
     console.error("[listing DELETE] Unexpected error:", err);
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }
 }
+
 
