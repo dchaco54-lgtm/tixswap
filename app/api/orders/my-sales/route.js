@@ -21,8 +21,8 @@ function computeRoleFromSales(soldCount) {
   return best;
 }
 function getBearerToken(req) {
-  const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-const res = await fetch("/api/orders/my-sales", { headers });
+  const h = req.headers.get("authorization") || "";
+  const [type, token] = h.split(" ");
   if ((type || "").toLowerCase() !== "bearer") return null;
   return token || null;
 }
