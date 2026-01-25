@@ -1,70 +1,33 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-export const dynamic = 'force-dynamic';
+// app/api/events/[id]/tickets/route.js
 export const runtime = "nodejs";
-export const revalidate = 0;
+export const dynamic = "force-dynamic";
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-  if (!url || !serviceKey) {
-    const missing = [];
-    if (!url) missing.push("NEXT_PUBLIC_SUPABASE_URL (o SUPABASE_URL)");
-    if (!serviceKey) missing.push("SUPABASE_SERVICE_ROLE_KEY");
-    throw new Error(`Supabase Admin Client not configured. Missing: ${missing.join(", ")}`);
-  }
-
-  return createClient(url, serviceKey, { auth: { persistSession: false } });
-}
-
-export async function GET(_req, { params }) {
+export async function GET(req, { params }) {
   try {
-    const id = params?.id;
-    if (!id) return NextResponse.json({ error: "Missing event id" }, { status: 400 });
-
-    const supabase = getSupabaseAdmin();
-
-    // Query simple y directo: solo tickets activos
-    const { data, error } = await supabase
-      .from("tickets")
-      .select("*")
-      .eq("event_id", id)
-      .eq("status", "active")
-      .order("created_at", { ascending: false });
-
-    console.log('[API Tickets] Query result:', { 
-      eventId: id, 
-      ticketCount: data?.length,
-      error: error?.message 
-    });
-
-    if (error) {
-      return NextResponse.json(
-        { error: error.message, hint: error.hint, details: error.details, code: error.code },
-        { 
-          status: 500,
-          headers: {
-            'Cache-Control': 'no-store, must-revalidate, max-age=0',
-            'CDN-Cache-Control': 'no-store'
-          }
-        }
-      );
+    const eventId = params?.id;
+    if (!eventId) {
+      return NextResponse.json({ error: "Falta id del evento" }, { status: 400 });
     }
 
-    return NextResponse.json(
-      { tickets: data || [] }, 
-      { 
-        status: 200,
-        headers: {
-          'Cache-Control': 'no-store, must-revalidate, max-age=0',
-          'CDN-Cache-Control': 'no-store'
-        }
-      }
-    );
-  } catch (err) {
-    return NextResponse.json({ error: err?.message || "Unexpected error" }, { status: 500 });
+    const admin = supabaseAdmin();
+
+    const { data, error } = await admin
+      .from("tickets")
+      .select("id, event_id, status, price, original_price, sector, row_label, seat_label, notes, created_at")
+      .eq("event_id", eventId)
+      // ✅ antes: .eq("status","active")
+      .in("status", ["active", "available"])
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ tickets: data || [] }, { status: 200 });
+  } catch (e) {
+    return NextResponse.json({ error: e.message || "Error interno" }, { status: 500 });
   }
 }
-
