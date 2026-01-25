@@ -92,6 +92,11 @@ export default function MisPublicaciones() {
 
     useEffect(() => {
       loadListings();
+      // Polling cada 5 segundos para mantener publicaciones actualizadas
+      const interval = setInterval(() => {
+        loadListings();
+      }, 5000);
+      return () => clearInterval(interval);
     }, []);
 
       async function loadListings() {
