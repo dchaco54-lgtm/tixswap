@@ -1,104 +1,87 @@
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import {
+  buildTicketSelect,
+  detectTicketColumns,
+  normalizeTicket,
+} from "@/lib/db/ticketSchema";
 
-import { NextResponse } from 'next/server';
-import { buildTicketSelect, detectTicketColumns, normalizeTicket } from '@/lib/db/ticketSchema';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
 
-// GET /api/tickets/my-publications
-export async function GET(request) {
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+  Pragma: "no-cache",
+  Expires: "0",
+};
+
+export async function GET(req) {
+  const supabase = await createClient();
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.replace("Bearer ", "").trim();
+
   try {
-    // 1) Auth: preferir Bearer (front lo manda), fallback cookies
-    const admin = supabaseAdmin();
-
+    // 1) Obtener userId desde el token
     let userId = null;
-    const authHeader = request.headers.get('authorization') || '';
 
-    if (authHeader.toLowerCase().startsWith('bearer ')) {
-      const token = authHeader.slice(7).trim();
+    if (token) {
+      const admin = supabase;
       const { data: userRes, error: userErr } = await admin.auth.getUser(token);
       if (userErr || !userRes?.user) {
-        return NextResponse.json({ error: 'Sesión inválida' }, { status: 401 });
+        return NextResponse.json(
+          { error: "Sesión inválida" },
+          { status: 401, headers: NO_STORE_HEADERS }
+        );
       }
       userId = userRes.user.id;
     } else {
-      const supabase = createClient(cookies());
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-      }
-      userId = user.id;
-    }
-
-    // 2) Detectar columnas reales y armar select seguro
-    const columns = await detectTicketColumns(admin);
-    const selectStr = buildTicketSelect(columns);
-
-    // 3) Query (admin para evitar RLS, pero filtrado por tu userId)
-    let { data: tickets, error: ticketsErr } = await admin
-      .from('tickets')
-      .select(selectStr)
-      .eq('seller_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(100);
-
-    // Fallback: si falla el embed `event:events(...)`, reintenta sin embed y arma el evento aparte.
-    if (ticketsErr) {
-      const msg = String(ticketsErr.message || '');
-      const looksLikeRelationErr = /relationship|schema cache|Could not find/i.test(msg) && /events?/i.test(msg);
-
-      if (!looksLikeRelationErr) {
+      // fallback: sesión cookie (server)
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data?.user) {
         return NextResponse.json(
-          { error: 'Error al obtener publicaciones', details: ticketsErr.message },
-          { status: 500 }
+          { error: "No autorizado" },
+          { status: 401, headers: NO_STORE_HEADERS }
         );
       }
-
-      const selectNoEmbed = selectStr.replace(/,\s*event:events\([^)]*\)\s*$/i, '');
-
-      const retry = await admin
-        .from('tickets')
-        .select(selectNoEmbed)
-        .eq('seller_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      tickets = retry.data || [];
-      if (retry.error) {
-        return NextResponse.json({ error: 'Error al obtener publicaciones', details: msg }, { status: 500 });
-      }
-
-      const eventIds = Array.from(new Set((tickets || []).map((t) => t?.event_id).filter(Boolean)));
-      if (eventIds.length) {
-        const { data: events, error: eErr } = await admin
-          .from('events')
-          .select('id,title,starts_at,venue,city')
-          .in('id', eventIds);
-
-        if (!eErr && Array.isArray(events)) {
-          const map = Object.fromEntries(events.map((e) => [e.id, e]));
-          tickets = (tickets || []).map((t) => ({ ...t, event: map[t.event_id] || null }));
-        }
-      }
+      userId = data.user.id;
     }
 
-    const normTickets = (tickets || []).map(normalizeTicket);
+    // 2) Detectar columnas y armar select safe
+    const cols = await detectTicketColumns(supabase);
+    const select = buildTicketSelect(cols);
 
-    const active = normTickets.filter((t) => t.status === 'active' || t.status === 'available').length;
-    const paused = normTickets.filter((t) => t.status === 'paused').length;
-    const sold = normTickets.filter((t) => t.status === 'sold').length;
+    // 3) Traer tickets del seller
+    const { data: tickets, error: errTickets } = await supabase
+      .from("tickets")
+      .select(select)
+      .eq("seller_id", userId)
+      .order("created_at", { ascending: false });
 
-    return NextResponse.json({
-      tickets: normTickets,
-      summary: { total: normTickets.length, active, paused, sold },
-    });
-  } catch (err) {
-    console.error('Error en GET /api/tickets/my-publications:', err);
+    if (errTickets) {
+      return NextResponse.json(
+        { error: errTickets.message || "Error al traer tickets" },
+        { status: 500, headers: NO_STORE_HEADERS }
+      );
+    }
+
+    // 4) Normalizar para el front
+    const normalized = (tickets || []).map((t) => normalizeTicket(t));
+
+    // 5) Summary (opcional)
+    const summary = {
+      total: normalized.length,
+      active: normalized.filter((t) => ["active", "available"].includes(t.status)).length,
+      paused: normalized.filter((t) => t.status === "paused").length,
+      sold: normalized.filter((t) => t.status === "sold").length,
+    };
+
+    return NextResponse.json({ tickets: normalized, summary }, { headers: NO_STORE_HEADERS });
+  } catch (e) {
     return NextResponse.json(
-      { error: 'Error inesperado', details: err?.message },
-      { status: 500 }
+      { error: e?.message || "Error inesperado" },
+      { status: 500, headers: NO_STORE_HEADERS }
     );
   }
 }
+
