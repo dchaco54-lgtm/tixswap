@@ -75,6 +75,8 @@ export async function PATCH(request) {
         );
       }
       updates.price = numPrice;
+      // Calcular y guardar platform_fee
+      updates.platform_fee = Math.max(Math.round(numPrice * 0.025), 1200);
     }
 
     if (status !== undefined) {
