@@ -1,116 +1,127 @@
 // app/api/checkout/preview/route.js
 export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { calculateFees } from "@/lib/fees";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const admin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: { persistSession: false },
+  }
+);
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("Missing Supabase env vars");
+// ✅ Email enmascarado por seguridad
+function maskEmail(email) {
+  if (!email || typeof email !== "string" || !email.includes("@")) return null;
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return null;
+
+  if (local.length <= 2) return `${local[0]}*@${domain}`;
+  const stars = "*".repeat(Math.min(6, local.length - 2));
+  return `${local[0]}${stars}${local.slice(-1)}@${domain}`;
 }
 
-const admin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false },
-});
-
-function normalizeEventStartsAt(evt) {
-  return evt?.starts_at || evt?.startsAt || evt?.date || evt?.datetime || null;
+function normalizeEventStartsAt(value) {
+  if (!value) return null;
+  try {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch {
+    return null;
+  }
 }
 
-function normalizeEventImageUrl(evt) {
-  // tu base ocupa image_url (por las capturas), pero dejo fallbacks por si acaso
-  return evt?.image_url || evt?.imageUrl || evt?.cover_url || evt?.banner_url || evt?.poster_url || null;
-}
-
-function pickTicketPrice(ticket) {
-  // Importante: si existen ambos, el “canon” suele ser price_clp en tu dashboard
-  // pero checkout usa lo que exista. Preferimos price_clp si viene.
-  const p = ticket?.price_clp ?? ticket?.price ?? ticket?.amount_clp ?? ticket?.amount ?? 0;
-  return Math.max(0, Math.round(Number(p) || 0));
-}
-
-function normalizeTicket(ticket) {
-  return {
-    id: ticket?.id,
-    status: ticket?.status || null,
-    event_id: ticket?.event_id || null,
-    seller_id: ticket?.seller_id || ticket?.owner_id || ticket?.user_id || null,
-
-    // Para UI (checkout)
-    sector: ticket?.sector ?? ticket?.section ?? null,
-    row_label: ticket?.row_label ?? ticket?.row ?? null,
-    seat_label: ticket?.seat_label ?? ticket?.seat ?? null,
-    notes: ticket?.notes ?? null,
-
-    // Precios
-    price: ticket?.price ?? null,
-    price_clp: ticket?.price_clp ?? null,
-    original_price: ticket?.original_price ?? null,
-  };
-}
-
+// ✅ Vendedor seguro (siempre devuelve full_name usable)
 function normalizeSeller(profile) {
   if (!profile) return null;
 
-  const full =
+  const displayName =
     profile.full_name ||
     profile.name ||
-    profile.email ||
-    null;
+    profile.display_name ||
+    profile.username ||
+    (profile.email ? String(profile.email).split("@")[0] : null) ||
+    "Usuario";
 
   return {
     id: profile.id,
-    full_name: full,
-    email: profile.email || null,
-    avatar_url: profile.avatar_url || null,
+    full_name: displayName,
+    email: maskEmail(profile.email) || null,
+    avatar_url:
+      profile.avatar_url || profile.profile_image_url || profile.photo_url || null,
+    is_verified: Boolean(
+      profile.is_verified ??
+        profile.verified ??
+        profile.is_verified_seller ??
+        profile.seller_verified ??
+        false
+    ),
   };
 }
 
-function normalizeEvent(evt) {
-  if (!evt) return null;
-
+function normalizeEvent(event) {
+  if (!event) return null;
   return {
-    id: evt.id,
-    title: evt.title || evt.name || evt.event_name || null,
-    name: evt.name || null,
-    starts_at: normalizeEventStartsAt(evt),
-    venue: evt.venue || null,
-    city: evt.city || null,
-    image_url: normalizeEventImageUrl(evt),
+    id: event.id,
+    name: event.name || event.title || null,
+    venue: event.venue || null,
+    city: event.city || null,
+    starts_at: normalizeEventStartsAt(event.starts_at || event.date),
+    image_url: event.image_url || null,
   };
 }
 
-async function getProfileSafe(userId) {
-  // Selección segura (no asume columnas)
-  const { data: cols, error: cErr } = await admin
-    .from("information_schema.columns")
-    .select("column_name")
-    .eq("table_schema", "public")
-    .eq("table_name", "profiles");
+function normalizeSellerStats(stats) {
+  if (!stats) return null;
+  return {
+    total_sales: Number(stats.total_sales || 0),
+    total_reviews: Number(stats.total_reviews || 0),
+    avg_rating: Number(stats.avg_rating || 0),
+  };
+}
 
-  if (cErr) {
-    // fallback: intenta lo mínimo
-    const { data } = await admin.from("profiles").select("id").eq("id", userId).maybeSingle();
-    return data ? { id: data.id } : null;
+function calculateFees(ticketPrice) {
+  // ✅ 2.5% con mínimo 1200
+  const fee = Math.max(Math.round(ticketPrice * 0.025), 1200);
+  return { fee, total: ticketPrice + fee };
+}
+
+// ✅ Prioriza price por sobre price_clp
+function pickTicketPrice(ticket) {
+  const p =
+    ticket?.price ??
+    ticket?.price_clp ??
+    ticket?.amount_clp ??
+    ticket?.amount ??
+    0;
+
+  return Math.max(0, Math.round(Number(p) || 0));
+}
+
+// ✅ PERFIL SEGURO SIN INFORMATION_SCHEMA (esto era lo que te estaba rompiendo)
+async function getProfileSafe(userId) {
+  if (!userId) return null;
+
+  const { data, error } = await admin
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Seller profile fetch error:", error);
+    return null;
   }
 
-  const set = new Set((cols || []).map((x) => x.column_name));
-  const fields = ["id", "full_name", "name", "email", "avatar_url"].filter((f) => set.has(f));
-  const selectStr = fields.length ? fields.join(",") : "id";
-
-  const { data: prof, error } = await admin.from("profiles").select(selectStr).eq("id", userId).maybeSingle();
-  if (error) return null;
-  return prof || null;
+  return data || null;
 }
 
 export async function POST(req) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const ticketId = body?.ticketId;
+    const body = await req.json();
+    const ticketId = body.ticketId;
 
     if (!ticketId) {
       return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
@@ -119,77 +130,88 @@ export async function POST(req) {
     // 1) Ticket
     const { data: ticket, error: tErr } = await admin
       .from("tickets")
-      .select("*")
+      .select(
+        `
+        id,
+        event_id,
+        user_id,
+        status,
+        price,
+        price_clp,
+        original_price,
+        currency,
+        pdf_url,
+        event_image_url,
+        notes
+      `
+      )
       .eq("id", ticketId)
       .maybeSingle();
 
-    if (tErr || !ticket) {
-      return NextResponse.json({ error: "Entrada no encontrada" }, { status: 404 });
-    }
+    if (tErr) throw tErr;
+    if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
 
-    // Validación de estado (ajusta si tu negocio permite más estados)
-    const st = String(ticket.status || "").toLowerCase();
-    if (st && !["active", "available", "paused"].includes(st)) {
+    if (ticket.status && ticket.status !== "active") {
       return NextResponse.json({ error: "Entrada no disponible" }, { status: 400 });
     }
 
-    const ticketNorm = normalizeTicket(ticket);
-    const ticketPrice = pickTicketPrice(ticket);
-
     // 2) Evento
-    let event = null;
-    if (ticket.event_id) {
-      const { data: evt, error: eErr } = await admin
-        .from("events")
-        .select("*")
-        .eq("id", ticket.event_id)
-        .maybeSingle();
+    const { data: event, error: eErr } = await admin
+      .from("events")
+      .select("id, title, name, starts_at, date, venue, city, image_url")
+      .eq("id", ticket.event_id)
+      .maybeSingle();
 
-      if (!eErr && evt) event = normalizeEvent(evt);
-    }
+    if (eErr) throw eErr;
 
-    // 3) Vendedor (perfil)
-    const sellerId = ticketNorm.seller_id;
-    const sellerProfile = sellerId ? await getProfileSafe(sellerId) : null;
-    const seller = normalizeSeller(sellerProfile);
+    // 3) Perfil vendedor
+    const sellerProfile = await getProfileSafe(ticket.user_id);
+    const seller =
+      normalizeSeller(sellerProfile) || {
+        id: ticket.user_id,
+        full_name: "Usuario",
+        email: null,
+        avatar_url: null,
+        is_verified: false,
+      };
 
-    // 4) Fees (REGLA FIJA)
-    const fees = calculateFees(ticketPrice);
+    // 4) Stats vendedor
+    const { data: stats } = await admin
+      .from("seller_stats")
+      .select("total_sales,total_reviews,avg_rating")
+      .eq("user_id", ticket.user_id)
+      .maybeSingle();
 
-    // 5) Ratings (si existe tabla)
-    let sellerStats = { avgRating: null, totalRatings: 0 };
-    let sellerRatings = [];
+    // 5) Reviews vendedor (últimas 5)
+    const { data: ratings } = await admin
+      .from("seller_ratings")
+      .select("id,rating,comment,created_at,buyer_id")
+      .eq("seller_id", ticket.user_id)
+      .order("created_at", { ascending: false })
+      .limit(5);
 
-    try {
-      if (sellerId) {
-        const { data: ratings, error: rErr } = await admin
-          .from("seller_ratings")
-          .select("id,seller_id,buyer_id,rating,comment,created_at")
-          .eq("seller_id", sellerId)
-          .order("created_at", { ascending: false })
-          .limit(20);
+    const ticketNorm = {
+      ...ticket,
+      seller_id: ticket.user_id,
+    };
 
-        if (!rErr && ratings?.length) {
-          const avg = ratings.reduce((a, x) => a + (Number(x.rating) || 0), 0) / ratings.length;
-          sellerStats = { avgRating: Number(avg.toFixed(1)), totalRatings: ratings.length };
-          sellerRatings = ratings;
-        }
-      }
-    } catch {
-      // si no existe la tabla, no rompe el checkout
-    }
+    // ✅ cálculo basado en precio actual (price si existe)
+    const ticketPrice = pickTicketPrice(ticketNorm);
+    const { fee, total } = calculateFees(ticketPrice);
 
     return NextResponse.json({
       ticket: ticketNorm,
-      event,
+      event: normalizeEvent(event),
       seller,
-      fees,
-      sellerStats,
-      sellerRatings,
+      sellerStats: normalizeSellerStats(stats),
+      sellerRatings: ratings || [],
+      fee,
+      total,
     });
   } catch (err) {
-    console.error("[checkout preview] error", err);
-    return NextResponse.json({ error: err?.message || "Error" }, { status: 500 });
+    console.error("checkout/preview error", err);
+    return NextResponse.json({ error: err?.message || "Error interno" }, { status: 500 });
   }
 }
+
 
