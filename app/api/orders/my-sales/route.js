@@ -1,10 +1,9 @@
 // app/api/orders/my-sales/route.js
-export const dynamic = 'force-dynamic';
-
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { ROLE_DEFS, ROLE_ORDER, normalizeRole } from "@/lib/roles";
 
+export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function roleRank(roleKey) {
@@ -20,6 +19,8 @@ function computeRoleFromSales(soldCount) {
   }
   return best;
 }
+
+// ✅ Pura: solo lee Authorization: Bearer <token>
 function getBearerToken(req) {
   const h = req.headers.get("authorization") || "";
   const [type, token] = h.split(" ");
@@ -32,6 +33,7 @@ function isPaid(order) {
   const ps = String(order?.payment_state || "").toLowerCase();
   return s === "paid" || ps === "paid";
 }
+
 function normalizeBuyerId(order) {
   return order?.buyer_id || order?.user_id || null;
 }
@@ -57,6 +59,8 @@ function buildLastMonths(count) {
     out.push({
       year: d.getFullYear(),
       month: d.getMonth(),
+      key: monthKey(d),
+      label: monthLabel(d),
     });
   }
   return out;
@@ -74,17 +78,21 @@ export async function GET(req) {
 
     const userId = userRes.user.id;
 
-    // Perfil actual (para upgrade automático)
+    // ✅ Perfil del usuario correcto
     const { data: prof, error: profErr } = await admin
       .from("profiles")
-      .select("user_type")
+      .select("id,user_type,seller_tier")
+      .eq("id", userId)
       .maybeSingle();
 
     if (profErr) throw profErr;
 
-    const roleRaw = String(prof?.user_type || "").trim().toLowerCase();
-    const isPrivileged = roleRaw === "admin" || roleRaw === "seller";
-    const currentRoleKey = isPrivileged ? roleRaw : normalizeRole(roleRaw);
+    const userTypeRaw = String(prof?.user_type || "").trim().toLowerCase();
+    const tierRaw = String(prof?.seller_tier || "").trim().toLowerCase();
+
+    const isPrivileged = userTypeRaw === "admin" || userTypeRaw === "seller";
+    const currentTierKey = normalizeRole(tierRaw || userTypeRaw || "basic"); // lo normalizado para tiers
+    const currentRoleKey = isPrivileged ? userTypeRaw : currentTierKey;
 
     const url = new URL(req.url);
     const months = Math.min(Math.max(parseInt(url.searchParams.get("months") || "6", 10), 1), 24);
@@ -101,16 +109,18 @@ export async function GET(req) {
     const ticketIds = (tickets || []).map((t) => t.id).filter(Boolean);
     const soldCount = (tickets || []).filter((t) => String(t.status || "").toLowerCase() === "sold").length;
 
-    // 🔥 CATEGORÍA AUTOMÁTICA
+    // 🔥 CATEGORÍA AUTOMÁTICA (tiers)
     const computedTier = computeRoleFromSales(soldCount);
     let upgraded = false;
-    let effectiveTierKey = currentRoleKey || "basic";
+    let effectiveTierKey = currentTierKey || "basic";
+
     // Solo sube nivel (no baja) y no pisa admin/seller
-    if (!isPrivileged && roleRank(computedTier) > roleRank(currentRoleKey || "basic")) {
+    if (!isPrivileged && roleRank(computedTier) > roleRank(currentTierKey || "basic")) {
       const { error: upErr } = await admin
         .from("profiles")
         .update({ seller_tier: computedTier })
         .eq("id", userId);
+
       if (!upErr) {
         upgraded = true;
         effectiveTierKey = computedTier;
@@ -118,16 +128,16 @@ export async function GET(req) {
     }
 
     const lastMonths = buildLastMonths(months);
-    const monthly = lastMonths.map((m) => ({ key: m.key, label: m.label, count: 0, total_clp: 0 }));
+    const monthlyEmpty = lastMonths.map((m) => ({ key: m.key, label: m.label, count: 0, total_clp: 0 }));
 
     if (ticketIds.length === 0) {
       return NextResponse.json({
         soldCount,
         paid90dCount: 0,
         paid90dTotal: 0,
-        monthly,
+        monthly: monthlyEmpty,
         recentSales: [],
-        computedRole: isPrivileged ? (roleRaw || "basic") : effectiveRoleKey,
+        computedRole: isPrivileged ? (userTypeRaw || "basic") : effectiveTierKey,
         upgraded,
       });
     }
@@ -138,11 +148,13 @@ export async function GET(req) {
     const listStartMonth = buildLastMonths(listMonths)[0];
     const listStartISO = new Date(listStartMonth.year, listStartMonth.month, 1).toISOString();
 
-    // 2) Orders de esos tickets (schema-safe)
+    // 2) Orders de esos tickets
     const { data: orders, error: oErr } = await admin
       .from("orders")
-      .select(`id,status,payment_state,created_at,paid_at,total_amount,total_paid_clp,amount_clp,buyer_id,user_id,ticket_id,
-        ticket:ticket_id(id,price,sector,row_label,seat_label,notes,status,
+      .select(`
+        id,status,payment_state,created_at,paid_at,total_amount,total_paid_clp,amount_clp,buyer_id,user_id,ticket_id,
+        ticket:ticket_id(
+          id,price,sector,row_label,seat_label,notes,status,
           event:events(id,title,starts_at,venue,city)
         )
       `)
@@ -191,7 +203,10 @@ export async function GET(req) {
 
     const paid90 = paidOrders.filter((o) => new Date(o.paid_at || o.created_at) >= start90);
     const paid90dCount = paid90.length;
-    const paid90dTotal = paid90.reduce((sum, o) => sum + (Number(o.total_paid_clp ?? o.total_amount ?? o.amount_clp ?? 0) || 0), 0);
+    const paid90dTotal = paid90.reduce(
+      (sum, o) => sum + (Number(o.total_paid_clp ?? o.total_amount ?? o.amount_clp ?? 0) || 0),
+      0
+    );
 
     // recent list
     const recentSales = paidOrders
@@ -218,8 +233,8 @@ export async function GET(req) {
             ? {
                 id: o.ticket.id,
                 sector: o.ticket.sector,
-                row: o.ticket.row,
-                seat: o.ticket.seat,
+                row: o.ticket.row_label ?? null,
+                seat: o.ticket.seat_label ?? null,
                 notes: o.ticket.notes,
                 event: o.ticket?.event
                   ? {
@@ -241,7 +256,7 @@ export async function GET(req) {
       paid90dTotal: Math.round(paid90dTotal),
       monthly: monthlyOut,
       recentSales,
-      computedRole: isPrivileged ? (roleRaw || "basic") : effectiveRoleKey,
+      computedRole: isPrivileged ? (userTypeRaw || "basic") : effectiveTierKey,
       upgraded,
     });
   } catch (err) {
