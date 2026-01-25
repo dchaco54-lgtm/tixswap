@@ -397,8 +397,19 @@ function calcPayout(price) {
                             <div className="text-sm text-slate-800">{safeText(venue, "—")}</div>
                             {city && (<div className="text-xs text-slate-500 mt-1">{city}</div>)}
                           </td>
-                          <td className="px-5 py-4"><div className="text-sm font-extrabold text-slate-900">{formatCLP(listing.price)}</div></td>
-                          <td className="px-5 py-4"><span className={statusBadgeClass(listing.status)}>{statusLabel(listing.status)}</span></td>
+                          <td className="px-5 py-4">
+                            <div className="text-sm font-extrabold text-slate-900">
+                              {/* Siempre mostrar el precio real actualizado */}
+                              {formatCLP(listing.price)}
+                            </div>
+                            {listing.original_price && listing.price !== listing.original_price && (
+                              <div className="text-xs text-slate-500 line-through">{formatCLP(listing.original_price)}</div>
+                            )}
+                          </td>
+                          <td className="px-5 py-4">
+                            {/* Siempre mostrar el status real del backend */}
+                            <span className={statusBadgeClass(listing.status)}>{statusLabel(listing.status)}</span>
+                          </td>
                           <td className="px-5 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               <button onClick={() => openEditModal(listing)} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 font-extrabold rounded-full hover:bg-blue-100 transition-colors" disabled={listing.status === "sold"}>Editar</button>
