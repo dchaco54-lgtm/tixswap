@@ -185,7 +185,7 @@ export default function MisPublicaciones() {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          ticket_id: editingListing.id,
+          ticketId: editingListing.id, // Cambiado a ticketId
           price,
           status: editStatus,
         }),
@@ -222,7 +222,7 @@ export default function MisPublicaciones() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ ticket_id: listing.id }),
+        body: JSON.stringify({ ticketId: listing.id }), // Cambiado a ticketId
       });
 
       if (!res.ok) {
@@ -237,6 +237,13 @@ export default function MisPublicaciones() {
       alert(err.message);
     }
   }
+// Helpers para comisión y payout
+function calcFee(price) {
+  return Math.max(Math.round(price * 0.025), 1200);
+}
+function calcPayout(price) {
+  return Math.max(0, price - calcFee(price));
+}
 
   // Aplicar filtros y orden
   let filteredListings = listings.filter((l) => {
@@ -491,9 +498,18 @@ export default function MisPublicaciones() {
                 {editingListing.event?.title || "Sin título"}
               </div>
               <div className="text-xs text-slate-500 mt-1">
-                {editingListing.event?.venue || "—"} · {formatDateTime(editingListing.event?.event_datetime)}
+                {editingListing.event?.venue || "—"} · {formatDateTime(editingListing.event?.starts_at)}
               </div>
             </div>
+              {/* Resumen de comisión y payout */}
+              <div className="mt-2 text-xs text-slate-700 bg-slate-50 rounded-xl p-3">
+                <div><b>Precio:</b> {formatCLP(Number(editPrice) || 0)}</div>
+                <div><b>Comisión (2.5% mín $1.200):</b> {formatCLP(calcFee(Number(editPrice) || 0))}</div>
+                <div><b>Tú recibes aprox.:</b> {formatCLP(calcPayout(Number(editPrice) || 0))}</div>
+                {calcPayout(Number(editPrice) || 0) === 0 && (
+                  <div className="mt-2 text-rose-600 font-bold">El fee es igual o mayor al precio. No recibirás pago.</div>
+                )}
+              </div>
 
             {editError && (
               <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-800 text-sm font-semibold">
