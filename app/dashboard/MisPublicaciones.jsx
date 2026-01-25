@@ -252,6 +252,7 @@ function calcPayout(price) {
 
   // Aplicar filtros y orden
   let filteredListings = listings.filter((l) => {
+    // Filtro por búsqueda
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const eventTitle = (l.event?.title || "").toLowerCase();
@@ -261,9 +262,12 @@ function calcPayout(price) {
         return false;
       }
     }
+    // Filtro por estado
     if (statusFilter !== "all") {
-      if (l.status !== statusFilter) return false;
+      // Si el filtro es distinto de 'all', filtra por status exacto
+      return l.status === statusFilter;
     }
+    // Si es 'all', incluye todos los estados (active, sold, paused, cancelled, etc)
     return true;
   });
   if (sortOrder === "price") {
