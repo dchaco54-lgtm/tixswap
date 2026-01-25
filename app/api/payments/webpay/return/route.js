@@ -1,236 +1,109 @@
-import { NextResponse } from 'next/server';
+// app/api/payments/webpay/return/route.js
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getWebpayTransaction } from '@/lib/webpay';
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { commitTransaction } from "@/lib/transbank";
 
-export const dynamic = 'force-dynamic';
-
-function normalizeBaseUrl(url) {
-  if (!url) return '';
-  return url.endsWith('/') ? url.slice(0, -1) : url;
+async function detectTicketCols(admin) {
+  // SQL editor sí ve information_schema, pero PostgREST no siempre.
+  // Así que detectamos por sample row (sirve para saber si existen columnas tipo buyer_id/sold_at).
+  const { data, error } = await admin.from("tickets").select("*").limit(1);
+  if (error) return new Set();
+  const row = Array.isArray(data) && data.length ? data[0] : null;
+  return new Set(row ? Object.keys(row) : []);
 }
 
-export async function POST(req) {
+export async function GET(request) {
+  const admin = supabaseAdmin();
+
   try {
-    const formData = await req.formData();
+    const url = new URL(request.url);
+    const searchParams = url.searchParams;
 
-    // Flujo normal: token_ws
-    const token = formData.get('token_ws');
+    const token_ws = searchParams.get("token_ws");
+    const buyOrderParam = searchParams.get("TBK_ORDEN_COMPRA");
 
-    // Flujo cancelación/timeout: vienen estos campos, sin token_ws
-    const tbkBuyOrder = formData.get('TBK_ORDEN_COMPRA');
-
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    const redirectBase = `${baseUrl}/dashboard/purchases`;
-
-    const admin = supabaseAdmin();
-
-    // Si canceló antes de pagar en Webpay
-    if (!token && tbkBuyOrder) {
-      const { data: order } = await admin
-        .from('orders')
-        .select('id, ticket_id')
-        .eq('buy_order', tbkBuyOrder)
-        .single();
-
-      if (order?.ticket_id) {
-        await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
-      }
-
-      if (order?.id) {
-        await admin
-          .from('orders')
-          .update({ status: 'canceled', payment_state: 'canceled' })
-          .eq('id', order.id);
-      }
-
-      return NextResponse.redirect(`${redirectBase}?payment=canceled`, { status: 303 });
+    if (!token_ws) {
+      // usuario canceló o retorno raro
+      const res = NextResponse.redirect(new URL("/checkout?status=cancel", request.url));
+      res.headers.set("Cache-Control", "no-store");
+      return res;
     }
 
-    if (!token) {
-      // No sabemos qué pasó, pero no hay token ni buyOrder
-      return NextResponse.redirect(`${redirectBase}?payment=unknown`, { status: 303 });
-    }
+    const buyOrder = buyOrderParam || null;
 
-    // Commit en Webpay
-    const transaction = getWebpayTransaction();
-    const result = await transaction.commit(token);
+    // 1) Commit Webpay
+    const commitRes = await commitTransaction(token_ws);
 
-    const buyOrder = result?.buy_order;
-
-    // Buscar orden
+    // 2) Buscar la orden
     const { data: order, error: orderError } = await admin
-      .from('orders')
-      .select('id, ticket_id')
-      .eq('buy_order', buyOrder)
-      .single();
+      .from("orders")
+      .select("id,ticket_id,user_id,status,payment_state")
+      .eq("buy_order", buyOrder)
+      .maybeSingle();
 
     if (orderError || !order) {
-      return NextResponse.redirect(`${redirectBase}?payment=order_not_found`, { status: 303 });
+      console.error("[webpay return] order not found", orderError);
+      const res = NextResponse.redirect(new URL("/checkout?status=order_not_found", request.url));
+      res.headers.set("Cache-Control", "no-store");
+      return res;
     }
 
-    // Aprobado típicamente: response_code === 0 y status === 'AUTHORIZED'
-    const approved = Number(result?.response_code) === 0 && result?.status === 'AUTHORIZED';
+    const responseCode = Number(commitRes?.responseCode ?? commitRes?.response_code ?? -1);
+    const isApproved = responseCode === 0;
 
-    if (approved) {
-      // Marcar orden pagada + ticket vendido
-      await admin
-        .from('orders')
-        .update({
-          status: 'paid',
-          payment_state: result?.status || 'AUTHORIZED',
-          webpay_token: token,
-          webpay_authorization_code: result?.authorization_code,
-          webpay_payment_type_code: result?.payment_type_code,
-          webpay_card_last4: result?.card_detail?.card_number,
-          webpay_installments_number: result?.installments_number,
-          paid_at: new Date().toISOString(),
-        })
-        .eq('id', order.id);
-
-      await admin.from('tickets').update({ status: 'sold' }).eq('id', order.ticket_id);
-
-      return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
-        status: 303,
-      });
-    }
-
-    // Rechazado / fallido => liberar ticket
+    // 3) Update orden
     await admin
-      .from('orders')
+      .from("orders")
       .update({
-        status: 'failed',
-        payment_state: result?.status || 'FAILED',
-        webpay_token: token,
+        status: isApproved ? "paid" : "failed",
+        payment_state: isApproved ? "paid" : "failed",
+        authorization_code: commitRes?.authorizationCode ?? commitRes?.authorization_code ?? null,
+        payment_data: commitRes || null,
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', order.id);
+      .eq("id", order.id);
 
-    await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
+    // 4) Update ticket
+    if (order.ticket_id) {
+      const cols = await detectTicketCols(admin);
 
-    return NextResponse.redirect(`${redirectBase}?payment=failed&order=${order.id}`, {
-      status: 303,
-    });
+      if (isApproved) {
+        // ✅ intentamos update completo, pero solo con columnas que existan
+        const patch = { status: "sold" };
+        if (cols.has("buyer_id")) patch.buyer_id = order.user_id;
+        if (cols.has("sold_at")) patch.sold_at = new Date().toISOString();
+        if (cols.has("hold_expires_at")) patch.hold_expires_at = null;
+
+        const { error: tErr } = await admin.from("tickets").update(patch).eq("id", order.ticket_id);
+
+        if (tErr) {
+          console.error("[webpay return] ticket sold update failed:", tErr);
+          // fallback ultra seguro: al menos dejar sold
+          await admin.from("tickets").update({ status: "sold" }).eq("id", order.ticket_id);
+        }
+      } else {
+        // pago fallido → liberar
+        const patch = { status: "active" };
+        if (cols.has("hold_expires_at")) patch.hold_expires_at = null;
+
+        await admin.from("tickets").update(patch).eq("id", order.ticket_id);
+      }
+    }
+
+    // 5) Redirect
+    const res = NextResponse.redirect(
+      new URL(isApproved ? "/dashboard/purchases?paid=1" : "/checkout?status=failed", request.url)
+    );
+    res.headers.set("Cache-Control", "no-store");
+    return res;
   } catch (err) {
-    console.error('Webpay return error:', err);
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    return NextResponse.redirect(`${baseUrl}/dashboard/purchases?payment=error`, { status: 303 });
+    console.error("[webpay return] unexpected error", err);
+    const res = NextResponse.redirect(new URL("/checkout?status=error", request.url));
+    res.headers.set("Cache-Control", "no-store");
+    return res;
   }
 }
 
-// Webpay puede redirigir con GET (token_ws en query string)
-export async function GET(req) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const token = searchParams.get('token_ws');
-    const tbkBuyOrder = searchParams.get('TBK_ORDEN_COMPRA');
-    const tbkIdSesion = searchParams.get('TBK_ID_SESION');
-
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    const redirectBase = `${baseUrl}/dashboard/purchases`;
-
-    const admin = supabaseAdmin();
-
-    console.log('[Webpay Return] GET:', { token: !!token, tbkBuyOrder, tbkIdSesion });
-
-    // Si canceló antes de pagar en Webpay
-    if (!token && tbkBuyOrder) {
-      const { data: order } = await admin
-        .from('orders')
-        .select('id, ticket_id')
-        .eq('buy_order', tbkBuyOrder)
-        .single();
-
-      if (order?.ticket_id) {
-        await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
-      }
-
-      if (order?.id) {
-        await admin
-          .from('orders')
-          .update({ status: 'canceled', payment_state: 'canceled' })
-          .eq('id', order.id);
-      }
-
-      return NextResponse.redirect(`${redirectBase}?payment=canceled`, { status: 303 });
-    }
-
-    if (!token) {
-      return NextResponse.redirect(`${redirectBase}?payment=unknown`, { status: 303 });
-    }
-
-    // Commit en Webpay
-    console.log('[Webpay Return] Committing transaction:', token);
-    const transaction = getWebpayTransaction();
-    const result = await transaction.commit(token);
-
-    console.log('[Webpay Return] Result:', {
-      buyOrder: result?.buy_order,
-      status: result?.status,
-      responseCode: result?.response_code,
-    });
-
-    const buyOrder = result?.buy_order;
-
-    // Buscar orden
-    const { data: order, error: orderError } = await admin
-      .from('orders')
-      .select('id, ticket_id')
-      .eq('buy_order', buyOrder)
-      .single();
-
-    if (orderError || !order) {
-      console.error('[Webpay Return] Order not found:', buyOrder);
-      return NextResponse.redirect(`${redirectBase}?payment=order_not_found`, { status: 303 });
-    }
-
-    // Aprobado típicamente: response_code === 0 y status === 'AUTHORIZED'
-    const approved = Number(result?.response_code) === 0 && result?.status === 'AUTHORIZED';
-
-    if (approved) {
-      console.log('[Webpay Return] Payment approved for order:', order.id);
-      
-      // Marcar orden pagada + ticket vendido
-      await admin
-        .from('orders')
-        .update({
-          status: 'paid',
-          payment_state: result?.status || 'AUTHORIZED',
-          webpay_token: token,
-          webpay_authorization_code: result?.authorization_code,
-          webpay_payment_type_code: result?.payment_type_code,
-          webpay_card_last4: result?.card_detail?.card_number,
-          webpay_installments_number: result?.installments_number,
-          paid_at: new Date().toISOString(),
-        })
-        .eq('id', order.id);
-
-      await admin.from('tickets').update({ status: 'sold' }).eq('id', order.ticket_id);
-
-      return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
-        status: 303,
-      });
-    }
-
-    // Rechazado / fallido => liberar ticket
-    console.log('[Webpay Return] Payment failed/rejected for order:', order.id);
-    
-    await admin
-      .from('orders')
-      .update({
-        status: 'failed',
-        payment_state: result?.status || 'FAILED',
-        webpay_token: token,
-      })
-      .eq('id', order.id);
-
-    await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
-
-    return NextResponse.redirect(`${redirectBase}?payment=failed&order=${order.id}`, {
-      status: 303,
-    });
-  } catch (err) {
-    console.error('[Webpay Return] Error:', err);
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    return NextResponse.redirect(`${baseUrl}/dashboard/purchases?payment=error`, { status: 303 });
-  }
-}
