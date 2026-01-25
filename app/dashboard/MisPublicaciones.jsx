@@ -92,11 +92,22 @@ export default function MisPublicaciones() {
 
     useEffect(() => {
       loadListings();
-      // Polling cada 5 segundos para mantener publicaciones actualizadas
-      const interval = setInterval(() => {
-        loadListings();
-      }, 5000);
-      return () => clearInterval(interval);
+      // Suscripción realtime a cambios en tickets
+      const channel = supabase
+        .channel('public:tickets')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'tickets' },
+          (payload) => {
+            // Refresca publicaciones ante cualquier cambio
+            loadListings();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }, []);
 
       async function loadListings() {
