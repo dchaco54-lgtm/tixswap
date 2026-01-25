@@ -1,297 +1,155 @@
 // app/api/tickets/listing/route.js
+export const dynamic = "force-dynamic";
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { calculateFees } from "@/lib/fees";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const runtime = "nodejs";
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("Missing Supabase env vars");
+function getBearer(req) {
+  const auth = req.headers.get("authorization") || "";
+  const [type, token] = auth.split(" ");
+  if ((type || "").toLowerCase() !== "bearer") return null;
+  return token || null;
 }
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false },
-});
-
-/**
- * PATCH /api/tickets/listing
- * Editar una publicación (precio, estado)
- * Body: { ticketId, price?, status?, notes? }
- */
-// Detectar columnas reales en la tabla (hay instalaciones que tienen `price_clp` en vez de `price`)
-const { data: schemaCols, error: schemaErr } = await supabaseAdmin
-  .from("information_schema.columns")
-  .select("column_name")
-  .eq("table_schema", "public")
-  .eq("table_name", "tickets")
-  .in("column_name", ["price", "price_clp", "platform_fee", "platform_fee_clp", "fee_clp"]);
-
-if (schemaErr) {
-  console.error("Schema detection error", schemaErr);
-  return NextResponse.json({ error: "Error interno" }, { status: 500 });
-}
-
-const cols = new Set((schemaCols || []).map((c) => c.column_name));
-const hasPrice = cols.has("price");
-const hasPriceClp = cols.has("price_clp");
-const hasPlatformFee = cols.has("platform_fee");
-const hasPlatformFeeClp = cols.has("platform_fee_clp");
-const hasFeeClp = cols.has("fee_clp");
-
-// Construir update object solo con campos válidos
-const updates = {};
-
-if (price !== undefined) {
-  const parsedPrice = parseInt(price, 10);
-  if (isNaN(parsedPrice) || parsedPrice <= 0) {
-    return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
-  }
-
-  // ✅ Regla negocio: 2.5% con mínimo 1200
-  const fee = Math.max(Math.round(parsedPrice * 0.025), 1200);
-
-  // ✅ Actualizamos AMBOS si existen para evitar “precios pegados”
-  if (hasPriceClp) updates.price_clp = parsedPrice;
-  if (hasPrice) updates.price = parsedPrice;
-
-  if (!hasPriceClp && !hasPrice) {
-    return NextResponse.json(
-      { error: "No existe columna de precio (price/price_clp) en tickets" },
-      { status: 500 }
-    );
-  }
-
-  // Si tienes columna de fee en tickets, la dejamos consistente
-  if (hasPlatformFee) updates.platform_fee = fee;
-  if (hasPlatformFeeClp) updates.platform_fee_clp = fee;
-  if (hasFeeClp) updates.fee_clp = fee;
-}
-
-if (status !== undefined) {
-  const validStatuses = ["active", "paused", "available"];
-  if (!validStatuses.includes(status)) {
-    return NextResponse.json({ error: "Estado inválido" }, { status: 400 });
-  }
-  updates.status = status;
-}
-
-if (Object.keys(updates).length === 0) {
-  return NextResponse.json({ error: "No hay cambios para actualizar" }, { status: 400 });
-}
-
-export async function PATCH(request) {
+export async function PATCH(req) {
   try {
-    // Auth
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
+    const token = getBearer(req);
+    if (!token) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Sesión inválida" }, { status: 401 });
-    }
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    });
 
-    const userId = authData.user.id;
+    const {
+      data: { user },
+      error: uErr,
+    } = await admin.auth.getUser(token);
 
-    // Parse body
-    const body = await request.json().catch(() => ({}));
-    const { ticketId, price, status, notes } = body;
+    if (uErr || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    if (!ticketId) {
-      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
-    }
+    const body = await req.json().catch(() => ({}));
+    const { ticketId, status, price, notes } = body || {};
 
-    // Verificar ownership
-    const { data: ticket, error: fetchErr } = await supabaseAdmin
+    if (!ticketId) return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
+
+    // Validar que el ticket sea del usuario
+    const { data: existing, error: exErr } = await admin
       .from("tickets")
-      .select("id, seller_id, status")
+      .select("id,seller_id,status,price,price_clp")
       .eq("id", ticketId)
       .single();
 
-    if (fetchErr || !ticket) {
-      return NextResponse.json(
-        { error: "Publicación no encontrada" },
-        { status: 404 }
-      );
-    }
-
-    if (ticket.seller_id !== userId) {
-      return NextResponse.json(
-        { error: "No tienes permiso para editar esta publicación" },
-        { status: 403 }
-      );
-    }
+    if (exErr || !existing) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    if (existing.seller_id !== user.id) return NextResponse.json({ error: "No autorizado" }, { status: 403 });
 
     // Construir update object solo con campos válidos
+    // Ojo: en la DB existen ambos campos price y price_clp, y si no los sincronizas
+    // el dashboard se queda mostrando el price_clp viejo (tu bug de 1.300 “pegado”).
     const updates = {};
+    if (typeof status === "string") updates.status = status;
+    if (typeof notes === "string") updates.notes = notes;
 
-    if (price !== undefined) {
-      const numPrice = Number(price);
-      if (isNaN(numPrice) || numPrice < 0) {
-        return NextResponse.json(
-          { error: "Precio inválido" },
-          { status: 400 }
-        );
-      }
-      updates.price = numPrice;
-      // Calcular y guardar platform_fee
-      updates.platform_fee = Math.max(Math.round(numPrice * 0.025), 1200);
+    // precio y fee
+    if (price !== undefined && price !== null && price !== "") {
+      const p = Math.round(Number(price) || 0);
+      if (p <= 0) return NextResponse.json({ error: "Precio inválido" }, { status: 400 });
+
+      // ✅ Sincronizar SIEMPRE
+      updates.price = p;
+      updates.price_clp = p;
+
+      // ✅ Fee correcto: 2.5% con mínimo 1200
+      const { platformFee } = calculateFees(p);
+      updates.platform_fee = platformFee;
     }
 
-    if (status !== undefined) {
-      const validStatuses = ["active", "available", "paused", "sold", "cancelled"];
-      if (!validStatuses.includes(status)) {
-        return NextResponse.json(
-          { error: "Estado inválido. Usa: active, paused, sold, cancelled" },
-          { status: 400 }
-        );
-      }
-      updates.status = status;
-    }
-
-    if (notes !== undefined) {
-      updates.notes = String(notes || "").substring(0, 500);
-    }
-
+    // Si no hay nada que actualizar
     if (Object.keys(updates).length === 0) {
-      return NextResponse.json(
-        { error: "No hay cambios para aplicar" },
-        { status: 400 }
-      );
+      return NextResponse.json({ ok: true, ticket: existing }, { status: 200 });
     }
 
-    // Update
-    const { data: updated, error: updateErr } = await supabaseAdmin
+    // Intento update “completo”
+    let { data: updated, error: upErr } = await admin
       .from("tickets")
       .update(updates)
       .eq("id", ticketId)
-      .select()
+      .select("*")
       .single();
 
-    if (updateErr) {
-      console.error("[listing PATCH] Update error:", updateErr);
-      return NextResponse.json(
-        { error: "Error al actualizar publicación", details: updateErr.message },
-        { status: 500 }
-      );
+    // Fallback si alguna columna no existe en algún ambiente (dev/old schema)
+    if (upErr && /column .*price_clp.* does not exist/i.test(upErr.message || "")) {
+      const safeUpdates = { ...updates };
+      delete safeUpdates.price_clp;
+
+      const retry = await admin.from("tickets").update(safeUpdates).eq("id", ticketId).select("*").single();
+      updated = retry.data;
+      upErr = retry.error;
     }
 
-    return NextResponse.json({ ticket: updated });
-  } catch (err) {
-    console.error("[listing PATCH] Unexpected error:", err);
-    return NextResponse.json(
-      { error: "Error interno del servidor" },
-      { status: 500 }
-    );
+    if (upErr) throw upErr;
+
+    return NextResponse.json({ ok: true, ticket: updated }, { status: 200 });
+  } catch (e) {
+    console.error("listing PATCH error", e);
+    return NextResponse.json({ error: e?.message || "Error" }, { status: 500 });
   }
 }
 
-/**
- * DELETE /api/tickets/listing
- * Eliminar una publicación
- * Body: { ticketId }
- */
-export async function DELETE(request) {
+export async function DELETE(req) {
   try {
-    // Auth
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
+    const token = getBearer(req);
+    if (!token) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    const token = authHeader.replace("Bearer ", "");
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
-    if (authErr || !authData?.user) {
-      return NextResponse.json({ error: "Sesión inválida" }, { status: 401 });
-    }
+    const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    });
 
-    const userId = authData.user.id;
+    const {
+      data: { user },
+      error: uErr,
+    } = await admin.auth.getUser(token);
 
-    // Parse body
-    const body = await request.json().catch(() => ({}));
-    const { ticketId } = body;
+    if (uErr || !user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
-    if (!ticketId) {
-      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
-    }
+    const body = await req.json().catch(() => ({}));
+    const { ticketId } = body || {};
 
-    // Verificar ownership y estado
-    const { data: ticket, error: fetchErr } = await supabaseAdmin
-      .from("tickets")
-      .select("id, seller_id, status")
-      .eq("id", ticketId)
-      .single();
+    if (!ticketId) return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
 
-    if (fetchErr || !ticket) {
-      return NextResponse.json(
-        { error: "Publicación no encontrada" },
-        { status: 404 }
-      );
-    }
+    // Validar que el ticket sea del usuario
+    const { data: existing, error: exErr } = await admin.from("tickets").select("id,seller_id").eq("id", ticketId).single();
 
-    if (ticket.seller_id !== userId) {
-      return NextResponse.json(
-        { error: "No tienes permiso para eliminar esta publicación" },
-        { status: 403 }
-      );
-    }
+    if (exErr || !existing) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
+    if (existing.seller_id !== user.id) return NextResponse.json({ error: "No autorizado" }, { status: 403 });
 
-    // Bloquear eliminación si está vendida
-    if (ticket.status === "sold") {
-      return NextResponse.json(
-        { error: "No puedes eliminar una publicación vendida. Contacta a soporte si necesitas ayuda." },
-        { status: 400 }
-      );
-    }
-
-    // Verificar si tiene columna deleted_at (soft delete)
-    const { data: columns } = await supabaseAdmin
+    // Schema-safe: detect columns listing_status / is_listed, si existen
+    const { data: cols, error: cErr } = await admin
       .from("information_schema.columns")
       .select("column_name")
       .eq("table_schema", "public")
       .eq("table_name", "tickets")
-      .eq("column_name", "deleted_at");
+      .in("column_name", ["listing_status", "is_listed", "status"]);
 
-    const hasDeletedAt = columns && columns.length > 0;
+    if (cErr) throw cErr;
 
-    if (hasDeletedAt) {
-      // Soft delete
-      const { error: softDeleteErr } = await supabaseAdmin
-        .from("tickets")
-        .update({ deleted_at: new Date().toISOString(), status: "cancelled" })
-        .eq("id", ticketId);
+    const colNames = new Set((cols || []).map((c) => c.column_name));
+    const updates = {};
 
-      if (softDeleteErr) {
-        console.error("[listing DELETE] Soft delete error:", softDeleteErr);
-        return NextResponse.json(
-          { error: "Error al eliminar publicación" },
-          { status: 500 }
-        );
-      }
-    } else {
-      // Hard delete
-      const { error: deleteErr } = await supabaseAdmin
-        .from("tickets")
-        .delete()
-        .eq("id", ticketId);
+    if (colNames.has("listing_status")) updates.listing_status = "inactive";
+    if (colNames.has("is_listed")) updates.is_listed = false;
+    // fallback: set status = cancelled if exists
+    if (colNames.has("status")) updates.status = "cancelled";
 
-      if (deleteErr) {
-        console.error("[listing DELETE] Hard delete error:", deleteErr);
-        return NextResponse.json(
-          { error: "Error al eliminar publicación" },
-          { status: 500 }
-        );
-      }
-    }
+    const { error: delErr } = await admin.from("tickets").update(updates).eq("id", ticketId);
+    if (delErr) throw delErr;
 
-    return NextResponse.json({ success: true, message: "Publicación eliminada" });
-  } catch (err) {
-    console.error("[listing DELETE] Unexpected error:", err);
-    return NextResponse.json(
-      { error: "Error interno del servidor" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (e) {
+    console.error("listing DELETE error", e);
+    return NextResponse.json({ error: e?.message || "Error" }, { status: 500 });
   }
 }
+
