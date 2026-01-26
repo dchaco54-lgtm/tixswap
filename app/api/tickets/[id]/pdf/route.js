@@ -1,151 +1,128 @@
-// app/api/tickets/[id]/pdf/route.js
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export async function GET(_req, { params }) {
+// Genera signed URL del PDF de un ticket.
+// Solo comprador (con orden pagada) o vendedor.
+export async function GET(req, { params }) {
   try {
-    const ticketId = params?.id;
-
-    if (!ticketId) {
-      return NextResponse.json({ error: "id requerido" }, { status: 400 });
-    }
+    const { id: ticketId } = params;
 
     const cookieStore = cookies();
-    const supabaseUser = createRouteHandlerClient({ cookies: () => cookieStore });
+    const supabase = createClient(cookieStore);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user;
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabaseUser.auth.getUser();
-
-    if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    let admin = null;
-    try {
-      admin = supabaseAdmin();
-    } catch {
-      // si no hay service role, seguimos con usuario (puede fallar si storage es privado)
-    }
+    const admin = supabaseAdmin();
 
-    const client = admin || supabaseUser;
-
-    // ---- Auth check (best effort) ----
-    let allowed = false;
-
-    const { data: orderMaybe, error: orderErr } = await client
+    // 1) Buscar orden que autorice acceso (buyer o seller)
+    const { data: anyOrder, error: ordErr } = await admin
       .from("orders")
-      .select("id,buyer_id,seller_id,ticket_id")
+      .select("id, status, payment_state, buyer_id, seller_id, user_id, ticket_id")
       .eq("ticket_id", ticketId)
+      .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id},user_id.eq.${user.id}`)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!orderErr && orderMaybe) {
-      if (orderMaybe.buyer_id === user.id || orderMaybe.seller_id === user.id) {
-        allowed = true;
-      }
+    if (ordErr) {
+      console.error("GET /api/tickets/[id]/pdf ordErr", ordErr);
+      return NextResponse.json(
+        { error: "Error validando permisos" },
+        { status: 500 }
+      );
     }
 
-    let ticketRow = null;
-    if (!allowed) {
-      const { data: t, error: tErr } = await client
-        .from("tickets")
-        .select("*")
-        .eq("id", ticketId)
-        .maybeSingle();
-
-      if (!tErr && t) {
-        ticketRow = t;
-        if (t.seller_id === user.id) allowed = true;
-      }
+    if (!anyOrder) {
+      return NextResponse.json(
+        { error: "No tienes acceso a este ticket" },
+        { status: 403 }
+      );
     }
 
-    if (!allowed) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    // ---- Locate file ----
-    let bucket = "ticket-pdfs";
-    let path = null;
-
-    // 1) ticket_files
-    const { data: tf, error: tfErr } = await client
-      .from("ticket_files")
-      .select("storage_bucket,storage_path")
+    // 2) Traer ticket (para seller_id / posibles columnas)
+    const { data: ticket, error: tErr } = await admin
+      .from("tickets")
+      .select("*")
       .eq("id", ticketId)
       .maybeSingle();
 
-    if (!tfErr && tf?.storage_path) {
-      bucket = tf.storage_bucket || bucket;
-      path = tf.storage_path;
+    if (tErr) console.error("GET /api/tickets/[id]/pdf tErr", tErr);
+
+    const sellerId = ticket?.seller_id || anyOrder?.seller_id;
+
+    // 3) Intentar resolver PDF desde ticket_uploads
+    let bucket = null;
+    let path = null;
+
+    // Caso nuevo: ticket tiene source_pdf_bucket / source_pdf_path
+    if (ticket?.source_pdf_bucket && ticket?.source_pdf_path) {
+      bucket = ticket.source_pdf_bucket;
+      path = ticket.source_pdf_path;
     }
 
-    // 2) ticket_uploads (id == ticketId)
-    if (!path) {
-      const { data: tu, error: tuErr } = await client
+    // Caso nuevo: ticket tiene ticket_upload_id
+    if (!path && ticket?.ticket_upload_id) {
+      const { data: up, error: upErr } = await admin
         .from("ticket_uploads")
-        .select("storage_bucket,storage_path")
-        .eq("id", ticketId)
+        .select("storage_bucket, storage_path")
+        .eq("id", ticket.ticket_upload_id)
         .maybeSingle();
 
-      if (!tuErr && tu?.storage_path) {
-        bucket = tu.storage_bucket || bucket;
-        path = tu.storage_path;
+      if (upErr) console.error("GET /api/tickets/[id]/pdf upErr", upErr);
+      if (up?.storage_path) {
+        bucket = up.storage_bucket;
+        path = up.storage_path;
       }
     }
 
-    // 3) tickets.storage_path / bucket
-    if (!path && ticketRow) {
-      if (ticketRow.storage_path) {
-        bucket = ticketRow.storage_bucket || bucket;
-        path = ticketRow.storage_path;
-      }
-    }
-
-    // 4) tickets.ticket_upload_id -> ticket_uploads
-    if (!path && ticketRow?.ticket_upload_id) {
-      const { data: tu2, error: tu2Err } = await client
+    // Caso legacy (tu caso): no hay relación, fallback por seller_id
+    if (!path && sellerId) {
+      const { data: up2, error: upErr2 } = await admin
         .from("ticket_uploads")
-        .select("storage_bucket,storage_path")
-        .eq("id", ticketRow.ticket_upload_id)
+        .select("storage_bucket, storage_path")
+        .eq("seller_id", sellerId)
+        .eq("status", "uploaded")
+        .order("created_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      if (!tu2Err && tu2?.storage_path) {
-        bucket = tu2.storage_bucket || bucket;
-        path = tu2.storage_path;
+      if (upErr2) console.error("GET /api/tickets/[id]/pdf upErr2", upErr2);
+      if (up2?.storage_path) {
+        bucket = up2.storage_bucket;
+        path = up2.storage_path;
       }
     }
 
-    // 5) fallback
-    if (!path) {
-      path = `${ticketId}.pdf`;
-    }
-
-    const { data: signed, error: signErr } = await client.storage
-      .from(bucket)
-      .createSignedUrl(path, 60 * 10); // 10 min
-
-    if (signErr || !signed?.signedUrl) {
-      console.error("ticket pdf signErr:", signErr);
+    if (!bucket || !path) {
       return NextResponse.json(
-        {
-          error:
-            "No se pudo generar el link del PDF. Revisa que el archivo exista en Storage (ticket-pdfs) y que tenga storage_path válido.",
-          details: signErr?.message || null,
-          bucket,
-          path,
-        },
+        { error: "No se encontró el PDF del ticket" },
         { status: 404 }
       );
     }
 
-    return NextResponse.json({ signedUrl: signed.signedUrl, bucket, path });
+    // 4) Signed URL
+    const { data: signed, error: sErr } = await admin.storage
+      .from(bucket)
+      .createSignedUrl(path, 60 * 10); // 10 min
+
+    if (sErr) {
+      console.error("GET /api/tickets/[id]/pdf signedErr", sErr);
+      return NextResponse.json(
+        { error: "No se pudo generar el link" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ url: signed.signedUrl });
   } catch (err) {
-    console.error("ticket pdf fatal:", err);
+    console.error("GET /api/tickets/[id]/pdf fatal", err);
     return NextResponse.json({ error: "Error interno" }, { status: 500 });
   }
 }
+
