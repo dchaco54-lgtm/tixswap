@@ -1,54 +1,67 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server"; // ajusta si tu path es otro
+import { createClient } from "@supabase/supabase-js";
 
 function getBearerToken(req) {
-  const auth = req.headers.get("authorization") || "";
+  const auth = req.headers?.get?.("authorization") || "";
   const [type, token] = auth.split(" ");
   if (type?.toLowerCase() === "bearer" && token) return token.trim();
   return null;
 }
 
-function score(o) {
-  // 1) pagado o autorizado gana siempre
-  if (o.status === "paid" || o.payment_state === "AUTHORIZED") return 3;
+function createAuthedSupabase(token) {
+  const url =
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anon =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
-  // 2) pending / sesión creada
-  if (o.status === "pending" || o.payment_state === "session_created") return 2;
+  if (!url || !anon) throw new Error("Missing Supabase env vars (URL/ANON_KEY)");
 
-  // 3) otros estados “neutros”
-  if (["processing", "created"].includes(o.status)) return 1;
-
-  // 4) basura
-  if (["cancelled", "failed", "expired"].includes(o.status)) return 0;
-
-  return 1;
+  return createClient(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  });
 }
 
-function dedupeOrdersByTicket(rows) {
+function score(o) {
+  // top: paid / authorized
+  if (o?.status === "paid" || o?.payment_state === "AUTHORIZED") return 30;
+
+  // next: pending / session created
+  if (o?.status === "pending" || o?.payment_state === "session_created") return 20;
+
+  // other ok-ish
+  if (["created", "processing"].includes(o?.status)) return 10;
+
+  // trash
+  if (["cancelled", "failed", "expired"].includes(o?.status)) return 0;
+
+  return 10;
+}
+
+function dedupeByTicketId(rows) {
   const best = new Map();
 
-  for (const o of rows) {
-    const key = o.ticket_id; // <-- CLAVE: por ticket_id
+  for (const o of rows || []) {
+    const key = o?.ticket_id || `no-ticket-${o?.id}`;
 
-    // Si por alguna razón viene null, lo dejamos como “único”
-    const safeKey = key || `no-ticket-${o.id}`;
-
-    const curr = best.get(safeKey);
+    const curr = best.get(key);
     const so = score(o);
     const sc = curr ? score(curr) : -1;
 
-    const newer =
-      !curr ||
-      new Date(o.created_at).getTime() > new Date(curr.created_at).getTime();
+    const tO = new Date(o?.created_at || 0).getTime();
+    const tC = curr ? new Date(curr?.created_at || 0).getTime() : -1;
 
-    const better = !curr || so > sc || (so === sc && newer);
-
-    if (better) best.set(safeKey, o);
+    const better = !curr || so > sc || (so === sc && tO > tC);
+    if (better) best.set(key, o);
   }
 
-  // Oculta basura
+  // opcional: esconder basura
   return Array.from(best.values()).filter(
-    (o) => !["cancelled", "failed", "expired"].includes(o.status)
+    (o) => !["cancelled", "failed", "expired"].includes(o?.status)
   );
 }
 
@@ -56,30 +69,20 @@ export async function GET(req) {
   try {
     const token = getBearerToken(req);
     if (!token) {
-      return NextResponse.json(
-        { error: "No auth token provided" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Missing Authorization Bearer token" }, { status: 401 });
     }
 
-    const supabase = createClient();
+    const supabase = createAuthedSupabase(token);
 
-    // Validar usuario a partir del token
-    const { data: userData, error: userErr } = await supabase.auth.getUser(
-      token
-    );
-
-    if (userErr || !userData?.user?.id) {
-      return NextResponse.json(
-        { error: "Invalid session" },
-        { status: 401 }
-      );
+    // user desde el JWT (sin cookies)
+    const { data: u, error: uErr } = await supabase.auth.getUser();
+    if (uErr || !u?.user?.id) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
-    const userId = userData.user.id;
+    const userId = u.user.id;
 
-    // Traer órdenes del usuario (buyer)
-    // Ajusta el select si tus relaciones se llaman distinto (ticket/event)
+    // Traer orders del buyer
     const { data: rows, error: qErr } = await supabase
       .from("orders")
       .select(
@@ -125,16 +128,17 @@ export async function GET(req) {
       return NextResponse.json({ error: qErr.message }, { status: 500 });
     }
 
-    const unique = dedupeOrdersByTicket(rows || []);
+    const unique = dedupeByTicketId(rows);
 
-    return NextResponse.json({ orders: unique });
+    return NextResponse.json({ orders: unique }, { status: 200 });
   } catch (e) {
     return NextResponse.json(
-      { error: e?.message || "Internal error" },
+      { error: e?.message || "Internal Server Error" },
       { status: 500 }
     );
   }
 }
+
 
 
 
