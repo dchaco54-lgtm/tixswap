@@ -1,104 +1,149 @@
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-import { NextResponse } from 'next/server';
-import { buildTicketSelect, detectTicketColumns, normalizeTicket } from '@/lib/db/ticketSchema';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
+// Fuerza a Next a no intentar cachear esta ruta como estática
+export const dynamic = "force-dynamic";
+// También puedes dejar esto si quieres: export const revalidate = 0;
 
-// GET /api/tickets/my-publications
-export async function GET(request) {
+export async function GET(req) {
   try {
-    // 1) Auth: preferir Bearer (front lo manda), fallback cookies
+    const authHeader = req.headers.get("authorization");
+    const token = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : null;
+
+    if (!token) {
+      return NextResponse.json(
+        { error: "Missing token" },
+        {
+          status: 401,
+          headers: {
+            "Cache-Control":
+              "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
+        }
+      );
+    }
+
     const admin = supabaseAdmin();
 
-    let userId = null;
-    const authHeader = request.headers.get('authorization') || '';
-
-    if (authHeader.toLowerCase().startsWith('bearer ')) {
-      const token = authHeader.slice(7).trim();
-      const { data: userRes, error: userErr } = await admin.auth.getUser(token);
-      if (userErr || !userRes?.user) {
-        return NextResponse.json({ error: 'Sesión inválida' }, { status: 401 });
-      }
-      userId = userRes.user.id;
-    } else {
-      const supabase = createClient(cookies());
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-      }
-      userId = user.id;
-    }
-
-    // 2) Detectar columnas reales y armar select seguro
-    const columns = await detectTicketColumns(admin);
-    const selectStr = buildTicketSelect(columns);
-
-    // 3) Query (admin para evitar RLS, pero filtrado por tu userId)
-    let { data: tickets, error: ticketsErr } = await admin
-      .from('tickets')
-      .select(selectStr)
-      .eq('seller_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(100);
-
-    // Fallback: si falla el embed `event:events(...)`, reintenta sin embed y arma el evento aparte.
-    if (ticketsErr) {
-      const msg = String(ticketsErr.message || '');
-      const looksLikeRelationErr = /relationship|schema cache|Could not find/i.test(msg) && /events?/i.test(msg);
-
-      if (!looksLikeRelationErr) {
-        return NextResponse.json(
-          { error: 'Error al obtener publicaciones', details: ticketsErr.message },
-          { status: 500 }
-        );
-      }
-
-      const selectNoEmbed = selectStr.replace(/,\s*event:events\([^)]*\)\s*$/i, '');
-
-      const retry = await admin
-        .from('tickets')
-        .select(selectNoEmbed)
-        .eq('seller_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      tickets = retry.data || [];
-      if (retry.error) {
-        return NextResponse.json({ error: 'Error al obtener publicaciones', details: msg }, { status: 500 });
-      }
-
-      const eventIds = Array.from(new Set((tickets || []).map((t) => t?.event_id).filter(Boolean)));
-      if (eventIds.length) {
-        const { data: events, error: eErr } = await admin
-          .from('events')
-          .select('id,title,starts_at,venue,city')
-          .in('id', eventIds);
-
-        if (!eErr && Array.isArray(events)) {
-          const map = Object.fromEntries(events.map((e) => [e.id, e]));
-          tickets = (tickets || []).map((t) => ({ ...t, event: map[t.event_id] || null }));
+    // Obtener usuario desde el JWT (con admin client)
+    const { data: userData, error: userErr } = await admin.auth.getUser(token);
+    if (userErr || !userData?.user?.id) {
+      return NextResponse.json(
+        { error: "Invalid token" },
+        {
+          status: 401,
+          headers: {
+            "Cache-Control":
+              "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
         }
-      }
+      );
     }
 
-    const normTickets = (tickets || []).map(normalizeTicket);
+    const userId = userData.user.id;
 
-    const active = normTickets.filter((t) => t.status === 'active' || t.status === 'available').length;
-    const paused = normTickets.filter((t) => t.status === 'paused').length;
-    const sold = normTickets.filter((t) => t.status === 'sold').length;
+    // Traer publicaciones del vendedor + evento asociado
+    const { data: tickets, error } = await admin
+      .from("tickets")
+      .select(
+        `
+        id,
+        price,
+        currency,
+        sector,
+        row_label,
+        seat_label,
+        status,
+        created_at,
+        file_url,
+        is_named,
+        event:events (
+          id,
+          city,
+          title,
+          venue,
+          starts_at
+        )
+      `
+      )
+      .eq("seller_id", userId)
+      .order("created_at", { ascending: false });
 
-    return NextResponse.json({
-      tickets: normTickets,
-      summary: { total: normTickets.length, active, paused, sold },
-    });
-  } catch (err) {
-    console.error('Error en GET /api/tickets/my-publications:', err);
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        {
+          status: 500,
+          headers: {
+            "Cache-Control":
+              "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
+        }
+      );
+    }
+
+    const normTickets = (tickets || []).map((t) => ({
+      id: t.id,
+      price: t.price,
+      currency: t.currency,
+      section: t.sector,
+      row: t.row_label,
+      seat: t.seat_label,
+      status: t.status,
+      created_at: t.created_at,
+      file_url: t.file_url,
+      is_named: Boolean(t.is_named),
+      event: t.event
+        ? {
+            id: t.event.id,
+            city: t.event.city,
+            title: t.event.title,
+            venue: t.event.venue,
+            starts_at: t.event.starts_at,
+          }
+        : null,
+    }));
+
+    const summary = {
+      total: normTickets.length,
+      active: normTickets.filter((t) => t.status === "active").length,
+      paused: normTickets.filter((t) => t.status === "paused").length,
+      sold: normTickets.filter((t) => t.status === "sold").length,
+    };
+
     return NextResponse.json(
-      { error: 'Error inesperado', details: err?.message },
-      { status: 500 }
+      { tickets: normTickets, summary },
+      {
+        status: 200,
+        headers: {
+          "Cache-Control":
+            "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      }
+    );
+  } catch (e) {
+    return NextResponse.json(
+      { error: e?.message || "Unknown error" },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control":
+            "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      }
     );
   }
 }
+
