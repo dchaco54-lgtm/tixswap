@@ -4,9 +4,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { statusLabel, statusBadgeClass, TICKET_STATUS, getNextValidStatuses } from "@/lib/support/status";
+import { statusLabel, statusBadgeClass, TICKET_STATUS } from "@/lib/support/status";
 
-// Array de estados para el dropdown (compatible con STATUS anterior)
+/**
+ * ADMIN: fallback por email (por si roles/columns fallan)
+ * Ajusta/agrégate los correos que quieras permitir.
+ */
+const ADMIN_EMAILS = new Set([
+  "davidchacon_17@hotmail.com",
+  "soporte@tixswap.cl",
+]);
+
+// Array de estados para dropdown
 const STATES_FILTER = Object.entries(TICKET_STATUS).map(([key, value]) => ({
   v: value,
   l: statusLabel(value),
@@ -44,9 +53,33 @@ function fmtBytes(n) {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function normalizeRole(v) {
+  return String(v || "").toLowerCase().trim();
+}
+
+// Compat legacy -> nuevo
+function normalizeSupportStatus(s) {
+  const x = String(s || "").toLowerCase().trim();
+  const map = {
+    abierto: "open",
+    submitted: "open",
+    in_review: "in_progress",
+    en_revision: "in_progress",
+    pending_info: "waiting_user",
+    pendiente_info: "waiting_user",
+    resolved: "resolved",
+    resuelto: "resolved",
+    closed: "closed",
+    cerrado: "closed",
+    rejected: "closed",
+  };
+  return map[x] || x;
+}
+
 function isOverdue(ticket) {
   if (!ticket?.due_at) return false;
-  if (ticket.status === "resolved" || ticket.status === "rejected") return false;
+  const st = normalizeSupportStatus(ticket.status);
+  if (st === "resolved" || st === "closed") return false;
   return new Date(ticket.due_at).getTime() < Date.now();
 }
 
@@ -82,25 +115,39 @@ export default function AdminSupportConsole() {
     return data?.session?.access_token || null;
   };
 
+  /**
+   * ✅ Admin check robusto:
+   * 1) user.email en whitelist
+   * 2) profiles.user_type === 'admin' (sin asumir columnas extra)
+   * 3) metadata fallback (user_metadata/app_metadata)
+   */
   const ensureAdmin = async () => {
     const { data } = await supabase.auth.getUser();
     const user = data?.user;
     if (!user) return { ok: false };
 
-    const { data: prof } = await supabase
+    const email = (user.email || "").toLowerCase();
+    if (ADMIN_EMAILS.has(email)) return { ok: true };
+
+    // metadata fallback (por si lo guardaste ahí alguna vez)
+    const metaRole =
+      user?.user_metadata?.user_type ||
+      user?.app_metadata?.user_type ||
+      user?.user_metadata?.role ||
+      user?.app_metadata?.role;
+
+    if (normalizeRole(metaRole) === "admin") return { ok: true };
+
+    // source of truth: profiles.user_type (minimal)
+    const { data: prof, error: profErr } = await supabase
       .from("profiles")
-      .select("app_role, user_type, email")
+      .select("user_type")
       .eq("id", user.id)
       .maybeSingle();
 
-    // Verificar app_role (prioritario) o user_type (fallback) o email hardcoded
-    const isAdmin = 
-      prof?.app_role === 'admin' ||
-      prof?.user_type === 'admin' ||
-      prof?.email?.toLowerCase() === 'davidchacon_17@hotmail.com';
+    if (!profErr && normalizeRole(prof?.user_type) === "admin") return { ok: true };
 
-    if (!isAdmin) return { ok: false };
-    return { ok: true };
+    return { ok: false };
   };
 
   const refreshList = async () => {
@@ -149,7 +196,7 @@ export default function AdminSupportConsole() {
       if (!res.ok) throw new Error(json?.error || "No pudimos abrir el ticket");
 
       setSelected(json.ticket);
-      setAdminStatus(json.ticket?.status || "submitted");
+      setAdminStatus(json.ticket?.status || "open");
       setMessages(json.messages || []);
       setAttachments(json.attachments || []);
     } catch (e) {
@@ -176,6 +223,7 @@ export default function AdminSupportConsole() {
       setBoot(false);
       await refreshList();
     };
+
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -204,17 +252,30 @@ export default function AdminSupportConsole() {
       const subj = (t.subject || "").toLowerCase();
       const email = (t.requester_email || "").toLowerCase();
       const rut = (t.requester_rut || "").toLowerCase();
-      return (
-        n.includes(qq) ||
-        subj.includes(qq) ||
-        email.includes(qq) ||
-        rut.includes(qq)
-      );
+      return n.includes(qq) || subj.includes(qq) || email.includes(qq) || rut.includes(qq);
     });
   }, [q, tickets]);
 
+  // Opciones para dropdown (incluye legacy si el ticket viene con status viejo)
+  const statusOptions = useMemo(() => {
+    const base = STATES_FILTER;
+    if (adminStatus && !base.some((o) => o.v === adminStatus)) {
+      return [{ v: adminStatus, l: statusLabel(adminStatus) }, ...base];
+    }
+    return base;
+  }, [adminStatus]);
+
   const canReply =
-    !!selected && ["submitted", "in_review", "waiting_user"].includes(adminStatus);
+    !!selected &&
+    [
+      "open",
+      "in_progress",
+      "waiting_user",
+      // legacy compatibles
+      "submitted",
+      "in_review",
+      "pending_info",
+    ].includes(String(adminStatus || "").toLowerCase());
 
   const handleUpdateStatus = async () => {
     if (!selected?.id) return;
@@ -428,8 +489,7 @@ export default function AdminSupportConsole() {
                     </p>
 
                     <p className="text-xs text-slate-500 line-clamp-1 mt-1">
-                      {CATEGORY_LABEL(t.category)} ·{" "}
-                      {t.requester_email ? t.requester_email : "—"}
+                      {CATEGORY_LABEL(t.category)} · {t.requester_email ? t.requester_email : "—"}
                     </p>
 
                     <p className="text-xs text-slate-500 line-clamp-1 mt-1">
@@ -450,9 +510,7 @@ export default function AdminSupportConsole() {
           {/* DETALLE */}
           <div className="bg-white border border-slate-100 rounded-2xl p-4">
             {!selected ? (
-              <p className="text-sm text-slate-500">
-                Selecciona un ticket para verlo.
-              </p>
+              <p className="text-sm text-slate-500">Selecciona un ticket para verlo.</p>
             ) : loadingDetail ? (
               <p className="text-sm text-slate-500">Cargando ticket…</p>
             ) : (
@@ -476,32 +534,17 @@ export default function AdminSupportConsole() {
                     </div>
 
                     <p className="text-xs text-slate-500 mt-2">
-                      {selected.category === "disputa_compra" ||
-                      selected.category === "disputa_venta" ? (
-                        <>
-                          disputa · Creado: {fmtCL(selected.created_at)} · Vence:{" "}
-                          {fmtCL(selected.due_at)}
-                        </>
-                      ) : (
-                        <>
-                          Creado: {fmtCL(selected.created_at)} · Vence:{" "}
-                          {fmtCL(selected.due_at)}
-                        </>
-                      )}
+                      Creado: {fmtCL(selected.created_at)} · Vence: {fmtCL(selected.due_at)}
                     </p>
 
                     <p className="text-xs text-slate-500 mt-1">
                       Usuario:{" "}
-                      <b className="text-slate-700">
-                        {selected.requester_name || "—"}
-                      </b>{" "}
-                      · {selected.requester_email || "—"}{" "}
+                      <b className="text-slate-700">{selected.requester_name || "—"}</b> ·{" "}
+                      {selected.requester_email || "—"}{" "}
                       {selected.requester_rut ? (
                         <>
                           · RUT{" "}
-                          <span className="text-slate-700">
-                            {selected.requester_rut}
-                          </span>
+                          <span className="text-slate-700">{selected.requester_rut}</span>
                         </>
                       ) : null}
                     </p>
@@ -517,12 +560,13 @@ export default function AdminSupportConsole() {
                         onChange={(e) => setAdminStatus(e.target.value)}
                         className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
                       >
-                        {STATUS.map((s) => (
+                        {statusOptions.map((s) => (
                           <option key={s.v} value={s.v}>
                             {s.l}
                           </option>
                         ))}
                       </select>
+
                       <button
                         onClick={handleUpdateStatus}
                         disabled={savingStatus}
@@ -571,6 +615,7 @@ export default function AdminSupportConsole() {
                     {messages.map((m) => {
                       const mine = m.sender_type === "admin";
                       const related = attachments.filter((a) => a.message_id === m.id);
+
                       return (
                         <div
                           key={m.id}
@@ -690,4 +735,5 @@ export default function AdminSupportConsole() {
     </main>
   );
 }
+
 
