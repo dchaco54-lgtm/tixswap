@@ -1,9 +1,8 @@
-// app/dashboard/WalletSection.jsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "../lib/supabaseClient";
+import { createClient } from "@/lib/supabase/client";
 
 const ACCOUNT_TYPES = [
   "Cuenta corriente",
@@ -12,11 +11,19 @@ const ACCOUNT_TYPES = [
   "Cuenta digital (Mach/Tenpo/otro)",
 ];
 
+function maskAccount(n) {
+  const s = String(n || "").trim();
+  if (s.length <= 4) return s;
+  return `${"*".repeat(Math.max(0, s.length - 4))}${s.slice(-4)}`;
+}
+
 export default function WalletSection({ user: userProp = null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnUrl = searchParams.get("return");
-  
+
+  const supabase = useMemo(() => createClient(), []);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -37,15 +44,15 @@ export default function WalletSection({ user: userProp = null }) {
     transfer_phone: "",
   });
 
-  const [savedView, setSavedView] = useState(null); // payout_accounts row
+  const [savedView, setSavedView] = useState(null);
 
-  // Si el padre algún día pasa user, lo respetamos
+  // si el padre pasa user, lo tomamos
   useEffect(() => {
     if (userProp?.id) setAuthedUser(userProp);
   }, [userProp]);
 
   const holderName = useMemo(() => {
-    const fromProfile = (profile?.full_name || "").trim();
+    const fromProfile = String(profile?.full_name || "").trim();
     if (fromProfile) return fromProfile;
 
     const meta =
@@ -64,84 +71,81 @@ export default function WalletSection({ user: userProp = null }) {
     return String(authedUser?.user_metadata?.rut || "").trim();
   }, [profile?.rut, authedUser]);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError("");
-      setSuccess("");
-
-      try {
-        // 1) user
-        let u = authedUser;
-
-        if (!u) {
-          const { data } = await supabase.auth.getUser();
-          u = data?.user || null;
-          setAuthedUser(u);
-        }
-
-        if (!u) {
-          setError("Debes iniciar sesión.");
-          setConfigured(false);
-          setSavedView(null);
-          setEditing(false);
-          return;
-        }
-
-        // 2) profile (FUENTE REAL pa nombre/rut)
-        const { data: pData } = await supabase
-          .from("profiles")
-          .select("id, full_name, rut, email, phone, role")
-          .eq("id", u.id)
-          .maybeSingle();
-
-        setProfile(pData || null);
-
-        // 3) wallet
-        const { data: wData, error: wErr } = await supabase
-          .from("payout_accounts")
-          .select("*")
-          .eq("user_id", u.id)
-          .maybeSingle();
-
-        if (wErr) {
-          console.warn(wErr);
-          setConfigured(false);
-          setSavedView(null);
-          setEditing(true);
-          return;
-        }
-
-        if (wData) {
-          setConfigured(true);
-          setSavedView(wData);
-          setForm({
-            bank_name: wData.bank_name || "",
-            account_type: wData.account_type || "Cuenta corriente",
-            account_number: wData.account_number || "",
-            transfer_email: wData.transfer_email || "",
-            transfer_phone: wData.transfer_phone || "",
-          });
-          setEditing(false);
-        } else {
-          setConfigured(false);
-          setSavedView(null);
-          setEditing(true); // si no hay wallet, entra en modo editar
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const setField = (k) => (e) => {
     setError("");
     setSuccess("");
     setForm((p) => ({ ...p, [k]: e.target.value }));
   };
+
+  const loadWallet = async () => {
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      // 1) user
+      let u = authedUser;
+      if (!u) {
+        const { data } = await supabase.auth.getUser();
+        u = data?.user || null;
+        setAuthedUser(u);
+      }
+
+      if (!u) {
+        router.push(`/login?redirectTo=${encodeURIComponent("/dashboard/wallet")}`);
+        return;
+      }
+
+      // 2) profile (solo lo esencial, para no romperse si tu tabla es “minimal”)
+      const { data: pData, error: pErr } = await supabase
+        .from("profiles")
+        .select("id, full_name, rut")
+        .eq("id", u.id)
+        .maybeSingle();
+
+      if (!pErr) setProfile(pData || null);
+
+      // 3) payout_accounts
+      const { data: wData, error: wErr } = await supabase
+        .from("payout_accounts")
+        .select("user_id, holder_name, holder_rut, bank_name, account_type, account_number, transfer_email, transfer_phone, created_at, updated_at")
+        .eq("user_id", u.id)
+        .maybeSingle();
+
+      if (wErr) {
+        // si hay error, dejamos editable para que el usuario no quede bloqueado
+        console.warn("wallet load error:", wErr);
+        setConfigured(false);
+        setSavedView(null);
+        setEditing(true);
+        return;
+      }
+
+      if (wData) {
+        setConfigured(true);
+        setSavedView(wData);
+        setForm({
+          bank_name: wData.bank_name || "",
+          account_type: wData.account_type || "Cuenta corriente",
+          account_number: wData.account_number || "",
+          transfer_email: wData.transfer_email || "",
+          transfer_phone: wData.transfer_phone || "",
+        });
+        setEditing(false);
+      } else {
+        setConfigured(false);
+        setSavedView(null);
+        setEditing(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadWallet();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleEdit = () => {
     setError("");
@@ -170,14 +174,13 @@ export default function WalletSection({ user: userProp = null }) {
 
     if (!authedUser?.id) {
       setError("Debes iniciar sesión.");
+      router.push(`/login?redirectTo=${encodeURIComponent("/dashboard/wallet")}`);
       return;
     }
 
-    // Importante: nombre/rut deben existir desde cuenta/perfil
+    // Nombre/RUT desde cuenta/perfil (no editable acá por seguridad)
     if (!holderName || !holderRut) {
-      setError(
-        "No encontré tu Nombre/RUT en tu cuenta. Revisa 'Mis datos' (nombre y RUT) o solicita cambio por ticket."
-      );
+      setError("No encontré tu Nombre/RUT. Ve a “Mis datos” o solicita cambio por soporte.");
       return;
     }
 
@@ -194,6 +197,7 @@ export default function WalletSection({ user: userProp = null }) {
 
       if (!token) {
         setError("Sesión expirada. Vuelve a iniciar sesión.");
+        router.push(`/login?redirectTo=${encodeURIComponent("/dashboard/wallet")}`);
         return;
       }
 
@@ -221,7 +225,7 @@ export default function WalletSection({ user: userProp = null }) {
       setConfigured(true);
       setSavedView(json?.payout_account || null);
       setEditing(false);
-      setSuccess("Wallet guardada. Ya tenemos tus datos para pagarte.");
+      setSuccess("Wallet guardada ✅ Ya tenemos tus datos para pagarte.");
     } finally {
       setSaving(false);
     }
@@ -238,22 +242,14 @@ export default function WalletSection({ user: userProp = null }) {
 
   return (
     <div className="space-y-6">
-      {/* Botón de retorno si viene desde /sell/confirm */}
+      {/* Banner retorno */}
       {returnUrl && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
           <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <p className="text-sm font-medium text-blue-900">
-                Configura tu Wallet para continuar publicando tu ticket
-              </p>
-            </div>
-            <button
-              onClick={() => router.push(returnUrl)}
-              className="tix-btn-primary text-sm px-4 py-2"
-            >
+            <p className="text-sm font-medium text-blue-900">
+              Configura tu Wallet para continuar publicando tu ticket.
+            </p>
+            <button onClick={() => router.push(returnUrl)} className="tix-btn-primary text-sm px-4 py-2">
               Volver a la venta
             </button>
           </div>
@@ -266,7 +262,7 @@ export default function WalletSection({ user: userProp = null }) {
           <div>
             <h2 className="text-lg font-semibold">Wallet</h2>
             <p className="text-sm text-slate-500">
-              Aquí configuras los datos donde TixSwap te deposita tus ventas.
+              Configura la cuenta donde TixSwap te deposita tus ventas.
             </p>
           </div>
 
@@ -276,6 +272,21 @@ export default function WalletSection({ user: userProp = null }) {
             </span>
           )}
         </div>
+
+        {/* Resumen si está configurada */}
+        {configured && savedView ? (
+          <div className="mt-4 border border-slate-200 rounded-xl p-4">
+            <p className="text-sm font-semibold text-slate-800 mb-1">Resumen</p>
+            <p className="text-sm text-slate-700">
+              <span className="font-semibold">{savedView.bank_name}</span> · {savedView.account_type} ·{" "}
+              <span className="font-mono">{maskAccount(savedView.account_number)}</span>
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Última actualización:{" "}
+              {savedView.updated_at ? new Date(savedView.updated_at).toLocaleString("es-CL") : "—"}
+            </p>
+          </div>
+        ) : null}
 
         <div className="mt-4 border border-slate-200 rounded-xl p-4">
           <p className="text-sm font-semibold text-slate-800 mb-1">Pagos (MVP)</p>
@@ -287,13 +298,13 @@ export default function WalletSection({ user: userProp = null }) {
         </div>
       </div>
 
-      {/* Body */}
+      {/* Form */}
       <div className="bg-white shadow-sm rounded-2xl p-6 border border-slate-100">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-base font-semibold">Datos para transferencia</h3>
             <p className="text-sm text-slate-500">
-              Puedes usar cuenta corriente, vista, CuentaRUT o cuenta digital (Tenpo/Mach, etc.).
+              Cuenta corriente/vista/CuentaRUT o cuenta digital (Tenpo/Mach, etc.).
             </p>
           </div>
 
@@ -308,7 +319,7 @@ export default function WalletSection({ user: userProp = null }) {
           )}
         </div>
 
-        {/* Bloque anti-estafa (nombre/rut desde cuenta) */}
+        {/* Titular (readonly) */}
         <div className="grid gap-4 md:grid-cols-2 mb-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Nombre titular</label>
@@ -319,7 +330,7 @@ export default function WalletSection({ user: userProp = null }) {
               placeholder="(se toma desde tu cuenta)"
             />
             <p className="text-[11px] text-slate-500 mt-1">
-              Por seguridad, este dato viene desde tu cuenta y no se puede cambiar aquí.
+              Por seguridad, esto viene desde tu cuenta (no se edita acá).
             </p>
           </div>
 
@@ -332,12 +343,12 @@ export default function WalletSection({ user: userProp = null }) {
               placeholder="(se toma desde tu cuenta)"
             />
             <p className="text-[11px] text-slate-500 mt-1">
-              Tip: lo guardamos tal cual (sin puntos también sirve).
+              Si está malo, corrígelo en “Mis datos” o solicita cambio por soporte.
             </p>
           </div>
         </div>
 
-        {/* Form editable solo si editing */}
+        {/* Editables */}
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Banco / institución</label>
@@ -346,9 +357,7 @@ export default function WalletSection({ user: userProp = null }) {
               onChange={setField("bank_name")}
               disabled={!editing}
               className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                editing
-                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  : "border-slate-200 bg-slate-50 text-slate-600"
+                editing ? "border-slate-300 focus:ring-2 focus:ring-blue-500" : "border-slate-200 bg-slate-50 text-slate-600"
               }`}
               placeholder="Banco de Chile / Santander / Tenpo..."
             />
@@ -361,9 +370,7 @@ export default function WalletSection({ user: userProp = null }) {
               onChange={setField("account_type")}
               disabled={!editing}
               className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                editing
-                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  : "border-slate-200 bg-slate-50 text-slate-600"
+                editing ? "border-slate-300 focus:ring-2 focus:ring-blue-500" : "border-slate-200 bg-slate-50 text-slate-600"
               }`}
             >
               {ACCOUNT_TYPES.map((x) => (
@@ -380,15 +387,14 @@ export default function WalletSection({ user: userProp = null }) {
               value={form.account_number}
               onChange={setField("account_number")}
               disabled={!editing}
+              inputMode="text"
               className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                editing
-                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  : "border-slate-200 bg-slate-50 text-slate-600"
+                editing ? "border-slate-300 focus:ring-2 focus:ring-blue-500" : "border-slate-200 bg-slate-50 text-slate-600"
               }`}
-              placeholder="Para CuentaRUT normalmente es tu RUT sin DV (pero puedes pegar lo que uses)."
+              placeholder="Ej: CuentaRUT suele ser RUT sin DV (pero pega lo que uses)."
             />
             <p className="text-[11px] text-slate-500 mt-1">
-              Para CuentaRUT normalmente es tu RUT sin DV (pero puedes pegar lo que uses).
+              Tip: si es CuentaRUT, muchas veces es tu RUT sin DV.
             </p>
           </div>
 
@@ -399,9 +405,7 @@ export default function WalletSection({ user: userProp = null }) {
               onChange={setField("transfer_email")}
               disabled={!editing}
               className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                editing
-                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  : "border-slate-200 bg-slate-50 text-slate-600"
+                editing ? "border-slate-300 focus:ring-2 focus:ring-blue-500" : "border-slate-200 bg-slate-50 text-slate-600"
               }`}
               placeholder="correo@ejemplo.cl"
             />
@@ -414,28 +418,26 @@ export default function WalletSection({ user: userProp = null }) {
               onChange={setField("transfer_phone")}
               disabled={!editing}
               className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                editing
-                  ? "border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  : "border-slate-200 bg-slate-50 text-slate-600"
+                editing ? "border-slate-300 focus:ring-2 focus:ring-blue-500" : "border-slate-200 bg-slate-50 text-slate-600"
               }`}
               placeholder="+56 9 ..."
             />
           </div>
         </div>
 
-        {/* Alerts + actions */}
+        {/* alerts + actions */}
         <div className="mt-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div className="flex-1">
-            {error && (
+            {error ? (
               <div className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
                 {error}
               </div>
-            )}
-            {success && (
+            ) : null}
+            {success ? (
               <div className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
                 {success}
               </div>
-            )}
+            ) : null}
           </div>
 
           {editing ? (
@@ -469,4 +471,3 @@ export default function WalletSection({ user: userProp = null }) {
     </div>
   );
 }
-
