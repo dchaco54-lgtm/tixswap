@@ -1,129 +1,45 @@
 // app/api/orders/my/route.js
-// Devuelve las compras del usuario logueado (buyer), con ticket + evento embebidos.
-// Importante: NO usamos relaciones (select event:events(*)) porque en muchos schemas no hay FK y Supabase tira:
-// "Could not find a relationship between 'orders' and 'events' in the schema cache".
-
+import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createServerClient } from "@/lib/supabase/server";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-function toIso(v) {
-  try {
-    return new Date(v).toISOString();
-  } catch {
-    return null;
-  }
-}
-
-// Ranking pedido:
-// 1) paid / AUTHORIZED
-// 2) pending
-// 3) resto
-function rankOrder(o) {
-  const status = String(o?.status ?? "").toLowerCase();
-  const pstate = String(o?.payment_state ?? "").toUpperCase();
-
-  if (status === "paid" || pstate === "AUTHORIZED") return 3;
-  if (status === "pending") return 2;
-  return 1;
-}
-
-// Decide si "a" es mejor que "b"
-function isBetter(a, b) {
-  if (!b) return true;
-
-  const ra = rankOrder(a);
-  const rb = rankOrder(b);
-
-  if (ra !== rb) return ra > rb;
-
-  // empate → más nuevo
-  const da = new Date(a.created_at).getTime();
-  const db = new Date(b.created_at).getTime();
-  return da > db;
+function toNum(v) {
+  const n = typeof v === "number" ? v : Number(String(v ?? "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function GET() {
   try {
-    const supabase = createServerClient(cookies());
+    const supabase = createRouteHandlerClient({ cookies });
+
     const {
       data: { user },
-      error: userError,
+      error: userErr,
     } = await supabase.auth.getUser();
 
-    if (userError || !user) {
-      return Response.json({ error: "No autorizado" }, { status: 401 });
-    }
+    if (userErr) return NextResponse.json({ error: userErr.message }, { status: 401 });
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    // 1) Traemos todas las órdenes del usuario (buyer)
-    const { data: rows, error } = await supabase
+    // 1) Traer órdenes del usuario (buyer_id o user_id)
+    const { data: orders, error: ordersErr } = await supabase
       .from("orders")
-      .select(
-        [
-          "id",
-          "listing_id",
-          "ticket_id",
-          "buyer_id",
-          "seller_id",
-          "user_id",
-          "status",
-          "payment_state",
-          "payment_provider",
-          "payment_method",
-          "created_at",
-          "updated_at",
-          "paid_at",
-          "buy_order",
-          "session_id",
-          "webpay_token",
-          "amount_clp",
-          "fee_clp",
-          "fees_clp",
-          "total_clp",
-          "total_paid_clp",
-          "total_amount",
-          "currency",
-        ].join(",")
-      )
-      // fallback por compat: a veces queda buyer_id o user_id
+      .select("id, created_at, status, amount_clp, total_clp, total_amount, currency, ticket_id, event_id")
       .or(`buyer_id.eq.${user.id},user_id.eq.${user.id}`)
-      .order("created_at", { ascending: false })
-      .limit(200);
+      .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("[api/orders/my] orders select error:", error);
-      return Response.json({ error: error.message }, { status: 500 });
-    }
+    if (ordersErr) return NextResponse.json({ error: ordersErr.message }, { status: 500 });
 
-    const orders = rows ?? [];
+    const safeOrders = Array.isArray(orders) ? orders : [];
 
-    // 2) DEDUPE por ticket_id: dejamos la mejor por ticket (paid/AUTH > pending > resto)
-    const bestByTicket = new Map();
+    // 2) Traer tickets asociados (en batch)
+    const ticketIds = [...new Set(safeOrders.map((o) => o.ticket_id).filter(Boolean))];
+    let ticketsById = {};
 
-    for (const o of orders) {
-      const key = o.ticket_id || o.id; // fallback si no hay ticket_id por algún bug
-      const current = bestByTicket.get(key);
-
-      if (isBetter(o, current)) {
-        bestByTicket.set(key, o);
-      }
-    }
-
-    // opcional: filtrar estados que nunca quieres mostrar
-    const cleaned = Array.from(bestByTicket.values()).filter((o) => {
-      const st = String(o.status ?? "").toLowerCase();
-      return !["cancelled", "failed"].includes(st);
-    });
-
-    // 3) Cargamos tickets de una (sin relaciones)
-    const ticketIds = Array.from(
-      new Set(cleaned.map((o) => o.ticket_id).filter(Boolean))
-    );
-
-    let tickets = [];
-    if (ticketIds.length > 0) {
-      const tRes = await supabase
+    if (ticketIds.length) {
+      const { data: tickets, error: ticketsErr } = await supabase
         .from("tickets")
         .select(
           [
@@ -138,82 +54,67 @@ export async function GET() {
             "sale_type",
             "status",
             "currency",
-            "seller_id",
-            "seller_name",
-            "seller_email",
-            "seller_rut",
-            "platform_fee",
-            "created_at",
-            "pdf_path",
-            "ticket_pdf_path",
-            "pdf_url",
           ].join(",")
         )
         .in("id", ticketIds);
 
-      if (tRes.error) {
-        console.error("[api/orders/my] tickets select error:", tRes.error);
-        return Response.json({ error: tRes.error.message }, { status: 500 });
-      }
-      tickets = tRes.data ?? [];
+      if (ticketsErr) return NextResponse.json({ error: ticketsErr.message }, { status: 500 });
+
+      ticketsById = (tickets || []).reduce((acc, t) => {
+        acc[t.id] = t;
+        return acc;
+      }, {});
     }
 
-    const ticketsById = new Map(tickets.map((t) => [t.id, t]));
+    // 3) Traer eventos asociados (order.event_id o ticket.event_id)
+    const eventIds = [
+      ...new Set(
+        safeOrders
+          .map((o) => o.event_id || ticketsById[o.ticket_id]?.event_id)
+          .filter(Boolean)
+      ),
+    ];
 
-    // 4) Cargamos eventos asociados a esos tickets
-    const eventIds = Array.from(
-      new Set(tickets.map((t) => t.event_id).filter(Boolean))
-    );
-
-    let events = [];
-    if (eventIds.length > 0) {
-      const eRes = await supabase
+    let eventsById = {};
+    if (eventIds.length) {
+      const { data: events, error: eventsErr } = await supabase
         .from("events")
-        .select(
-          [
-            "id",
-            "title",
-            "category",
-            "venue",
-            "city",
-            "starts_at",
-            "image_url",
-            "created_at",
-          ].join(",")
-        )
+        .select("id, title, category, venue, city, starts_at, image_url, created_at")
         .in("id", eventIds);
 
-      if (eRes.error) {
-        console.error("[api/orders/my] events select error:", eRes.error);
-        return Response.json({ error: eRes.error.message }, { status: 500 });
-      }
-      events = eRes.data ?? [];
+      if (eventsErr) return NextResponse.json({ error: eventsErr.message }, { status: 500 });
+
+      eventsById = (events || []).reduce((acc, e) => {
+        acc[e.id] = e;
+        return acc;
+      }, {});
     }
 
-    const eventsById = new Map(events.map((e) => [e.id, e]));
+    // 4) Armar payload para el front (PurchasesPage)
+    const enriched = safeOrders.map((o) => {
+      const ticket = o.ticket_id ? ticketsById[o.ticket_id] || null : null;
+      const eventId = o.event_id || ticket?.event_id || null;
+      const event = eventId ? eventsById[eventId] || null : null;
 
-    // 5) Embebemos ticket + event dentro de cada orden
-    const enriched = cleaned
-      .map((o) => {
-        const ticket = o.ticket_id ? ticketsById.get(o.ticket_id) : null;
-        const event = ticket?.event_id ? eventsById.get(ticket.event_id) : null;
+      return {
+        id: o.id,
+        created_at: o.created_at,
+        status: o.status ?? "pending",
+        amount_clp: toNum(o.amount_clp),
+        total_clp: toNum(o.total_clp ?? o.total_amount),
+        currency: o.currency ?? "CLP",
+        ticket_id: o.ticket_id ?? null,
+        event_id: eventId,
+        ticket,
+        event,
+      };
+    });
 
-        return {
-          ...o,
-          created_at: toIso(o.created_at),
-          updated_at: toIso(o.updated_at),
-          paid_at: o.paid_at ? toIso(o.paid_at) : null,
-          ticket,
-          event,
-        };
-      })
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-    return Response.json({ orders: enriched }, { status: 200 });
-  } catch (err) {
-    console.error("[api/orders/my] unexpected error:", err);
-    return Response.json({ error: "Error interno" }, { status: 500 });
+    return NextResponse.json({ orders: enriched }, { status: 200 });
+  } catch (e) {
+    return NextResponse.json({ error: e?.message || "Unknown error" }, { status: 500 });
   }
 }
+
 
 
