@@ -137,7 +137,83 @@ export async function GET() {
             "original_price",
             "sale_type",
             "status",
-            "
+            "currency",
+            "seller_id",
+            "seller_name",
+            "seller_email",
+            "seller_rut",
+            "platform_fee",
+            "created_at",
+            "pdf_path",
+            "ticket_pdf_path",
+            "pdf_url",
+          ].join(",")
+        )
+        .in("id", ticketIds);
 
+      if (tRes.error) {
+        console.error("[api/orders/my] tickets select error:", tRes.error);
+        return Response.json({ error: tRes.error.message }, { status: 500 });
+      }
+      tickets = tRes.data ?? [];
+    }
+
+    const ticketsById = new Map(tickets.map((t) => [t.id, t]));
+
+    // 4) Cargamos eventos asociados a esos tickets
+    const eventIds = Array.from(
+      new Set(tickets.map((t) => t.event_id).filter(Boolean))
+    );
+
+    let events = [];
+    if (eventIds.length > 0) {
+      const eRes = await supabase
+        .from("events")
+        .select(
+          [
+            "id",
+            "title",
+            "category",
+            "venue",
+            "city",
+            "starts_at",
+            "image_url",
+            "created_at",
+          ].join(",")
+        )
+        .in("id", eventIds);
+
+      if (eRes.error) {
+        console.error("[api/orders/my] events select error:", eRes.error);
+        return Response.json({ error: eRes.error.message }, { status: 500 });
+      }
+      events = eRes.data ?? [];
+    }
+
+    const eventsById = new Map(events.map((e) => [e.id, e]));
+
+    // 5) Embebemos ticket + event dentro de cada orden
+    const enriched = cleaned
+      .map((o) => {
+        const ticket = o.ticket_id ? ticketsById.get(o.ticket_id) : null;
+        const event = ticket?.event_id ? eventsById.get(ticket.event_id) : null;
+
+        return {
+          ...o,
+          created_at: toIso(o.created_at),
+          updated_at: toIso(o.updated_at),
+          paid_at: o.paid_at ? toIso(o.paid_at) : null,
+          ticket,
+          event,
+        };
+      })
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    return Response.json({ orders: enriched }, { status: 200 });
+  } catch (err) {
+    console.error("[api/orders/my] unexpected error:", err);
+    return Response.json({ error: "Error interno" }, { status: 500 });
+  }
+}
 
 
