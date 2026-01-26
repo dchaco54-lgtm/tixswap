@@ -1,312 +1,225 @@
 // app/dashboard/purchases/[orderId]/page.jsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
-import OrderChat from "@/app/components/OrderChat";
 
-function formatCLP(value) {
-  const n = Number(value ?? 0);
-  return n.toLocaleString("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    maximumFractionDigits: 0,
-  });
+function formatCLP(n) {
+  const value = Number(n || 0);
+  return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP" }).format(value);
 }
 
-function formatDateTime(iso) {
+function formatDateLong(iso) {
   if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString("es-CL", {
-      weekday: "long",
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat("es-CL", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
+function statusBadge(order) {
+  const s = (order?.status || "").toLowerCase();
+  if (s === "paid") return { text: "Pagada", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  if (s === "pending") return { text: "Pendiente", cls: "bg-amber-50 text-amber-700 border-amber-200" };
+  return { text: order?.status || "Estado", cls: "bg-slate-50 text-slate-700 border-slate-200" };
 }
 
 export default function PurchaseDetailPage() {
-  const params = useParams();
-  const orderId = params?.orderId;
-
-  const [loading, setLoading] = useState(true);
+  const { orderId } = useParams();
   const [order, setOrder] = useState(null);
-  const [error, setError] = useState(null);
-  const [downloadingPdf, setDownloadingPdf] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
 
-  useEffect(() => {
-    if (!orderId) return;
-
-    let cancelled = false;
-
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.access_token) {
-          setOrder(null);
-          setError("Debes iniciar sesión.");
-          return;
-        }
-
-        const res = await fetch(`/api/orders/${orderId}`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) throw new Error(data?.error || "No se pudo cargar la compra.");
-
-        if (!cancelled) setOrder(data.order || null);
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) setError("No se pudo cargar el detalle de la compra.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [orderId]);
-
-  async function handleDownloadPdf() {
-    if (!order?.ticket_id) return;
+  async function load() {
+    setErr("");
+    setLoading(true);
     try {
-      setDownloadingPdf(true);
-      const res = await fetch(`/api/tickets/${order.ticket_id}/pdf`, { cache: "no-store" });
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(json?.error || "No se pudo generar el PDF.");
-      }
-
-      if (!json?.signedUrl) {
-        throw new Error("No se encontró el PDF para este ticket.");
-      }
-
-      window.open(json.signedUrl, "_blank", "noopener,noreferrer");
+      const res = await fetch(`/api/orders/${orderId}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Error cargando detalle");
+      setOrder(json?.order || null);
     } catch (e) {
-      console.error(e);
-      alert(e?.message || "No se pudo descargar el PDF.");
+      setErr(e.message);
+      setOrder(null);
     } finally {
-      setDownloadingPdf(false);
+      setLoading(false);
     }
   }
 
-  const ticket = order?.ticket;
-  const event = ticket?.event || order?.event;
-  const seller = ticket?.seller || order?.seller;
+  useEffect(() => {
+    if (orderId) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderId]);
 
-  const ticketPrice = Number(order?.amount_clp ?? 0);
-  const platformFee = Number(order?.fee_clp ?? 0);
-  const totalPaid = Number(order?.total_paid_clp ?? order?.total_clp ?? 0);
+  const t = order?.ticket;
+  const e = order?.event;
+  const badge = useMemo(() => statusBadge(order), [order]);
+
+  // Ajusta estos links a tus rutas reales:
+  const chatHref = order ? `/dashboard/chat?orderId=${order.id}&to=${order.seller_id}` : "#";
+  const pdfHref = t ? `/api/tickets/${t.id}/pdf` : "#"; // <-- cambia a tu endpoint real de descarga
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <Link href="/dashboard/purchases" className="text-blue-600 hover:underline">
-          ← Volver a Mis compras
-        </Link>
-
-        <div className="mt-6">
-          {loading ? (
-            <div className="bg-white rounded-2xl shadow p-6">Cargando...</div>
-          ) : error ? (
-            <div className="bg-white rounded-2xl shadow p-6">
-              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3">
-                {error}
-              </div>
-            </div>
-          ) : !order ? (
-            <div className="bg-white rounded-2xl shadow p-6 text-gray-600">
-              No hay información para mostrar.
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {/* Header con estado */}
-              <div className="bg-white rounded-2xl shadow p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h1 className="text-2xl font-bold">Detalle de compra</h1>
-                    <p className="text-gray-600 mt-1">
-                      Orden: <span className="font-mono">{order.id}</span>
-                    </p>
-                    <p className="text-gray-600">
-                      {order.created_at ? formatDateTime(order.created_at) : ""}
-                    </p>
-                  </div>
-                  <span
-                    className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium ${
-                      order.payment_state === "paid" || order.status === "completed"
-                        ? "bg-green-50 text-green-700 border border-green-200"
-                        : order.status === "pending"
-                        ? "bg-yellow-50 text-yellow-700 border border-yellow-200"
-                        : "bg-gray-50 text-gray-700 border border-gray-200"
-                    }`}
-                  >
-                    {order.payment_state === "paid" || order.status === "completed"
-                      ? "✓ Pagado"
-                      : order.status === "pending"
-                      ? "⏳ Pendiente"
-                      : order.status || "—"}
-                  </span>
-                </div>
-              </div>
-
-              {/* Evento */}
-              <div className="bg-white rounded-2xl shadow p-6">
-                <h2 className="text-lg font-semibold mb-4">Evento</h2>
-                <div className="flex gap-4 items-start">
-                  {event?.image_url && (
-                    <img
-                      src={event.image_url}
-                      alt={event.title || "Evento"}
-                      className="w-32 h-32 rounded-xl object-cover flex-shrink-0"
-                    />
-                  )}
-                  <div>
-                    <div className="text-xl font-semibold">{event?.title || "Evento"}</div>
-                    {event?.starts_at && (
-                      <div className="text-gray-600 mt-1">{formatDateTime(event.starts_at)}</div>
-                    )}
-                    <div className="text-gray-600">
-                      {[event?.venue, event?.city].filter(Boolean).join(" • ")}
-                    </div>
-                    {event?.warnings && (
-                      <div className="mt-3 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2 text-sm text-yellow-800">
-                        ⚠️ {event.warnings}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Entrada */}
-              <div className="bg-white rounded-2xl shadow p-6">
-                <h2 className="text-lg font-semibold mb-4">Tu entrada</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                  {ticket?.section && (
-                    <div>
-                      <div className="text-gray-500">Sección</div>
-                      <div className="font-medium text-lg">{ticket.section}</div>
-                    </div>
-                  )}
-                  {ticket?.row && (
-                    <div>
-                      <div className="text-gray-500">Fila</div>
-                      <div className="font-medium text-lg">{ticket.row}</div>
-                    </div>
-                  )}
-                  {ticket?.seat && (
-                    <div>
-                      <div className="text-gray-500">Asiento</div>
-                      <div className="font-medium text-lg">{ticket.seat}</div>
-                    </div>
-                  )}
-                </div>
-                {ticket?.notes && (
-                  <div className="mt-4 text-sm text-gray-600">
-                    <span className="font-medium">Notas:</span> {ticket.notes}
-                  </div>
-                )}
-              </div>
-
-              {/* Vendedor */}
-              <div className="bg-white rounded-2xl shadow p-6">
-                <h2 className="text-lg font-semibold mb-4">Vendedor</h2>
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="font-medium text-lg">
-                      {seller?.full_name || seller?.email || "Usuario"}
-                    </div>
-                    {seller?.email && (
-                      <div className="text-gray-600 text-sm">{seller.email}</div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setChatOpen(true)}
-                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
-                  >
-                    💬 Abrir Chat
-                  </button>
-                </div>
-              </div>
-
-              {/* Resumen de valores */}
-              <div className="bg-white rounded-2xl shadow p-6">
-                <h2 className="text-lg font-semibold mb-4">Resumen de pago</h2>
-                <div className="space-y-3">
-                  <div className="flex justify-between text-gray-700">
-                    <span>Precio entrada</span>
-                    <span className="font-medium">{formatCLP(ticketPrice)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-700">
-                    <span>Cargo TixSwap</span>
-                    <span className="font-medium">{formatCLP(platformFee)}</span>
-                  </div>
-                  <div className="border-t pt-3 flex justify-between text-lg font-bold">
-                    <span>Total pagado</span>
-                    <span>{formatCLP(totalPaid)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Acciones */}
-              <div className="bg-white rounded-2xl shadow p-6">
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={handleDownloadPdf}
-                    disabled={!order?.ticket_id || downloadingPdf}
-                    className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {downloadingPdf ? "Generando PDF..." : "📄 Descargar entrada PDF"}
-                  </button>
-
-                  {event?.id && (
-                    <Link
-                      href={`/events/${event.id}`}
-                      className="px-6 py-3 rounded-xl border border-gray-300 hover:bg-gray-50 font-semibold"
-                    >
-                      Ver evento
-                    </Link>
-                  )}
-                </div>
-              </div>
-
-              {/* Recomendaciones */}
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6">
-                <h3 className="font-semibold text-blue-900 mb-2">💡 Recomendaciones</h3>
-                <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-                  <li>No hagas transacciones fuera de la plataforma</li>
-                  <li>Recuerda: no entregues tus claves ni PIN al vendedor</li>
-                  <li>Siempre pide el PDF de la entrada al vendedor</li>
-                  <li>Verifica que el evento y la ubicación coincidan con lo publicado</li>
-                </ul>
-              </div>
-            </div>
-          )}
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <Link href="/dashboard/purchases" className="text-sm text-slate-600 hover:underline">
+            ← Volver a Mis compras
+          </Link>
+          <h1 className="text-2xl font-semibold mt-2">Detalle de compra</h1>
         </div>
+
+        {order ? (
+          <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs ${badge.cls}`}>
+            {badge.text}
+          </span>
+        ) : null}
       </div>
 
-      {/* Chat modal */}
-      {chatOpen && <OrderChat orderId={orderId} onClose={() => setChatOpen(false)} />}
+      {err ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 p-4">
+          {err}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="rounded-2xl border bg-white p-6 shadow-sm animate-pulse h-64" />
+      ) : null}
+
+      {!loading && order ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Columna principal */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Header evento */}
+            <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
+              <div className="relative h-48 bg-slate-100">
+                {e?.image_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={e.image_url} alt={e?.title || "Evento"} className="w-full h-full object-cover" />
+                ) : null}
+
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+                <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
+                  <div className="text-xl font-semibold">{e?.title || "Evento"}</div>
+                  <div className="text-sm text-white/90">
+                    {e?.city ? `${e.city} · ` : ""}
+                    {e?.venue ? `${e.venue} · ` : ""}
+                    {e?.starts_at ? formatDateLong(e.starts_at) : ""}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-xl border p-4">
+                    <div className="text-xs text-slate-500">Sector</div>
+                    <div className="font-semibold">{t?.sector || "-"}</div>
+                  </div>
+                  <div className="rounded-xl border p-4">
+                    <div className="text-xs text-slate-500">Fila</div>
+                    <div className="font-semibold">{t?.row_label || "-"}</div>
+                  </div>
+                  <div className="rounded-xl border p-4">
+                    <div className="text-xs text-slate-500">Asiento</div>
+                    <div className="font-semibold">{t?.seat_label || "-"}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Acciones */}
+            <div className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div className="text-lg font-semibold mb-1">Acciones</div>
+              <div className="text-sm text-slate-600 mb-4">
+                Descarga tu entrada y contacta al vendedor cuando quieras.
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <a
+                  href={pdfHref}
+                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Descargar PDF
+                </a>
+
+                <Link
+                  href={chatHref}
+                  className="inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
+                >
+                  Abrir chat con vendedor
+                </Link>
+
+                <Link
+                  href="/support"
+                  className="inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
+                >
+                  Soporte
+                </Link>
+              </div>
+
+              <div className="mt-4 text-xs text-slate-500">
+                * Si tu descarga real no es <code>/api/tickets/[id]/pdf</code>, cámbialo arriba (pdfHref).
+              </div>
+            </div>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            <div className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div className="text-lg font-semibold mb-3">Resumen</div>
+
+              <div className="flex items-center justify-between py-2 text-sm">
+                <span className="text-slate-600">Total</span>
+                <span className="font-semibold">{formatCLP(order.total_clp ?? order.amount_clp)}</span>
+              </div>
+
+              <div className="flex items-center justify-between py-2 text-sm">
+                <span className="text-slate-600">Entrada</span>
+                <span className="font-medium">{formatCLP(order.amount_clp)}</span>
+              </div>
+
+              <div className="flex items-center justify-between py-2 text-sm">
+                <span className="text-slate-600">Fee</span>
+                <span className="font-medium">{formatCLP(order.fee_clp)}</span>
+              </div>
+
+              <div className="mt-3 pt-3 border-t text-xs text-slate-500">
+                Orden: <span className="font-mono">{order.buy_order || "-"}</span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                Webpay: <span className="font-mono">{order.webpay_token ? `${order.webpay_token.slice(0, 10)}...` : "-"}</span>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-white p-5 shadow-sm">
+              <div className="text-lg font-semibold mb-3">Vendedor</div>
+              <div className="text-sm">
+                <div className="font-semibold">{t?.seller_name || "Vendedor"}</div>
+                <div className="text-slate-600">{t?.seller_email || ""}</div>
+                <div className="text-slate-500 text-xs mt-1">RUT: {t?.seller_rut || "-"}</div>
+              </div>
+
+              <div className="mt-4">
+                <Link
+                  href={chatHref}
+                  className="inline-flex w-full items-center justify-center rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
+                >
+                  Hablar por chat
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
+
