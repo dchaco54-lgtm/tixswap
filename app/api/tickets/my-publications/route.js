@@ -97,8 +97,16 @@ export async function GET(request) {
   } catch (err) {
     console.error('Error en GET /api/tickets/my-publications:', err);
     return NextResponse.json(
-      { error: 'Error inesperado', details: err?.message },
-      { status: 500 }
+  {
+    tickets: normTickets,
+    summary: { total: normTickets.length, active, paused, sold },
+  },
+  {
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+      "Pragma": "no-cache",
+      "Expires": "0",
+    },
     );
   }
 }
