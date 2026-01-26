@@ -1,59 +1,68 @@
 import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 import { NextResponse } from 'next/server';
 
+const ADMIN_EMAILS = new Set([
+  'davidchacon_17@hotmail.com',
+  'soporte@tixswap.cl',
+]);
+
+function normalizeRole(v) {
+  if (!v) return '';
+  return String(v).toLowerCase().trim();
+}
+
 export async function middleware(req) {
   const res = NextResponse.next();
-  
-  // Crear cliente de Supabase con cookies de middleware
   const supabase = createMiddlewareClient({ req, res });
-  
-  // Obtener sesión actual
+
   const { data: { session } } = await supabase.auth.getSession();
-  
-  // Rutas protegidas que requieren autenticación
+
   const protectedPaths = ['/dashboard', '/sell', '/admin'];
-  const isProtected = protectedPaths.some(path => req.nextUrl.pathname.startsWith(path));
-  
-  // Si es ruta protegida y no hay sesión, redirigir a login
+  const isProtected = protectedPaths.some((path) => req.nextUrl.pathname.startsWith(path));
+
   if (isProtected && !session) {
     const redirectUrl = new URL('/login', req.url);
     redirectUrl.searchParams.set('redirectTo', req.nextUrl.pathname);
     return NextResponse.redirect(redirectUrl);
   }
-  
-  // Si es admin route, verificar que tenga user_type admin O email específico
+
+  // Admin guard
   if (req.nextUrl.pathname.startsWith('/admin') && session) {
-    const userType =
+    const userEmail = (session.user?.email || '').toLowerCase();
+
+    // 1) Intentar sacar el rol desde metadata (a veces viene vacío)
+    const metaRole =
       session.user?.user_metadata?.user_type ||
       session.user?.app_metadata?.user_type ||
-      session.user?.user_metadata?.role || // fallback legacy
+      session.user?.user_metadata?.role ||
       session.user?.app_metadata?.role;
 
-    const userEmail = session.user?.email?.toLowerCase();
-    const isAdminByEmail = userEmail === 'davidchacon_17@hotmail.com';
+    let role = normalizeRole(metaRole);
 
-    // Permitir acceso si es admin por tipo O por email
-    if (userType !== 'admin' && !isAdminByEmail) {
-      console.log('🚫 Middleware bloqueando acceso admin:', { userType, userEmail, isAdminByEmail });
-      // Redirigir a dashboard si no es admin
+    // 2) Si metadata no trae role, consultar profiles.user_type (source of truth)
+    if (role !== 'admin') {
+      const { data: prof, error: profErr } = await supabase
+        .from('profiles')
+        .select('user_type')
+        .eq('id', session.user.id)
+        .maybeSingle();
+
+      if (!profErr && prof?.user_type) {
+        role = normalizeRole(prof.user_type);
+      }
+    }
+
+    const isAdmin = role === 'admin' || ADMIN_EMAILS.has(userEmail);
+
+    if (!isAdmin) {
       return NextResponse.redirect(new URL('/dashboard', req.url));
     }
-    
-    console.log('✅ Middleware permitiendo acceso admin:', { userType, userEmail, isAdminByEmail });
   }
-  
+
   return res;
 }
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
-  ],
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 };
+
