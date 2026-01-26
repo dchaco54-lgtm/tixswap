@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+/* ===================== */
+/* ===== Helpers ======= */
+/* ===================== */
+
 function getBearerToken(req) {
   const auth = req.headers?.get?.("authorization") || "";
   const [type, token] = auth.split(" ");
@@ -19,26 +23,18 @@ function createAuthedSupabase(token) {
   return createClient(url, anon, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     },
   });
 }
 
+// Prioridad: paid/AUTHORIZED > pending/session_created > resto
 function score(o) {
-  // top: paid / authorized
   if (o?.status === "paid" || o?.payment_state === "AUTHORIZED") return 30;
-
-  // next: pending / session created
-  if (o?.status === "pending" || o?.payment_state === "session_created") return 20;
-
-  // other ok-ish
+  if (o?.status === "pending" || o?.payment_state === "session_created")
+    return 20;
   if (["created", "processing"].includes(o?.status)) return 10;
-
-  // trash
   if (["cancelled", "failed", "expired"].includes(o?.status)) return 0;
-
   return 10;
 }
 
@@ -59,22 +55,29 @@ function dedupeByTicketId(rows) {
     if (better) best.set(key, o);
   }
 
-  // opcional: esconder basura
+  // Ocultar basura (opcional)
   return Array.from(best.values()).filter(
     (o) => !["cancelled", "failed", "expired"].includes(o?.status)
   );
 }
 
+/* ===================== */
+/* ===== Endpoint ====== */
+/* ===================== */
+
 export async function GET(req) {
   try {
     const token = getBearerToken(req);
     if (!token) {
-      return NextResponse.json({ error: "Missing Authorization Bearer token" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Missing Authorization Bearer token" },
+        { status: 401 }
+      );
     }
 
     const supabase = createAuthedSupabase(token);
 
-    // user desde el JWT (sin cookies)
+    // user desde JWT (sin cookies)
     const { data: u, error: uErr } = await supabase.auth.getUser();
     if (uErr || !u?.user?.id) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
@@ -82,7 +85,8 @@ export async function GET(req) {
 
     const userId = u.user.id;
 
-    // Traer orders del buyer
+    // OJO: NO hacemos join directo orders->events (no hay relación en schema cache)
+    // Traemos event vía tickets->events
     const { data: rows, error: qErr } = await supabase
       .from("orders")
       .select(
@@ -107,17 +111,17 @@ export async function GET(req) {
           seller_rut,
           platform_fee,
           currency,
-          section_label
-        ),
-        event:events (
-          id,
-          title,
-          category,
-          venue,
-          city,
-          starts_at,
-          image_url,
-          created_at
+          section_label,
+          event:events (
+            id,
+            title,
+            category,
+            venue,
+            city,
+            starts_at,
+            image_url,
+            created_at
+          )
         )
       `
       )
@@ -128,9 +132,23 @@ export async function GET(req) {
       return NextResponse.json({ error: qErr.message }, { status: 500 });
     }
 
+    // dedupe por ticket_id
     const unique = dedupeByTicketId(rows);
 
-    return NextResponse.json({ orders: unique }, { status: 200 });
+    // “Subimos” el event a nivel superior para que tu UI siga leyendo order.event
+    const normalized = unique.map((o) => {
+      const ev = o?.ticket?.event || null;
+      const ticket = o?.ticket
+        ? (() => {
+            const { event, ...rest } = o.ticket; // sacamos event duplicado dentro del ticket
+            return rest;
+          })()
+        : null;
+
+      return { ...o, ticket, event: ev };
+    });
+
+    return NextResponse.json({ orders: normalized }, { status: 200 });
   } catch (e) {
     return NextResponse.json(
       { error: e?.message || "Internal Server Error" },
@@ -138,7 +156,6 @@ export async function GET(req) {
     );
   }
 }
-
 
 
 
