@@ -1,123 +1,135 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { createServerClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+// Soporta 2 formas de auth:
+// 1) Cookies (normal en el dashboard)
+// 2) Bearer token (por si llamas desde cliente con access_token)
+async function getUserFromRequest(req) {
+  // A) Bearer token
+  const auth = req.headers.get("authorization") || "";
+  if (auth.startsWith("Bearer ")) {
+    const token = auth.replace("Bearer ", "").trim();
+    const admin = supabaseAdmin();
+    const { data, error } = await admin.auth.getUser(token);
+    if (!error && data?.user) return data.user;
+  }
 
-function toNum(v) {
-  const n = typeof v === "number" ? v : Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return Number.isFinite(n) ? n : 0;
+  // B) Cookies/session
+  const cookieStore = cookies();
+  const supabase = createClient(cookieStore);
+  const { data } = await supabase.auth.getUser();
+  return data?.user || null;
 }
 
 export async function GET(req, { params }) {
   try {
-    const supabase = createServerClient(cookies());
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const { orderId } = params;
 
-    if (userError || !user) {
+    const user = await getUserFromRequest(req);
+    if (!user) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
     }
 
-    const orderId = params.orderId;
+    const admin = supabaseAdmin();
 
-    const { data: order, error } = await supabase
+    // 1) Buscar la orden (service role)
+    const { data: order, error: orderErr } = await admin
       .from("orders")
       .select(
-        [
-          "id",
-          "ticket_id",
-          "buyer_id",
-          "seller_id",
-          "status",
-          "payment_state",
-          "payment_provider",
-          "payment_method",
-          "created_at",
-          "updated_at",
-          "paid_at",
-          "buy_order",
-          "session_id",
-          "webpay_token",
-          "amount_clp",
-          "fee_clp",
-          "fees_clp",
-          "total_clp",
-          "total_paid_clp",
-          "total_amount",
-          "currency",
-          "event_id",
-        ].join(",")
+        `
+        id,
+        ticket_id,
+        buyer_id,
+        seller_id,
+        user_id,
+        status,
+        payment_state,
+        payment_provider,
+        payment_method,
+        created_at,
+        updated_at,
+        paid_at,
+        amount_clp,
+        fee_clp,
+        total_clp,
+        total_amount,
+        currency,
+        buy_order,
+        session_id,
+        webpay_token
+      `
       )
       .eq("id", orderId)
       .maybeSingle();
 
-    if (error || !order) {
-      return NextResponse.json({ error: "Compra no encontrada" }, { status: 404 });
+    if (orderErr) {
+      console.error("GET /api/orders/[orderId] orderErr", orderErr);
+      return NextResponse.json(
+        { error: "Error buscando la compra" },
+        { status: 500 }
+      );
     }
 
-    // Lo puede ver comprador O vendedor
-    if (order.buyer_id !== user.id && order.seller_id !== user.id) {
-      return NextResponse.json({ error: "Prohibido" }, { status: 403 });
+    if (!order) {
+      return NextResponse.json(
+        { error: "Compra no encontrada" },
+        { status: 404 }
+      );
     }
 
-    const ticket = order.ticket_id
-      ? (await supabase.from("tickets").select("*").eq("id", order.ticket_id).maybeSingle()).data
-      : null;
+    // 2) Seguridad: solo comprador o vendedor
+    const isBuyer = order.buyer_id === user.id || order.user_id === user.id;
+    const isSeller = order.seller_id === user.id;
 
-    const eventId = order.event_id ?? ticket?.event_id ?? null;
-    const event = eventId
-      ? (await supabase.from("events").select("*").eq("id", eventId).maybeSingle()).data
-      : null;
+    if (!isBuyer && !isSeller) {
+      return NextResponse.json(
+        { error: "No tienes permisos para ver esta compra" },
+        { status: 403 }
+      );
+    }
 
-    const sellerId = order.seller_id ?? ticket?.seller_id ?? null;
-    const seller = sellerId
-      ? (await supabase.from("profiles").select("*").eq("id", sellerId).maybeSingle()).data
-      : null;
+    // 3) Traer ticket
+    let ticket = null;
+    if (order.ticket_id) {
+      const { data: t, error: tErr } = await admin
+        .from("tickets")
+        .select("*")
+        .eq("id", order.ticket_id)
+        .maybeSingle();
 
-    const mergedOrder = {
-      id: order.id,
-      status: order.status ?? "pending",
-      created_at: order.created_at,
-      updated_at: order.updated_at,
-      paid_at: order.paid_at,
+      if (tErr) console.error("GET /api/orders/[orderId] ticketErr", tErr);
+      ticket = t || null;
+    }
 
-      amount_clp: toNum(order.amount_clp),
-      fee_clp: toNum(order.fee_clp ?? order.fees_clp),
-      total_clp: toNum(order.total_clp ?? order.total_paid_clp ?? order.total_amount),
-      currency: order.currency ?? "CLP",
+    // 4) Traer evento
+    let event = null;
+    const eventId = ticket?.event_id || order.event_id;
+    if (eventId) {
+      const { data: e, error: eErr } = await admin
+        .from("events")
+        .select("*")
+        .eq("id", eventId)
+        .maybeSingle();
 
-      payment_state: order.payment_state,
-      payment_provider: order.payment_provider ?? order.payment_method ?? null,
-      buy_order: order.buy_order ?? null,
-      session_id: order.session_id ?? null,
-      webpay_token: order.webpay_token ?? null,
+      if (eErr) console.error("GET /api/orders/[orderId] eventErr", eErr);
+      event = e || null;
+    }
 
-      ticket_id: order.ticket_id,
-      event_id: order.event_id ?? ticket?.event_id ?? null,
-      buyer_id: order.buyer_id,
-      seller_id: order.seller_id,
-
-      ticket,
-      event,
-      seller,
-    };
-
-    return NextResponse.json(
-      {
-        order: mergedOrder,
+    return NextResponse.json({
+      order: {
+        ...order,
         ticket,
         event,
-        seller,
       },
-      { status: 200 }
-    );
+    });
   } catch (err) {
-    console.error("[orders/[orderId]] Error:", err);
-    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+    console.error("GET /api/orders/[orderId] fatal", err);
+    return NextResponse.json(
+      { error: "Error interno" },
+      { status: 500 }
+    );
   }
 }
 
