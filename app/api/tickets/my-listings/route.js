@@ -1,9 +1,17 @@
 // app/api/tickets/my-listings/route.js
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buildTicketSelect, detectTicketColumns, normalizeTicket } from '@/lib/db/ticketSchema';
+import {
+  buildTicketSelect,
+  detectTicketColumns,
+  normalizeTicket,
+} from "@/lib/db/ticketSchema";
 
+// ✅ clave: evita que Next intente renderizar esto estático en build
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+export const runtime = "nodejs";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -16,6 +24,10 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { persistSession: false },
 });
 
+/**
+ * GET /api/tickets/my-listings
+ * Obtener publicaciones (tickets) del seller autenticado
+ */
 export async function GET(request) {
   try {
     const authHeader = request.headers.get("authorization");
@@ -64,4 +76,5 @@ export async function GET(request) {
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }
 }
+
 
