@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -67,6 +69,9 @@ export async function POST(req) {
       );
     }
 
+    const now = new Date().toISOString();
+
+    // ✅ Forzamos timestamps para que el resumen muestre la hora real del último update
     const payload = {
       user_id: user.id,
       holder_name,
@@ -76,6 +81,8 @@ export async function POST(req) {
       account_number,
       transfer_email,
       transfer_phone,
+      created_at: now, // safe: en upsert se ignora si ya existe o si la tabla maneja defaults
+      updated_at: now,
     };
 
     const { data, error } = await supabase
@@ -88,7 +95,7 @@ export async function POST(req) {
       return NextResponse.json({ error: "DB error", details: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ ok: true, payout_account: data });
+    return NextResponse.json({ ok: true, payout_account: data }, { status: 200 });
   } catch (e) {
     return NextResponse.json(
       { error: "Server error", details: e?.message || String(e) },
