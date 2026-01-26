@@ -1,20 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
-function getAccessTokenFromLocalStorage() {
-  if (typeof window === "undefined") return null;
-
+async function getAccessToken() {
+  // 1) Forma correcta en tu proyecto (cookies + auth-helpers)
   try {
-    const raw = window.localStorage.getItem("sb-auth-token");
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-    return parsed?.access_token || null;
+    const supabase = createClient();
+    const { data, error } = await supabase.auth.getSession();
+    if (!error && data?.session?.access_token) {
+      return data.session.access_token;
+    }
   } catch (e) {
-    console.warn("No se pudo leer sb-auth-token", e);
-    return null;
+    // seguimos con fallback
   }
+
+  // 2) Fallback: si existe token en localStorage (legacy)
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem("sb-auth-token");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.access_token) return parsed.access_token;
+      }
+    } catch (e) {}
+  }
+
+  return null;
 }
 
 export default function MisPublicaciones() {
@@ -34,43 +46,40 @@ export default function MisPublicaciones() {
       setLoading(true);
       setError(null);
 
-      const token = getAccessTokenFromLocalStorage();
+      const token = await getAccessToken();
       if (!token) {
-        setError(
-          "No se encontró sesión activa. Cierra sesión y vuelve a entrar."
-        );
         setTickets([]);
+        setSummary({ total: 0, active: 0, paused: 0, sold: 0 });
+        setError("No hay sesión válida. Cierra sesión y vuelve a entrar.");
         return;
       }
 
-      const res = await fetch(
-        `/api/tickets/my-publications?ts=${Date.now()}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          cache: "no-store",
-        }
-      );
+      const res = await fetch(`/api/tickets/my-publications?ts=${Date.now()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
 
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(txt || "Error cargando publicaciones");
+        throw new Error(
+          `API ${res.status} ${res.statusText} - ${txt || "sin detalle"}`
+        );
       }
 
       const data = await res.json();
       setTickets(data.tickets || []);
       setSummary(
-        data.summary || {
-          total: 0,
-          active: 0,
-          paused: 0,
-          sold: 0,
-        }
+        data.summary || { total: 0, active: 0, paused: 0, sold: 0 }
       );
     } catch (err) {
-      console.error("Error loading publications:", err);
-      setError("No se pudieron cargar tus publicaciones.");
+      console.error("MisPublicaciones error:", err);
+      setError(
+        typeof err?.message === "string"
+          ? err.message
+          : "No se pudieron cargar tus publicaciones."
+      );
     } finally {
       setLoading(false);
     }
@@ -91,8 +100,12 @@ export default function MisPublicaciones() {
   if (error) {
     return (
       <div className="p-6 text-center text-red-500">
-        {error}
-        <div className="mt-3 flex justify-center gap-2">
+        <div className="mb-3">No se pudieron cargar tus publicaciones.</div>
+        <div className="text-xs text-red-400 break-words max-w-3xl mx-auto">
+          {error}
+        </div>
+
+        <div className="mt-4 flex items-center justify-center gap-2">
           <button
             onClick={fetchPublications}
             className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
@@ -152,9 +165,7 @@ export default function MisPublicaciones() {
               {tickets.map((t) => (
                 <tr key={t.id} className="border-t">
                   <td className="p-3">
-                    <div className="font-medium">
-                      {t.event?.title || "-"}
-                    </div>
+                    <div className="font-medium">{t.event?.title || "-"}</div>
                     <div className="text-xs text-gray-500">
                       {t.event?.venue || "-"} — {t.event?.city || "-"}
                     </div>
