@@ -32,7 +32,8 @@ export async function GET(req, { params }) {
 
     const admin = supabaseAdmin();
 
-    // Verificar que el usuario sea parte de la orden
+
+    // Verificar que el usuario sea parte de la orden y obtener buyer/seller info
     const { data: order, error: orderError } = await admin
       .from('orders')
       .select('id, buyer_id, seller_id')
@@ -45,6 +46,35 @@ export async function GET(req, { params }) {
 
     if (order.buyer_id !== user.id && order.seller_id !== user.id) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
+    }
+
+    // Traer buyer_name, buyer_rut, seller_name, seller_rut
+    let buyer_name = null, buyer_rut = null, seller_name = null, seller_rut = null;
+    try {
+      const ids = [order.buyer_id, order.seller_id].filter(Boolean);
+      if (ids.length) {
+        const { data: profiles, error: profErr } = await admin
+          .from('profiles')
+          .select('id, full_name, rut')
+          .in('id', ids);
+        if (profErr) {
+          console.error('GET /api/orders/[orderId]/messages profile join error', profErr);
+        }
+        if (profiles) {
+          for (const p of profiles) {
+            if (p.id === order.buyer_id) {
+              buyer_name = p.full_name || null;
+              buyer_rut = p.rut || null;
+            }
+            if (p.id === order.seller_id) {
+              seller_name = p.full_name || null;
+              seller_rut = p.rut || null;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('GET /api/orders/[orderId]/messages profile join exception', e);
     }
 
     // Obtener mensajes con info del sender
@@ -87,7 +117,13 @@ export async function GET(req, { params }) {
       is_mine: m.sender_id === user.id,
     }));
 
-    return NextResponse.json({ messages: enriched });
+    return NextResponse.json({
+      messages: enriched,
+      buyer_name,
+      buyer_rut,
+      seller_name,
+      seller_rut,
+    });
   } catch (err) {
     console.error('GET /api/orders/[orderId]/messages error:', err);
     return NextResponse.json({ error: 'Error interno' }, { status: 500 });

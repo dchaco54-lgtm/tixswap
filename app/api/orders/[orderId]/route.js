@@ -117,11 +117,36 @@ export async function GET(req, { params }) {
       event = e || null;
     }
 
+    // 5) Traer buyer_name y buyer_rut (desde profiles)
+    let buyer_name = null;
+    let buyer_rut = null;
+    const buyerId = order.buyer_id || order.user_id;
+    if (buyerId) {
+      try {
+        const { data: buyerProfile, error: buyerErr } = await admin
+          .from("profiles")
+          .select("id, full_name, rut")
+          .eq("id", buyerId)
+          .maybeSingle();
+        if (buyerErr) {
+          console.error("GET /api/orders/[orderId] buyer profile join error", buyerErr);
+        }
+        if (buyerProfile) {
+          buyer_name = buyerProfile.full_name || null;
+          buyer_rut = buyerProfile.rut || null;
+        }
+      } catch (e) {
+        console.error("GET /api/orders/[orderId] buyer profile join exception", e);
+      }
+    }
+
     return NextResponse.json({
       order: {
         ...order,
         ticket,
         event,
+        buyer_name,
+        buyer_rut,
       },
     });
   } catch (err) {

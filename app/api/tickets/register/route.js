@@ -144,8 +144,6 @@ export async function POST(req) {
         event_name: null,
         event_date: null,
         seat_info: null,
-        buyer_name: null,
-        buyer_rut: null,
         raw_text: text || null,
       };
     } else {
@@ -158,8 +156,14 @@ export async function POST(req) {
       }
     }
 
+    // Solo insertar columnas válidas en ticket_uploads
+    const allowedKeys = [
+      "user_id", "provider", "file_hash", "storage_bucket", "storage_path", "is_nominada",
+      "ticket_number", "event_name", "event_date", "seat_info", "raw_text", "parsed_data",
+      "status", "validation_status", "updated_at"
+    ];
     const nowIso = new Date().toISOString();
-    const toSet = {
+    const toSetRaw = {
       user_id: user.id,
       provider,
       file_hash,
@@ -170,14 +174,14 @@ export async function POST(req) {
       event_name: parsed?.event_name || null,
       event_date: parsed?.event_date || null,
       seat_info: parsed?.seat_info || null,
-      buyer_name: parsed?.buyer_name || null,
-      buyer_rut: parsed?.buyer_rut || null,
       raw_text: text || null,
       parsed_data: parsed || null,
       status: "uploaded",
       validation_status: manual_review ? "pending_manual" : "parsed_ok",
       updated_at: nowIso,
     };
+    // pick solo allowedKeys
+    const toSet = Object.fromEntries(Object.entries(toSetRaw).filter(([k]) => allowedKeys.includes(k)));
 
     const { data: uploadRow, error: insErr } = await supabase
       .from("ticket_uploads")
@@ -186,7 +190,8 @@ export async function POST(req) {
       .single();
 
     if (insErr) {
-      return NextResponse.json({ error: "DB error", details: insErr.message }, { status: 500 });
+      console.error("[ticket_uploads insert error]", insErr);
+      return NextResponse.json({ error: "DB error", details: insErr.message, hint: insErr.hint }, { status: 500 });
     }
 
     return NextResponse.json({

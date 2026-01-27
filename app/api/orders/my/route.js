@@ -81,12 +81,32 @@ export async function GET() {
       }, {});
     }
 
-    // 5) Payload final
+    // 5) Traer buyer_name y buyer_rut para cada orden (desde profiles)
+    let buyerProfiles = {};
+    const buyerIds = Array.from(new Set(mine.map((o) => o.buyer_id || o.user_id).filter(Boolean)));
+    if (buyerIds.length) {
+      try {
+        const { data: profiles, error: buyerErr } = await admin
+          .from("profiles")
+          .select("id, full_name, rut")
+          .in("id", buyerIds);
+        if (buyerErr) {
+          console.error("GET /api/orders/my buyer profile join error", buyerErr);
+        }
+        if (profiles) {
+          buyerProfiles = Object.fromEntries(profiles.map(p => [p.id, p]));
+        }
+      } catch (e) {
+        console.error("GET /api/orders/my buyer profile join exception", e);
+      }
+    }
+
     const enriched = mine.map((o) => {
       const ticket = o.ticket_id ? ticketsById[o.ticket_id] || null : null;
       const eventId = o.event_id || ticket?.event_id || null;
       const event = eventId ? eventsById[eventId] || null : null;
-
+      const buyerId = o.buyer_id || o.user_id;
+      const buyerProfile = buyerId ? buyerProfiles[buyerId] : null;
       return {
         id: o.id,
         created_at: o.created_at,
@@ -99,6 +119,8 @@ export async function GET() {
         event_id: eventId,
         ticket,
         event,
+        buyer_name: buyerProfile?.full_name || null,
+        buyer_rut: buyerProfile?.rut || null,
       };
     });
 
