@@ -1,36 +1,20 @@
-// app/api/checkout/preview/route.js
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { calculateFees } from "@/lib/fees";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const runtime = "nodejs";
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("Missing Supabase env vars");
+function getEnv(name) {
+  const v = process.env[name];
+  return v && String(v).trim().length ? String(v).trim() : null;
 }
 
-const admin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false },
-});
-
-function normalizeEventStartsAt(evt) {
-  return evt?.starts_at || evt?.startsAt || evt?.date || evt?.datetime || null;
+function json(data, status = 200) {
+  return NextResponse.json(data, { status });
 }
 
-function normalizeEventImageUrl(evt) {
-  // tu base ocupa image_url (por las capturas), pero dejo fallbacks por si acaso
-  return evt?.image_url || evt?.imageUrl || evt?.cover_url || evt?.banner_url || evt?.poster_url || null;
-}
-
-function pickTicketPrice(ticket) {
-  // Importante: si existen ambos, el “canon” suele ser price_clp en tu dashboard
-  // pero checkout usa lo que exista. Preferimos price_clp si viene.
-  const p = ticket?.price_clp ?? ticket?.price ?? ticket?.amount_clp ?? ticket?.amount ?? 0;
-  return Math.max(0, Math.round(Number(p) || 0));
+function toNumber(n) {
+  const x = Number(n);
+  return Number.isFinite(x) ? x : 0;
 }
 
 function normalizeTicket(ticket) {
@@ -40,156 +24,177 @@ function normalizeTicket(ticket) {
     event_id: ticket?.event_id || null,
     seller_id: ticket?.seller_id || ticket?.owner_id || ticket?.user_id || null,
 
-    // Para UI (checkout)
-    sector: ticket?.sector ?? ticket?.section ?? null,
-    row_label: ticket?.row_label ?? ticket?.row ?? null,
-    seat_label: ticket?.seat_label ?? ticket?.seat ?? null,
-    notes: ticket?.notes ?? null,
+    // Fallbacks para mostrar vendedor en checkout aunque el perfil (profiles)
+    // esté incompleto. En tu tabla tickets estos campos ya vienen (seller_name/email/rut).
+    seller_name: ticket?.seller_name || ticket?.sellerName || null,
+    seller_email: ticket?.seller_email || ticket?.sellerEmail || null,
+    seller_rut: ticket?.seller_rut || ticket?.sellerRut || null,
 
-    // Precios
-    price: ticket?.price ?? null,
-    price_clp: ticket?.price_clp ?? null,
-    original_price: ticket?.original_price ?? null,
+    price: toNumber(ticket?.price),
+    original_price: toNumber(ticket?.original_price),
+    platform_fee: toNumber(ticket?.platform_fee),
+    currency: ticket?.currency || "CLP",
+    sector: ticket?.sector || null,
+    row_label: ticket?.row_label || null,
+    seat_label: ticket?.seat_label || null,
+    section_label: ticket?.section_label || null,
+    sale_type: ticket?.sale_type || "fixed",
+    title: ticket?.title || null,
+    description: ticket?.description || null,
+  };
+}
+
+function normalizeEvent(event) {
+  return {
+    id: event?.id,
+    name: event?.name || null,
+    venue: event?.venue || null,
+    city: event?.city || null,
+    country: event?.country || null,
+    starts_at: event?.starts_at || null,
+    image_url: event?.image_url || null,
   };
 }
 
 function normalizeSeller(profile) {
   if (!profile) return null;
-
-  const full =
-    profile.full_name ||
-    profile.name ||
-    profile.email ||
-    null;
-
   return {
-    id: profile.id,
-    full_name: full,
-    email: profile.email || null,
-    avatar_url: profile.avatar_url || null,
-  };
-}
-
-function normalizeEvent(evt) {
-  if (!evt) return null;
-
-  return {
-    id: evt.id,
-    title: evt.title || evt.name || evt.event_name || null,
-    name: evt.name || null,
-    starts_at: normalizeEventStartsAt(evt),
-    venue: evt.venue || null,
-    city: evt.city || null,
-    image_url: normalizeEventImageUrl(evt),
+    id: profile?.id || null,
+    full_name: profile?.full_name || profile?.name || null,
+    email: profile?.email || null,
+    avatar_url: profile?.avatar_url || null,
+    phone: profile?.phone || null,
+    rut: profile?.rut || null,
   };
 }
 
 async function getProfileSafe(userId) {
-  // Selección segura (no asume columnas)
-  const { data: cols, error: cErr } = await admin
+  const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const serviceKey = getEnv("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) return null;
+
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
+
+  // detect columns existence
+  const { data: cols, error: colsErr } = await admin
     .from("information_schema.columns")
     .select("column_name")
     .eq("table_schema", "public")
     .eq("table_name", "profiles");
 
-  if (cErr) {
-    // fallback: intenta lo mínimo
+  const colset = new Set((cols || []).map((c) => c.column_name));
+  if (colsErr) {
+    // if cannot read info_schema, fallback to basic select
     const { data } = await admin.from("profiles").select("id").eq("id", userId).maybeSingle();
-    return data ? { id: data.id } : null;
+    return data || null;
   }
 
-  const set = new Set((cols || []).map((x) => x.column_name));
-  const fields = ["id", "full_name", "name", "email", "avatar_url"].filter((f) => set.has(f));
-  const selectStr = fields.length ? fields.join(",") : "id";
+  const want = ["id", "full_name", "name", "email", "avatar_url", "phone", "rut"].filter((c) =>
+    colset.has(c)
+  );
+  const selectStr = want.length ? want.join(",") : "id";
 
-  const { data: prof, error } = await admin.from("profiles").select(selectStr).eq("id", userId).maybeSingle();
+  const { data, error } = await admin.from("profiles").select(selectStr).eq("id", userId).maybeSingle();
   if (error) return null;
-  return prof || null;
+  return data || null;
 }
 
-export async function POST(req) {
+async function getSellerRatingsSafe(sellerId) {
+  const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const serviceKey = getEnv("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) return null;
+
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
+
+  // ratings table might not exist
+  const { data: cols, error: colsErr } = await admin
+    .from("information_schema.tables")
+    .select("table_name")
+    .eq("table_schema", "public")
+    .eq("table_name", "seller_ratings")
+    .maybeSingle();
+
+  if (colsErr || !cols) return null;
+
+  const { data, error } = await admin
+    .from("seller_ratings")
+    .select("rating")
+    .eq("seller_id", sellerId);
+
+  if (error) return null;
+  const arr = data || [];
+  const count = arr.length;
+  const avg = count ? arr.reduce((s, r) => s + toNumber(r.rating), 0) / count : 0;
+  return { count, avg: Math.round(avg * 10) / 10 };
+}
+
+export async function GET(req) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const ticketId = body?.ticketId;
+    const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL");
+    const serviceKey = getEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-    if (!ticketId) {
-      return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
+    if (!supabaseUrl) return json({ error: "Missing NEXT_PUBLIC_SUPABASE_URL" }, 500);
+    if (!serviceKey) return json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" }, 500);
+
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false },
+    });
+
+    const url = new URL(req.url);
+    const ticketId = url.searchParams.get("ticketId");
+    if (!ticketId) return json({ error: "Missing ticketId" }, 400);
+
+    const { data: ticketRow, error: ticketErr } = await admin.from("tickets").select("*").eq("id", ticketId).maybeSingle();
+    if (ticketErr) return json({ error: "DB ticket read failed", details: ticketErr.message }, 500);
+    if (!ticketRow) return json({ error: "Ticket not found" }, 404);
+
+    const ticketNorm = normalizeTicket(ticketRow);
+
+    let eventNorm = null;
+    if (ticketNorm.event_id) {
+      const { data: eventRow } = await admin.from("events").select("*").eq("id", ticketNorm.event_id).maybeSingle();
+      eventNorm = normalizeEvent(eventRow);
     }
 
-    // 1) Ticket
-    const { data: ticket, error: tErr } = await admin
-      .from("tickets")
-      .select("*")
-      .eq("id", ticketId)
-      .maybeSingle();
-
-    if (tErr || !ticket) {
-      return NextResponse.json({ error: "Entrada no encontrada" }, { status: 404 });
-    }
-
-    // Validación de estado (ajusta si tu negocio permite más estados)
-    const st = String(ticket.status || "").toLowerCase();
-    if (st && !["active", "available", "paused"].includes(st)) {
-      return NextResponse.json({ error: "Entrada no disponible" }, { status: 400 });
-    }
-
-    const ticketNorm = normalizeTicket(ticket);
-    const ticketPrice = pickTicketPrice(ticket);
-
-    // 2) Evento
-    let event = null;
-    if (ticket.event_id) {
-      const { data: evt, error: eErr } = await admin
-        .from("events")
-        .select("*")
-        .eq("id", ticket.event_id)
-        .maybeSingle();
-
-      if (!eErr && evt) event = normalizeEvent(evt);
-    }
-
-    // 3) Vendedor (perfil)
     const sellerId = ticketNorm.seller_id;
     const sellerProfile = sellerId ? await getProfileSafe(sellerId) : null;
-    const seller = normalizeSeller(sellerProfile);
 
-    // 4) Fees (REGLA FIJA)
-    const fees = calculateFees(ticketPrice);
+    const sellerFromProfile = normalizeSeller(sellerProfile);
 
-    // 5) Ratings (si existe tabla)
-    let sellerStats = { avgRating: null, totalRatings: 0 };
-    let sellerRatings = [];
+    // Merge defensivo: si el perfil no tiene nombre/mail/rut, usamos lo que
+    // ya trae la tabla tickets (seller_name/seller_email/seller_rut)
+    const seller = {
+      id: sellerId || sellerFromProfile?.id || null,
+      full_name: sellerFromProfile?.full_name || ticketNorm.seller_name || null,
+      email: sellerFromProfile?.email || ticketNorm.seller_email || null,
+      rut: sellerFromProfile?.rut || ticketNorm.seller_rut || null,
+      avatar_url: sellerFromProfile?.avatar_url || null,
+      phone: sellerFromProfile?.phone || null,
+    };
 
-    try {
-      if (sellerId) {
-        const { data: ratings, error: rErr } = await admin
-          .from("seller_ratings")
-          .select("id,seller_id,buyer_id,rating,comment,created_at")
-          .eq("seller_id", sellerId)
-          .order("created_at", { ascending: false })
-          .limit(20);
+    const ratings = sellerId ? await getSellerRatingsSafe(sellerId) : null;
 
-        if (!rErr && ratings?.length) {
-          const avg = ratings.reduce((a, x) => a + (Number(x.rating) || 0), 0) / ratings.length;
-          sellerStats = { avgRating: Number(avg.toFixed(1)), totalRatings: ratings.length };
-          sellerRatings = ratings;
-        }
-      }
-    } catch {
-      // si no existe la tabla, no rompe el checkout
-    }
+    const price = ticketNorm.price;
+    const platformFee = ticketNorm.platform_fee;
+    const total = price + platformFee;
 
-    return NextResponse.json({
-      ticket: ticketNorm,
-      event,
+    return json({
+      ok: true,
+      ticket: {
+        ...ticketNorm,
+        priceToPay: total,
+      },
+      event: eventNorm,
       seller,
-      fees,
-      sellerStats,
-      sellerRatings,
+      ratings: ratings || { count: 0, avg: 0 },
+      fees: { platform_fee: platformFee },
     });
-  } catch (err) {
-    console.error("[checkout preview] error", err);
-    return NextResponse.json({ error: err?.message || "Error" }, { status: 500 });
+  } catch (e) {
+    return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);
   }
 }
 
