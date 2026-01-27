@@ -4,7 +4,7 @@ import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { NextResponse } from "next/server";
 import { buildTicketSelect, normalizeTicket } from "@/lib/db/ticketSchema";
 
-export async function GET(request) {
+export async function GET() {
   const supabase = createRouteHandlerClient({ cookies });
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -48,4 +48,3 @@ export async function GET(request) {
     );
   }
 }
-
