@@ -97,8 +97,10 @@ export async function POST(req) {
       });
     }
 
-    // Upload to Storage
-    const bucket = "tickets";
+
+    // Bucket configurable para PDFs
+    const BUCKET = process.env.TICKET_PDF_BUCKET ?? "ticket-pdfs";
+    const bucket = BUCKET;
     const storage_path = `uploads/${user.id}/${crypto.randomUUID()}.pdf`;
 
     const { error: upErr } = await supabase.storage.from(bucket).upload(storage_path, buffer, {

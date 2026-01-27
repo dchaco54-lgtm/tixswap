@@ -62,7 +62,10 @@ export async function POST(req, { params }) {
       return NextResponse.json({ error: "Debe ser un PDF válido." }, { status: 400 });
     }
 
-    const bucket = "tickets";
+
+    // Bucket configurable para PDFs
+    const BUCKET = process.env.TICKET_PDF_BUCKET ?? "ticket-pdfs";
+    const bucket = BUCKET;
     const path = `orders/${orderId}/renominated-${crypto.randomUUID()}.pdf`;
 
     const { error: upErr } = await supabase.storage.from(bucket).upload(path, buf, {
