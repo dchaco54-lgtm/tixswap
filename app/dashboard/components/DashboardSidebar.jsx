@@ -1,129 +1,112 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
-import { USER_TYPES, normalizeRole } from "@/lib/roles";
+import { useRouter, usePathname } from 'next/navigation';
+import { useProfile } from '@/hooks/useProfile';
+import { normalizeRole, USER_TYPES } from '@/lib/roles';
+import { useEffect, useMemo, useState } from 'react';
 
+/**
+ * DashboardSidebar: menú lateral consistente para todas las rutas /dashboard/*
+ * 
+ * Muestra opciones: Mis datos, Mis compras, Wallet, Vender, etc.
+ * Incluye opción Admin si el usuario es admin
+ * Marca activa la ruta actual
+ */
 export default function DashboardSidebar() {
   const router = useRouter();
   const pathname = usePathname();
-
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const { profile } = useProfile();
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
-
-      const { data } = await supabase
-        .from("profiles")
-        .select("id, user_type, app_role, role")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      // Guardamos todo lo que venga (user_type / app_role / role)
-      setProfile(data || {});
-      setLoading(false);
-    };
-
-    load();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
-      load();
-    });
-
-    return () => {
-      authListener?.subscription?.unsubscribe?.();
-    };
+    setMounted(true);
   }, []);
 
   const isAdmin = useMemo(() => {
-    const raw = profile?.user_type || profile?.app_role || profile?.role || "";
-    const normalized = normalizeRole(raw);
-    return normalized === USER_TYPES.ADMIN;
+    if (!profile) return false;
+    return normalizeRole(profile?.user_type) === USER_TYPES.ADMIN;
   }, [profile]);
 
-  const items = useMemo(() => {
+  const menuItems = useMemo(() => {
     const base = [
-      { label: "Mis datos", href: "/dashboard", icon: "👤" },
-      { label: "Mis compras", href: "/dashboard/purchases", icon: "🎟️" },
-      { label: "Mis publicaciones", href: "/dashboard/listings", icon: "💰" },
-      { label: "Wallet", href: "/dashboard/wallet", icon: "💳" },
-      { label: "Vender", href: "/sell", icon: "📤" },
-      { label: "Soporte", href: "/dashboard/support", icon: "🆘" },
+      { label: 'Mis datos', href: '/dashboard', icon: '👤' },
+      { label: 'Mis compras', href: '/dashboard/purchases', icon: '🎟️' },
+      { label: 'Mis publicaciones', href: '/dashboard/publicaciones', icon: '💰' },
+      { label: 'Wallet', href: '/dashboard/wallet', icon: '💳' },
+      { label: 'Vender', href: '/sell', icon: '📤' },
+      { label: 'Soporte', href: '/dashboard/soporte', icon: '🆘' },
     ];
 
+    // ✅ En vez de mandarte directo a /admin/soporte (solo tickets),
+    // te mandamos al HUB /admin (Usuarios / Eventos / Soporte)
     if (isAdmin) {
-      // ✅ Aquí está el fix: ir al HUB admin (3 casillas)
-      base.push({ label: "Soporte Admin", href: "/admin", icon: "🛠️" });
+      base.push({ label: 'Admin', href: '/admin', icon: '🛠️' });
     }
 
     return base;
   }, [isAdmin]);
 
+  const isActive = (href) => {
+    if (href === '/dashboard' && pathname === '/dashboard') return true;
+    if (href !== '/dashboard' && pathname.startsWith(href)) return true;
+    return false;
+  };
+
   const handleNavigate = (href) => {
-    // /admin a veces conviene hard nav
-    if (href === "/admin") {
-      window.location.href = "/admin";
+    // Para rutas admin, forzamos navegación full (evita rarezas con client routing en algunos casos)
+    if (href.startsWith('/admin')) {
+      window.location.href = href;
       return;
     }
     router.push(href);
   };
 
-  if (loading) {
+  if (!mounted) {
     return (
-      <aside className="w-full md:w-64 shrink-0">
-        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm text-sm text-gray-500">
-          Cargando menú...
+      <aside className="w-64 bg-white rounded-2xl shadow-sm p-4 h-fit">
+        <h3 className="text-lg font-bold text-slate-900 mb-4">Panel</h3>
+        <div className="space-y-2">
+          {[...Array(7)].map((_, i) => (
+            <div key={i} className="h-10 bg-slate-100 rounded-lg animate-pulse" />
+          ))}
         </div>
       </aside>
     );
   }
 
   return (
-    <aside className="w-full md:w-64 shrink-0">
-      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-        <div className="text-sm font-semibold text-gray-900 mb-3">Panel</div>
+    <aside className="w-64 bg-white rounded-2xl shadow-sm p-4 h-fit">
+      <h3 className="text-lg font-bold text-slate-900 mb-4">Panel</h3>
 
-        <nav className="flex flex-col gap-1">
-          {items.map((it) => {
-            const active = pathname === it.href;
-            return (
-              <button
-                key={it.href}
-                onClick={() => handleNavigate(it.href)}
-                className={[
-                  "w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition",
-                  active
-                    ? "bg-blue-600 text-white"
-                    : "text-gray-700 hover:bg-gray-50",
-                ].join(" ")}
-              >
-                <span className="w-5 text-left">{it.icon}</span>
-                <span className="text-left">{it.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+      <nav className="space-y-1">
+        {menuItems.map((item) => {
+          const active = isActive(item.href);
+          return (
+            <button
+              key={item.href}
+              onClick={() => handleNavigate(item.href)}
+              className={`
+                w-full text-left px-4 py-2.5 rounded-lg font-medium text-sm transition
+                ${active
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-700 hover:bg-slate-100'
+                }
+              `}
+            >
+              <span className="mr-2">{item.icon}</span>
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
 
-        <div className="mt-4 pt-4 border-t border-gray-100">
-          <Link
-            href="/"
-            className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <span className="w-5">🏠</span>
-            <span>Volver a Inicio</span>
-          </Link>
-        </div>
-      </div>
+      <hr className="my-4 border-slate-200" />
+      <button
+        onClick={() => handleNavigate('/')}
+        className="w-full text-left px-4 py-2 rounded-lg font-medium text-sm text-slate-600 hover:bg-slate-100 transition"
+      >
+        🏠 Volver a Inicio
+      </button>
     </aside>
   );
 }
