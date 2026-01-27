@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Link from "next/link";
 
 /** =========================================================
  *  Auth token (mantengo tu lógica)
@@ -470,6 +471,15 @@ export default function MisPublicaciones() {
 
                       <td className="p-4">
                         <div className="flex items-center justify-end gap-2">
+                          {t.status === "sold" && t.sale_order?.id && (
+                            <Link
+                              href={`/dashboard/chat/${t.sale_order.id}`}
+                              className="px-3 py-2 rounded-xl text-sm border transition bg-white hover:bg-gray-50 text-gray-700"
+                              title="Ver chat con el comprador"
+                            >
+                              Ver chat
+                            </Link>
+                          )}
                           <button
                             onClick={() => onOpenEdit(t)}
                             disabled={blocked}
@@ -679,5 +689,8 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
+
+
+
 
 
