@@ -151,7 +151,15 @@ export default function SellFilePage() {
       }
       setQrPayload(qr || '');
 
-      // sacar user id si existe sesión
+
+      // Obtener access_token de la sesión actual
+      let accessToken = null;
+      try {
+        const { data } = await supabase.auth.getSession();
+        accessToken = data?.session?.access_token ?? null;
+      } catch {}
+
+      // sacar user id si existe sesión (opcional, el backend lo puede derivar)
       let sellerId = null;
       try {
         const { data } = await supabase.auth.getUser();
@@ -171,7 +179,12 @@ export default function SellFilePage() {
         qrLength: qr?.length || 0 
       });
 
-      const res = await fetch("/api/tickets/register", { method: "POST", body: fd });
+      const res = await fetch("/api/tickets/register", {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      });
       const data = await res.json().catch(() => ({}));
 
       console.log('[Upload] Respuesta del servidor:', { status: res.status, ok: res.ok, data });

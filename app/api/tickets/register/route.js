@@ -28,19 +28,26 @@ export async function POST(req) {
   try {
     const supabase = getSupabaseAdmin();
 
-    // Auth
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-
-    const { data: uData, error: uErr } = await supabase.auth.getUser(token);
-    if (uErr || !uData?.user) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-    const user = uData.user;
 
     // Multipart
     const form = await req.formData();
     const file = form.get("file");
     const is_nominada = String(form.get("is_nominada") || "false") === "true";
+    let sellerId = form.get("sellerId");
+
+    // Auth: si no viene sellerId, derivarlo del token
+    let user = null;
+    if (!sellerId) {
+      const authHeader = req.headers.get("authorization") || "";
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+      if (!token) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+      const { data: uData, error: uErr } = await supabase.auth.getUser(token);
+      if (uErr || !uData?.user) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+      user = uData.user;
+      sellerId = user.id;
+    } else {
+      user = { id: sellerId };
+    }
 
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Falta el archivo PDF." }, { status: 400 });
