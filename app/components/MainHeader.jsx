@@ -26,12 +26,6 @@ export default function MainHeader() {
     router.push("/"); // te deja en la home
   };
 
-  const fullName =
-    user?.user_metadata?.name ||
-    user?.user_metadata?.full_name ||
-    user?.email ||
-    "Mi cuenta";
-
   return (
     <header className="w-full border-b border-slate-100 bg-white/80 backdrop-blur">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">

@@ -3,11 +3,15 @@ import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import TicketCard from "./TicketCard";
 import { getBulkSellerTrustSignals } from "@/lib/trustSignals";
+import type { Database } from "@/src/types/database.types";
 
 // ✅ Configuración crítica para evitar caché
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
+
+type TicketRow = Database["public"]["Tables"]["tickets"]["Row"];
+type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -71,10 +75,10 @@ async function getEventData(id: string) {
 
   // 3. Obtener vendedores
   const sellerIds = Array.from(
-    new Set((tickets || []).map((t: any) => t.seller_id).filter(Boolean))
+    new Set((tickets || []).map((t: TicketRow) => t.seller_id).filter(Boolean))
   );
 
-  const sellers: Record<string, any> = {};
+  const sellers: Record<string, Pick<ProfileRow, "id" | "full_name" | "email">> = {};
 
   if (sellerIds.length > 0) {
     const { data: profiles } = await supabase
@@ -160,7 +164,7 @@ export default async function EventDetailPage({ params }: { params: { id: string
 
       {tickets.length > 0 && (
         <div className="grid md:grid-cols-2 gap-6">
-          {tickets.map((ticket: any) => (
+          {tickets.map((ticket: TicketRow) => (
             <TicketCard 
               key={ticket.id} 
               ticket={ticket} 

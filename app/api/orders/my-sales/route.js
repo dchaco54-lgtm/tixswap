@@ -92,8 +92,6 @@ export async function GET(req) {
 
     const isPrivileged = userTypeRaw === "admin" || userTypeRaw === "seller";
     const currentTierKey = normalizeRole(tierRaw || userTypeRaw || "basic"); // lo normalizado para tiers
-    const currentRoleKey = isPrivileged ? userTypeRaw : currentTierKey;
-
     const url = new URL(req.url);
     const months = Math.min(Math.max(parseInt(url.searchParams.get("months") || "6", 10), 1), 24);
     const listMonths = Math.min(Math.max(parseInt(url.searchParams.get("listMonths") || "3", 10), 1), 12);

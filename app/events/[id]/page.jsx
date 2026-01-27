@@ -28,16 +28,6 @@ function formatTimeCL(value) {
   }).format(d);
 }
 
-function formatCLP(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "";
-  return new Intl.NumberFormat("es-CL", {
-    style: "currency",
-    currency: "CLP",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
-
 export default function EventDetailPage() {
   const params = useParams();
   const id = params?.id;

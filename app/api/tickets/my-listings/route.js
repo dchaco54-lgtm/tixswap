@@ -13,16 +13,22 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 export const runtime = "nodejs";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function getAdminOrResponse() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("Missing Supabase env vars");
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return {
+      error: NextResponse.json({ error: "Missing Supabase env vars" }, { status: 500 }),
+    };
+  }
+
+  return {
+    admin: createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false },
+    }),
+  };
 }
-
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false },
-});
 
 /**
  * GET /api/tickets/my-listings
@@ -30,6 +36,8 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
  */
 export async function GET(request) {
   try {
+    const { admin: supabaseAdmin, error } = getAdminOrResponse();
+    if (error) return error;
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json({ error: "No autorizado" }, { status: 401 });
@@ -76,5 +84,4 @@ export async function GET(request) {
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }
 }
-
 

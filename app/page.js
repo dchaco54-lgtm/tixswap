@@ -20,7 +20,6 @@ function norm(str) {
 }
 
 function formatMeta(event) {
-  const title = event?.title || event?.name || "";
   const venue = event?.venue || event?.location || "";
   const city = event?.city || "";
   let dateLabel = "";

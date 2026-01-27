@@ -6,16 +6,22 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { calculateFees } from "@/lib/fees";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function getAdminOrResponse() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("Missing Supabase env vars");
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return {
+      error: NextResponse.json({ error: "Missing Supabase env vars" }, { status: 500 }),
+    };
+  }
+
+  return {
+    admin: createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false },
+    }),
+  };
 }
-
-const admin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false },
-});
 
 function normalizeEventStartsAt(evt) {
   return evt?.starts_at || evt?.startsAt || evt?.date || evt?.datetime || null;
@@ -86,7 +92,7 @@ function normalizeEvent(evt) {
   };
 }
 
-async function getProfileSafe(userId) {
+async function getProfileSafe(admin, userId) {
   // OJO: information_schema no siempre está expuesto por PostgREST.
   // Si falla, fallback a lo mínimo.
   const { data: cols, error: cErr } = await admin
@@ -114,7 +120,7 @@ async function getProfileSafe(userId) {
   return prof || null;
 }
 
-async function handlePreview(ticketId) {
+async function handlePreview(admin, ticketId) {
   if (!ticketId) {
     return NextResponse.json({ error: "ticketId requerido" }, { status: 400 });
   }
@@ -152,7 +158,7 @@ async function handlePreview(ticketId) {
 
   // 3) Vendedor (perfil)
   const sellerId = ticketNorm.seller_id;
-  const sellerProfile = sellerId ? await getProfileSafe(sellerId) : null;
+  const sellerProfile = sellerId ? await getProfileSafe(admin, sellerId) : null;
   const sellerFromProfile = normalizeSeller(sellerProfile);
 
   const seller = {
@@ -203,9 +209,11 @@ async function handlePreview(ticketId) {
 
 export async function GET(req) {
   try {
+    const { admin, error } = getAdminOrResponse();
+    if (error) return error;
     const url = new URL(req.url);
     const ticketId = url.searchParams.get("ticketId");
-    return await handlePreview(ticketId);
+    return await handlePreview(admin, ticketId);
   } catch (err) {
     console.error("[checkout preview][GET] error", err);
     return NextResponse.json({ error: err?.message || "Error" }, { status: 500 });
@@ -214,13 +222,14 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    const { admin, error } = getAdminOrResponse();
+    if (error) return error;
     const body = await req.json().catch(() => ({}));
     const ticketId = body?.ticketId;
-    return await handlePreview(ticketId);
+    return await handlePreview(admin, ticketId);
   } catch (err) {
     console.error("[checkout preview][POST] error", err);
     return NextResponse.json({ error: err?.message || "Error" }, { status: 500 });
   }
 }
-
 

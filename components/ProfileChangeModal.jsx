@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { createProfileChangeTicket } from '@/lib/profileActions';
 
-export default function ProfileChangeModal({ field, currentValue, onClose, onSuccess }) {
+export default function ProfileChangeModal({ field, onClose, onSuccess }) {
   const [requestedValue, setRequestedValue] = useState('');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);

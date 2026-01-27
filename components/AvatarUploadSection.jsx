@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export default function AvatarUploadSection({ currentAvatarUrl, userId, onSuccess }) {
+export default function AvatarUploadSection({ currentAvatarUrl, onSuccess }) {
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState('');

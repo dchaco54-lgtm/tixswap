@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import TrustBadges from "@/components/TrustBadges";
+import type { Database } from "@/src/types/database.types";
 
 function formatCLP(value: number | null) {
   const n = Number(value);
@@ -13,10 +14,26 @@ function formatCLP(value: number | null) {
   }).format(n);
 }
 
+type TicketRow = Database["public"]["Tables"]["tickets"]["Row"];
+type TicketLike = TicketRow & {
+  price_clp?: number | null;
+  amount?: number | null;
+  row?: string | null;
+  seat?: string | null;
+  section?: string | null;
+  fila?: string | null;
+  asiento?: string | null;
+};
+
+type SellerLike = {
+  full_name?: string | null;
+  email?: string | null;
+};
+
 interface TicketCardProps {
-  ticket: any;
-  seller?: any;
-  trustSignals?: any;
+  ticket: TicketLike;
+  seller?: SellerLike | null;
+  trustSignals?: unknown;
 }
 
 export default function TicketCard({ ticket, seller, trustSignals }: TicketCardProps) {

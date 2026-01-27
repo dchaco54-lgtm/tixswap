@@ -148,7 +148,7 @@ export async function POST(req) {
 
     // Obtener seller_tier del vendedor para calcular fee
     console.log('[Webpay] Buscando seller_tier del vendedor:', ticket.seller_id);
-    const { data: sellerProfile, error: sellerError } = await admin
+    const { data: sellerProfile } = await admin
       .from('profiles')
       .select('seller_tier')
       .eq('id', ticket.seller_id)

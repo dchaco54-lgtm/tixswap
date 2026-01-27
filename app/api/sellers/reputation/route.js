@@ -85,7 +85,7 @@ export async function GET(req) {
       },
       { status: 200 }
     );
-  } catch (e) {
+  } catch {
     return NextResponse.json({ label: "Vendedor nuevo" }, { status: 200 });
   }
 }

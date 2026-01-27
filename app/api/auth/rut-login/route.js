@@ -90,7 +90,7 @@ export async function POST(req) {
 
     // json trae: access_token, refresh_token, user, expires_in, token_type
     return NextResponse.json(json, { status: 200 });
-  } catch (e) {
+  } catch {
     return NextResponse.json(
       { message: "Ocurrió un error al iniciar sesión." },
       { status: 500 }

@@ -3,8 +3,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
 
 function formatDateCL(value) {
   if (!value) return "";
@@ -19,7 +17,6 @@ function formatDateCL(value) {
 }
 
 export default function EventsPage() {
-  const router = useRouter();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
@@ -188,5 +185,4 @@ export default function EventsPage() {
     </div>
   );
 }
-
 

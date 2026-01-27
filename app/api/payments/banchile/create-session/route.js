@@ -68,10 +68,9 @@ export async function POST(req) {
     )}&token=${encodeURIComponent(token)}`;
 
     return NextResponse.json({ token, processUrl, amount: fees.totalDue });
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: "Error creando sesión Banco de Chile" }, { status: 500 });
   }
 }
-
 
 

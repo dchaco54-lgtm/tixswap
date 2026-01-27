@@ -1,6 +1,4 @@
 // components/StarRating.jsx
-import { useId } from "react";
-
 export default function StarRating({
   value = 0,
   max = 5,
@@ -31,8 +29,6 @@ export default function StarRating({
 }
 
 function Star({ variant, size }) {
-  const raw = useId();
-  const uid = String(raw).replace(/:/g, "");
 
   const common = {
     width: size,

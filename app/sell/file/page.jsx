@@ -20,7 +20,7 @@ export default function SellFilePage() {
 
   const [viewUrl, setViewUrl] = useState(null);
   const [sha256, setSha256] = useState(null);
-  const [qrPayload, setQrPayload] = useState("");
+  const [, setQrPayload] = useState("");
   const [summary, setSummary] = useState(null);
 
   const [error, setError] = useState("");
@@ -77,7 +77,7 @@ export default function SellFilePage() {
       // Configurar worker (necesario para render)
       try {
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      } catch (e) {
+      } catch {
         // noop
       }
 

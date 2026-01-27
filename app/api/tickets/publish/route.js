@@ -1,7 +1,6 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { revalidatePath } from 'next/cache';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
 
@@ -47,7 +46,6 @@ export async function POST(request) {
     }
 
     const userRole = profile?.user_type || 'standard'; // default: standard
-    const sellerTier = profile?.seller_tier || 'basic';
 
     // Calcular fee del vendedor según su tipo usando los helpers
     const originalPrice = Number(price);
@@ -106,4 +104,3 @@ export async function POST(request) {
     return NextResponse.json({ error: e?.message || 'Error inesperado' }, { status: 500 });
   }
 }
-

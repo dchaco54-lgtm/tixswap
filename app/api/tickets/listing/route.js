@@ -6,18 +6,24 @@ import { calculateFees } from "@/lib/fees";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+function getAdminOrResponse() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error("Missing Supabase env vars");
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return {
+      error: NextResponse.json({ error: "Missing Supabase env vars" }, { status: 500 }),
+    };
+  }
+
+  return {
+    admin: createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false },
+    }),
+  };
 }
 
-const admin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { persistSession: false },
-});
-
-async function getTicketsColumnSet() {
+async function getTicketsColumnSet(admin) {
   const { data, error } = await admin
     .from("information_schema.columns")
     .select("column_name")
@@ -55,6 +61,8 @@ function buildOwnerOrClause(cols, userId) {
  */
 export async function PATCH(request) {
   try {
+    const { admin, error } = getAdminOrResponse();
+    if (error) return error;
     // Auth
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -68,7 +76,7 @@ export async function PATCH(request) {
     }
     const userId = authData.user.id;
 
-    const cols = await getTicketsColumnSet();
+    const cols = await getTicketsColumnSet(admin);
 
     // Body
     const body = await request.json().catch(() => ({}));
@@ -177,6 +185,8 @@ export async function PATCH(request) {
  */
 export async function DELETE(request) {
   try {
+    const { admin, error } = getAdminOrResponse();
+    if (error) return error;
     // Auth
     const authHeader = request.headers.get("authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -190,7 +200,7 @@ export async function DELETE(request) {
     }
     const userId = authData.user.id;
 
-    const cols = await getTicketsColumnSet();
+    const cols = await getTicketsColumnSet(admin);
 
     const body = await request.json().catch(() => ({}));
     const { ticketId } = body || {};
@@ -255,5 +265,4 @@ export async function DELETE(request) {
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }
 }
-
 

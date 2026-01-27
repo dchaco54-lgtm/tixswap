@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 /**
@@ -13,8 +13,6 @@ import Link from 'next/link';
  */
 export default function OnboardingWelcomeModal({ onClose, onComplete, profile }) {
   const [step, setStep] = useState(0); // 0=welcome, 1-3=checklist
-  const dialogRef = useRef(null);
-
   const steps = [
     {
       id: 'welcome',

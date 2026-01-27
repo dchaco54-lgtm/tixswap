@@ -16,7 +16,6 @@ import {
 
 export default function RegisterPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [fullName, setFullName] = useState("");
   const [rut, setRut] = useState("");
@@ -140,6 +139,7 @@ export default function RegisterPage() {
     try {
       setLoading(true);
       setErrors({});
+      const supabase = createClient();
 
       // Validar RUT duplicado en backend
       const rutCheckRes = await fetch("/api/auth/check-rut", {
@@ -310,7 +310,7 @@ export default function RegisterPage() {
                 // Permitir que el usuario escriba libremente, normalizar al blur
                 setPhone(val);
               }}
-              onFocus={(e) => {
+              onFocus={() => {
                 // Si está vacío, prellenar +56 9
                 if (!phone) {
                   setPhone("+56 9");
@@ -460,4 +460,3 @@ export default function RegisterPage() {
     </div>
   );
 }
-

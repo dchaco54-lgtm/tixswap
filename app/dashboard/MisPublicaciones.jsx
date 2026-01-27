@@ -15,7 +15,7 @@ async function getAccessToken() {
     if (!error && data?.session?.access_token) {
       return data.session.access_token;
     }
-  } catch (e) {
+  } catch {
     // seguimos con fallback
   }
 
@@ -27,7 +27,7 @@ async function getAccessToken() {
         const parsed = JSON.parse(raw);
         if (parsed?.access_token) return parsed.access_token;
       }
-    } catch (e) {}
+    } catch {}
   }
 
   return null;
@@ -689,7 +689,6 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
-
 
 
 

@@ -1,25 +1,18 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/hooks/useProfile";
 import { useOnboardingLogic } from "@/hooks/useOnboardingLogic";
 import WalletSection from "./WalletSection";
 import MisPublicaciones from "./MisPublicaciones";
-import StarRating from "@/components/StarRating";
-import { normalizeRole, USER_TYPES } from "@/lib/roles";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
 import AvatarUploadSection from "@/components/AvatarUploadSection";
 import OnboardingWelcomeModal from "@/components/OnboardingWelcomeModal";
-import { 
-  getCurrentProfile, 
-  updateProfile, 
-  findOpenChangeTicket
-} from "@/lib/profileActions";
-import { formatRutForDisplay, formatEmailForDisplay } from "@/lib/formatUtils";
-import { validateRut, formatRut, cleanRut } from "@/lib/rutUtils";
-import { TIERS, TIER_DEFS, TIER_ORDER, tierLabel, normalizeTier } from "@/lib/tiers";
+import { updateProfile, findOpenChangeTicket } from "@/lib/profileActions";
+import { formatRutForDisplay } from "@/lib/formatUtils";
+import { TIERS, tierLabel, normalizeTier } from "@/lib/tiers";
 
 /* =========================
    Helpers
@@ -31,17 +24,6 @@ function formatCLP(n) {
     currency: "CLP",
     maximumFractionDigits: 0,
   }).format(num);
-}
-
-function formatDateShort(iso) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("es-CL", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
 }
 
 function formatDateTime(iso) {
@@ -105,46 +87,6 @@ function getCategoryLabelByTier(tierRaw, tierLocked) {
   return tierLabel(normalized);
 }
 
-function getNextTierInfo({ soldCount, currentTier, tierLocked }) {
-  const sold = Number(soldCount) || 0;
-  const normalized = normalizeTier(currentTier);
-
-  // Si está fijado (ej: Free), no hay progreso automático
-  if (tierLocked) {
-    return {
-      nextKey: null,
-      missing: "—",
-      nextLabel: "Fijado por admin",
-      required: null,
-    };
-  }
-
-  // FREE se trata como Básico para progresión (pero solo si no está lockeado)
-  const startTier = normalized === TIERS.FREE ? TIERS.BASIC : normalized;
-
-  // Encuentra el siguiente tier con minSales mayor a las ventas actuales
-  const nextKey = TIER_ORDER.find((key) => sold < (TIER_DEFS[key]?.minSales ?? Infinity));
-
-  if (!nextKey) {
-    return {
-      nextKey: null,
-      missing: 0,
-      nextLabel: "Máximo nivel",
-      required: TIER_DEFS[startTier]?.minSales ?? sold,
-    };
-  }
-
-  const required = Number(TIER_DEFS[nextKey]?.minSales ?? 0);
-  const missing = Math.max(0, required - sold);
-
-  return {
-    nextKey,
-    missing,
-    required,
-    nextLabel: TIER_DEFS[nextKey]?.label || nextKey,
-  };
-}
-
 function buildPrefillTicket({ field, currentValue, extraContext = "" }) {
   const base = {
     category: "soporte",
@@ -201,40 +143,6 @@ Detalle del problema:
 }
 
 /* =========================
-   Tiny chart (simple)
-========================= */
-function MiniBarChart({ items }) {
-  const max = Math.max(1, ...items.map((x) => Number(x.count) || 0));
-
-  return (
-    <div className="mt-3 grid grid-cols-6 gap-3">
-      {items.map((m) => {
-        const c = Number(m.count) || 0;
-        const pct = Math.round((c / max) * 100);
-
-        return (
-          <div key={m.key} className="rounded-2xl border border-slate-200 bg-white p-3">
-            <div className="text-xs font-bold text-slate-500">{m.label}</div>
-
-            <div className="mt-2 h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-              <div
-                className="h-2 rounded-full bg-blue-600"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-
-            <div className="mt-2 flex items-center justify-between">
-              <div className="text-sm font-extrabold text-slate-900">{c}</div>
-              <div className="text-[11px] font-semibold text-slate-500">ventas</div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* =========================
    Page
 ========================= */
 function DashboardContent() {
@@ -263,14 +171,14 @@ function DashboardContent() {
   const { shouldShow: shouldShowOnboarding, loading: onboardingLoading, handleDismiss: dismissOnboarding, handleComplete: completeOnboarding } = useOnboardingLogic(profile);
 
   // ventas
-  const [salesLoading, setSalesLoading] = useState(false);
-  const [salesErr, setSalesErr] = useState("");
-  const [salesData, setSalesData] = useState(null);
+  const [, setSalesLoading] = useState(false);
+  const [, setSalesErr] = useState("");
+  const [, setSalesData] = useState(null);
 
   // reputación
-  const [repLoading, setRepLoading] = useState(false);
-  const [repErr, setRepErr] = useState("");
-  const [rep, setRep] = useState(null);
+  const [, setRepLoading] = useState(false);
+  const [, setRepErr] = useState("");
+  const [, setRep] = useState(null);
 
   // modal detalle venta
   const [openSale, setOpenSale] = useState(null);
@@ -333,65 +241,6 @@ function DashboardContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
-  const navItems = useMemo(() => {
-    const isAdmin = normalizeRole(profile?.user_type) === USER_TYPES.ADMIN;
-
-    return [
-      { id: "mis_datos", label: "Mis datos" },
-      { id: "mis_publicaciones", label: "Mis publicaciones", tourId: "sales" },
-      { id: "wallet", label: "Wallet", tourId: "wallet" },
-      { id: "vender", label: "🎫 Vender", href: "/sell", tourId: "sell" },
-
-      // páginas ya existentes
-      { id: "mis_compras", label: "Mis compras", href: "/dashboard/purchases", tourId: "purchases" },
-      { id: "soporte", label: "Soporte", href: "/dashboard/soporte", tourId: "support" },
-      { id: "tickets", label: "Mis tickets", href: "/dashboard/tickets" },
-
-      ...(isAdmin ? [{ id: "admin", label: "Admin", href: "/admin" }] : []),
-    ];
-  }, [profile?.user_type]);
-
-  const goTab = (id, href) => {
-    setMsg("");
-    setErr("");
-    setEditing(false);
-
-    if (href) {
-      router.push(href);
-      return;
-    }
-
-    setTab(id);
-    // Navegación por ruta real (no tabs)
-    if (id === 'mis_publicaciones') {
-      router.replace('/dashboard/publicaciones');
-    } else if (id === 'mis_ventas') {
-      router.replace('/dashboard/purchases');
-    } else if (id === 'wallet') {
-      router.replace('/dashboard/wallet');
-    } else if (id === 'soporte') {
-      router.replace('/dashboard/soporte');
-    } else {
-      router.replace('/dashboard');
-    }
-  };
-
-  const requestChangeTicket = (field) => {
-    const currentValue =
-      field === "name" ? profile?.full_name : field === "rut" ? profile?.rut : "";
-
-    const t = buildPrefillTicket({ field, currentValue });
-
-    const qs = new URLSearchParams({
-      new: "1",
-      category: t.category,
-      subject: t.subject,
-      message: t.message,
-    });
-
-    router.push(`/dashboard/soporte?${qs.toString()}`);
-  };
-
   const requestSaleHelp = (sale) => {
     const extra = `Orden: ${sale?.id || "—"}
 Evento: ${sale?.ticket?.event?.title || "—"}
@@ -452,7 +301,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     }
   };
 
-  const handleAvatarSuccess = async (avatarUrl) => {
+  const handleAvatarSuccess = async () => {
     // Refetch para obtener la URL actualizada desde BD
     await refetchProfile();
     setMsg("Avatar actualizado ✅");
@@ -551,21 +400,11 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     );
   }
 
-  const soldCount = Number(salesData?.soldCount ?? 0) || 0;
-  const paid90dCount = Number(salesData?.paid90dCount ?? 0) || 0;
-  const paid90dTotal = Number(salesData?.paid90dTotal ?? 0) || 0;
-
   const currentSellerTier = profile?.seller_tier || profile?.tier;
   const sellerTierLocked =
     profile?.seller_tier_locked !== undefined
       ? profile?.seller_tier_locked
       : profile?.tier_locked;
-
-  const tierProgress = getNextTierInfo({
-    soldCount,
-    currentTier: currentSellerTier,
-    tierLocked: sellerTierLocked,
-  });
 
   return (
     <>
@@ -942,6 +781,3 @@ export default function DashboardPage() {
     </Suspense>
   );
 }
-
-
-

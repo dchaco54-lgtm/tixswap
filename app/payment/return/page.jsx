@@ -60,7 +60,7 @@ function PaymentReturnContent() {
 
         setMsg("Pago pendiente…");
         setErr("El banco aún no confirma. Revisa en “Mis compras” en unos minutos.");
-      } catch (e) {
+      } catch {
         setErr("Error de red confirmando el pago.");
         setMsg("");
       }
@@ -98,4 +98,3 @@ export default function PaymentReturnPage() {
     </Suspense>
   );
 }
-

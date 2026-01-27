@@ -16,7 +16,7 @@ const ADMIN_EMAILS = new Set([
 ]);
 
 // Array de estados para dropdown
-const STATES_FILTER = Object.entries(TICKET_STATUS).map(([key, value]) => ({
+const STATES_FILTER = Object.entries(TICKET_STATUS).map(([, value]) => ({
   v: value,
   l: statusLabel(value),
 }));
@@ -735,5 +735,4 @@ export default function AdminSupportConsole() {
     </main>
   );
 }
-
 

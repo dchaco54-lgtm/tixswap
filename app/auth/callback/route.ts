@@ -51,7 +51,14 @@ export async function GET(request: NextRequest) {
     // 3. INTERCAMBIAR CODE/TOKEN POR SESIÓN
     // ============================================
     
-    let sessionData;
+    type OtpType =
+      | "signup"
+      | "invite"
+      | "magiclink"
+      | "recovery"
+      | "email_change"
+      | "phone_change"
+      | "sms";
     
     if (code) {
       // PKCE flow (preferred)
@@ -86,14 +93,13 @@ export async function GET(request: NextRequest) {
         );
       }
       
-      sessionData = data;
     } else if (token && type) {
       // Implicit flow fallback (deprecated pero soportado)
       console.log('[AuthCallback] Usando implicit flow con token (deprecated)...');
       
       const { data, error: verifyError } = await supabase.auth.verifyOtp({
         token_hash: token,
-        type: type as any,
+        type: type as OtpType,
       });
 
       if (verifyError) {
@@ -110,7 +116,6 @@ export async function GET(request: NextRequest) {
         );
       }
       
-      sessionData = data;
     }
 
     // ============================================

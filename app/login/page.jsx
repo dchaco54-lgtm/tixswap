@@ -8,7 +8,6 @@ import { createClient } from "@/lib/supabase/client";
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = createClient();
 
   const redirectTo = searchParams.get("redirectTo") || "/dashboard";
   const errorParam = searchParams.get("error");
@@ -34,6 +33,7 @@ function LoginContent() {
   useEffect(() => {
     async function checkExistingSession() {
       try {
+        const supabase = createClient();
         const timeoutId = setTimeout(() => {
           console.warn("[Login] Timeout verificando sesión");
           setCheckingSession(false);
@@ -62,7 +62,7 @@ function LoginContent() {
     }
     
     checkExistingSession();
-  }, [router, redirectTo, supabase]);
+  }, [router, redirectTo]);
 
   const handleChange = (field) => (e) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -74,6 +74,7 @@ function LoginContent() {
     e.preventDefault();
     setErrorMessage("");
     setLoading(true);
+    const supabase = createClient();
 
     const identifier = String(form.identifier || "").trim();
     const password = String(form.password || "");
@@ -130,7 +131,7 @@ function LoginContent() {
       });
 
       router.push(redirectTo);
-    } catch (err) {
+    } catch {
       setErrorMessage("Ocurrió un problema al iniciar sesión. Inténtalo de nuevo.");
     } finally {
       setLoading(false);
@@ -247,4 +248,3 @@ export default function LoginPage() {
     </Suspense>
   );
 }
-

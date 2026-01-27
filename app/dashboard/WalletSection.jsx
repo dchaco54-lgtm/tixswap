@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -21,8 +21,11 @@ export default function WalletSection({ user: userProp = null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnUrl = searchParams.get("return");
-
-  const supabase = useMemo(() => createClient(), []);
+  const supabaseRef = useRef(null);
+  const getSupabase = () => {
+    if (!supabaseRef.current) supabaseRef.current = createClient();
+    return supabaseRef.current;
+  };
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -81,6 +84,7 @@ export default function WalletSection({ user: userProp = null }) {
     setLoading(true);
     setError("");
     setSuccess("");
+    const supabase = getSupabase();
 
     try {
       // 1) user
@@ -171,6 +175,7 @@ export default function WalletSection({ user: userProp = null }) {
   const handleSave = async () => {
     setError("");
     setSuccess("");
+    const supabase = getSupabase();
 
     if (!authedUser?.id) {
       setError("Debes iniciar sesión.");

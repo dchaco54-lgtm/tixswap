@@ -114,7 +114,6 @@ function rowToEvent(row) {
 export default function AdminEventsPage() {
   const router = useRouter();
 
-  const [userRole, setUserRole] = useState(null);
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -139,7 +138,6 @@ export default function AdminEventsPage() {
       if (role && role !== "admin") {
         router.push("/dashboard");
       } else {
-        setUserRole(role || "user");
       }
     };
     checkAuth();
@@ -182,7 +180,6 @@ export default function AdminEventsPage() {
         .eq("id", user.id)
         .maybeSingle();
 
-      setUserRole(prof?.user_type || "user");
 
       if (prof?.user_type !== "admin") {
         router.push("/dashboard");
@@ -708,4 +705,3 @@ export default function AdminEventsPage() {
     </div>
   );
 }
-

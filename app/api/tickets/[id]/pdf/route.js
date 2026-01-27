@@ -49,7 +49,6 @@ export async function GET(req, { params }) {
     }
 
     const isBuyer = order.buyer_id === user.id;
-    const isSeller = order.seller_id === user.id;
 
     // 3) Saber si es nominada (desde ticket_uploads)
     let isNominada = false;
@@ -109,4 +108,3 @@ export async function GET(req, { params }) {
     return NextResponse.json({ error: "Server error", details: e?.message || String(e) }, { status: 500 });
   }
 }
-
