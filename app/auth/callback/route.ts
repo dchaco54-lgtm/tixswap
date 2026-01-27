@@ -56,9 +56,7 @@ export async function GET(request: NextRequest) {
       | "invite"
       | "magiclink"
       | "recovery"
-      | "email_change"
-      | "phone_change"
-      | "sms";
+      | "email_change";
     
     if (code) {
       // PKCE flow (preferred)
