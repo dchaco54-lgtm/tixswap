@@ -35,6 +35,47 @@ function sanitizeSelect(selectStr) {
   return s;
 }
 
+// --- Helpers para que el vendedor pueda abrir el chat de un ticket vendido ---
+function orderPriority(order) {
+  const status = String(order?.status || "").toLowerCase();
+  const paymentState = String(order?.payment_state || "").toUpperCase();
+
+  // 1) paid + AUTHORIZED
+  if (status === "paid" && paymentState === "AUTHORIZED") return 0;
+  // 2) pending
+  if (status === "pending") return 1;
+  // 3) cualquier otro
+  return 2;
+}
+
+function pickBestOrder(orders) {
+  if (!Array.isArray(orders) || orders.length === 0) return null;
+  const copy = [...orders];
+  copy.sort((a, b) => {
+    const pa = orderPriority(a);
+    const pb = orderPriority(b);
+    if (pa !== pb) return pa - pb;
+    const da = new Date(a?.created_at || 0).getTime();
+    const db = new Date(b?.created_at || 0).getTime();
+    return db - da;
+  });
+  return copy[0];
+}
+
+function normalizeSaleOrder(order) {
+  if (!order) return null;
+  return {
+    id: order.id,
+    ticket_id: order.ticket_id,
+    buyer_id: order.buyer_id,
+    status: order.status,
+    payment_state: order.payment_state,
+    created_at: order.created_at,
+    buy_order: order.buy_order ?? null,
+    total_clp: order.total_clp ?? null,
+  };
+}
+
 // GET /api/tickets/my-publications
 export async function GET(request) {
   try {
@@ -129,13 +170,45 @@ export async function GET(request) {
 
     const normTickets = (tickets || []).map(normalizeTicket);
 
-    const active = normTickets.filter((t) => t.status === "active" || t.status === "available").length;
-    const paused = normTickets.filter((t) => t.status === "paused").length;
-    const sold = normTickets.filter((t) => t.status === "sold").length;
+    // Enriquecer tickets vendidos con la orden (para que el vendedor pueda abrir chat)
+    const soldTicketIds = normTickets.filter((t) => t.status === "sold").map((t) => t.id);
+    let enrichedTickets = normTickets.map((t) => ({ ...t, sale_order: null }));
+
+    if (soldTicketIds.length > 0) {
+      const { data: orders, error: ordersError } = await admin
+        .from("orders")
+        .select("id,ticket_id,buyer_id,seller_id,status,payment_state,created_at,buy_order,total_clp")
+        .eq("seller_id", userId)
+        .in("ticket_id", soldTicketIds);
+
+      if (!ordersError && Array.isArray(orders)) {
+        const byTicket = {};
+        for (const o of orders) {
+          if (!o?.ticket_id) continue;
+          (byTicket[o.ticket_id] ||= []).push(o);
+        }
+
+        const bestByTicket = {};
+        for (const [ticketId, list] of Object.entries(byTicket)) {
+          const best = pickBestOrder(list);
+          if (best) bestByTicket[ticketId] = normalizeSaleOrder(best);
+        }
+
+        enrichedTickets = normTickets.map((t) =>
+          t.status === "sold"
+            ? { ...t, sale_order: bestByTicket[t.id] || null }
+            : { ...t, sale_order: null }
+        );
+      }
+    }
+
+    const active = enrichedTickets.filter((t) => t.status === "active" || t.status === "available").length;
+    const paused = enrichedTickets.filter((t) => t.status === "paused").length;
+    const sold = enrichedTickets.filter((t) => t.status === "sold").length;
 
     return NextResponse.json({
-      tickets: normTickets,
-      summary: { total: normTickets.length, active, paused, sold },
+      tickets: enrichedTickets,
+      summary: { total: enrichedTickets.length, active, paused, sold },
     });
   } catch (err) {
     console.error("Error en GET /api/tickets/my-publications:", err);
