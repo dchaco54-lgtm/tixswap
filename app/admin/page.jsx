@@ -1,180 +1,231 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import supabase from "@/lib/supabaseClient";
 
 export default function AdminPage() {
   const router = useRouter();
 
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
 
   const [events, setEvents] = useState([]);
-  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
   const [tickets, setTickets] = useState([]);
-  const [loadingTickets, setLoadingTickets] = useState(true);
-
-  // VALIDAR ADMIN EN LA BD
-  useEffect(() => {
-    const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("user_type")
-        .eq("id", user.id)
-        .single();
-
-      const userType = profile?.user_type ? String(profile.user_type).toLowerCase().trim() : "";
-      const isAdminByRole = userType === "admin";
-      const isAdminByEmail = user.email?.toLowerCase() === "davidchacon_17@hotmail.com";
-
-      console.log("🔐 Validación Admin:", { 
-        user_type: profile?.user_type, 
-        userType, 
-        isAdminByRole, 
-        email: user.email, 
-        isAdminByEmail 
-      });
-
-      if (!isAdminByRole && !isAdminByEmail) {
-        // NO redirigir, dejar que se muestre el mensaje de error
-        setIsAdmin(false);
-        setCheckingAdmin(false);
-        return;
-      }
-
-      setIsAdmin(true);
-      setCheckingAdmin(false);
-
-      // Cargar eventos
-      try {
-        const { data, error } = await supabase
-          .from("events")
-          .select("id, title, starts_at, venue, city")
-          .order("starts_at", { ascending: true });
-
-        if (error) {
-          console.error("Error cargando eventos:", error);
-        } else {
-          setEvents(data || []);
-        }
-      } finally {
-        setLoadingEvents(false);
-      }
-
-      // Cargar tickets de soporte
-      try {
-        const { data, error } = await supabase
-          .from("support_tickets")
-          .select("id, email, subject, status, created_at")
-          .order("created_at", { ascending: false });
-
-        if (error) {
-          console.error("Error cargando tickets:", error);
-        } else {
-          setTickets(data || []);
-        }
-      } finally {
-        setLoadingTickets(false);
-      }
-    };
-
-    init();
-  }, [router]);
-
-  // Redirigir a usuarios
-  const handleGoToUsers = () => {
-    router.push("/admin/users");
-  };
-
-  const handleDeleteEvent = async (id) => {
-    if (!confirm("¿Seguro que quieres eliminar este evento?")) return;
-
-    const { error } = await supabase.from("events").delete().eq("id", id);
-    if (error) {
-      console.error(error);
-      alert("No se pudo eliminar el evento.");
-      return;
-    }
-
-    setEvents((prev) => prev.filter((e) => e.id !== id));
-  };
-
-  if (checkingAdmin) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-gray-100 text-sm text-gray-700">
-          Validando permisos de administrador...
-        </div>
-      </main>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <main className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="rounded-2xl bg-white px-6 py-4 shadow-sm border border-red-200 text-sm text-red-700 max-w-md">
-          <p className="font-semibold mb-2">❌ Acceso denegado</p>
-          <p className="mb-4">No tienes permisos de administrador para acceder a esta sección.</p>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-          >
-            Volver a mi cuenta
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  // Agrupar tickets por estado
-  const ticketsByStatus = {
+  const [ticketsByStatus, setTicketsByStatus] = useState({
     open: [],
     in_progress: [],
     closed: [],
-  };
+  });
+  const [loadingTickets, setLoadingTickets] = useState(false);
 
-  for (const t of tickets) {
-    if (t.status === "in_progress") ticketsByStatus.in_progress.push(t);
-    else if (t.status === "closed") ticketsByStatus.closed.push(t);
-    else ticketsByStatus.open.push(t);
+  // ✅ Emails que SIEMPRE serán admin (backup por si se te desordena profiles)
+  const ADMIN_EMAIL_ALLOWLIST = useMemo(
+    () => ["soporte@tixswap.cl"],
+    []
+  );
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setCheckingAdmin(true);
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        const session = sessionData?.session;
+        if (!session) {
+          router.push("/login");
+          return;
+        }
+
+        const { data: userData } = await supabase.auth.getUser();
+        const user = userData?.user;
+        if (!user) {
+          router.push("/login");
+          return;
+        }
+
+        // Traemos perfil
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("user_type, app_role, email")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        const user_type = (prof?.user_type || "").toString().toLowerCase();
+        const app_role = (prof?.app_role || "").toString().toLowerCase();
+        const email =
+          (prof?.email || user.email || "").toString().toLowerCase().trim();
+
+        const isAdminByRole = user_type === "admin" || app_role === "admin";
+        const isAdminByEmail = ADMIN_EMAIL_ALLOWLIST.includes(email);
+
+        // Log útil (puedes borrarlo después)
+        console.log("Validación Admin:", {
+          user_type,
+          app_role,
+          email,
+          isAdminByRole,
+          isAdminByEmail,
+        });
+
+        const allowed = isAdminByRole || isAdminByEmail;
+        setIsAdmin(allowed);
+
+        if (!allowed) {
+          router.push("/dashboard");
+          return;
+        }
+
+        // Cargar datos admin
+        loadEvents();
+        loadTickets();
+      } catch (e) {
+        console.error("Error validando admin:", e);
+        router.push("/dashboard");
+      } finally {
+        setCheckingAdmin(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadEvents() {
+    try {
+      setLoadingEvents(true);
+      const { data, error } = await supabase
+        .from("events")
+        .select("id, title, starts_at, venue, city")
+        .order("starts_at", { ascending: true })
+        .limit(50);
+
+      if (error) throw error;
+      setEvents(data || []);
+    } catch (e) {
+      console.error("Error cargando eventos:", e);
+      setEvents([]);
+    } finally {
+      setLoadingEvents(false);
+    }
   }
 
-  const formatDate = (iso) => {
-    const d = new Date(iso);
-    const dia = d.getDate().toString().padStart(2, "0");
-    const mes = d.toLocaleString("es-CL", { month: "short" });
-    const año = d.getFullYear();
-    const hora = d.toLocaleTimeString("es-CL", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    return `${dia} ${mes} ${año}, ${hora}`;
-  };
+  async function loadTickets() {
+    try {
+      setLoadingTickets(true);
 
-  const formatEventDate = (iso) => {
-    const d = new Date(iso);
-    const dia = d.getDate().toString().padStart(2, "0");
-    const mes = d.toLocaleString("es-CL", { month: "short" });
-    const año = d.getFullYear();
-    return `${dia} ${mes} ${año}`;
-  };
+      // ✅ FIX: support_tickets NO tiene email, tiene requester_email
+      const { data, error } = await supabase
+        .from("support_tickets")
+        .select("id, requester_email, subject, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+
+      const rows = data || [];
+      setTickets(rows);
+
+      // ✅ FIX: Normalizamos estados (tu sistema usa submitted/in_review/waiting_user/resolved/rejected)
+      const toLower = (v) => (v || "").toString().toLowerCase().trim();
+
+      const isOpen = (s) => ["submitted", "open", "new"].includes(toLower(s));
+      const isInProgress = (s) =>
+        ["in_review", "in_progress", "waiting_user", "pending"].includes(
+          toLower(s)
+        );
+      const isClosed = (s) =>
+        ["resolved", "closed", "rejected"].includes(toLower(s));
+
+      const grouped = {
+        open: rows.filter((t) => isOpen(t.status)),
+        in_progress: rows.filter((t) => isInProgress(t.status)),
+        closed: rows.filter((t) => isClosed(t.status)),
+      };
+
+      // Si llega algún status raro, lo dejamos como "open" para no perderlo
+      const leftovers = rows.filter(
+        (t) => !isOpen(t.status) && !isInProgress(t.status) && !isClosed(t.status)
+      );
+      if (leftovers.length) grouped.open = [...leftovers, ...grouped.open];
+
+      setTicketsByStatus(grouped);
+    } catch (e) {
+      console.error("Error cargando tickets:", e);
+      setTickets([]);
+      setTicketsByStatus({ open: [], in_progress: [], closed: [] });
+    } finally {
+      setLoadingTickets(false);
+    }
+  }
+
+  async function handleDeleteEvent(eventId) {
+    if (!confirm("¿Seguro que quieres eliminar este evento?")) return;
+    try {
+      const { error } = await supabase.from("events").delete().eq("id", eventId);
+      if (error) throw error;
+      await loadEvents();
+    } catch (e) {
+      console.error("Error eliminando evento:", e);
+      alert("No se pudo eliminar el evento.");
+    }
+  }
+
+  function handleGoToUsers() {
+    router.push("/admin/users");
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleString("es-CL", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return String(iso);
+    }
+  }
+
+  function formatEventDate(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleDateString("es-CL", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+    } catch {
+      return String(iso);
+    }
+  }
+
+  if (checkingAdmin) {
+    return (
+      <main className="min-h-screen bg-gray-50">
+        <div className="mx-auto max-w-6xl px-4 py-10">
+          <p className="text-sm text-gray-500">Validando permisos admin...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!isAdmin) return null;
 
   return (
-    <main className="min-h-screen bg-gray-50 py-10">
-      <div className="max-w-6xl mx-auto px-4 space-y-8">
+    <main className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-6xl px-4 py-10 space-y-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Panel administrador TixSwap
-          </h1>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Panel Admin</h1>
+            <p className="text-sm text-gray-500">
+              Gestión de usuarios, eventos y soporte.
+            </p>
+          </div>
+
           <button
             type="button"
             onClick={() => router.push("/dashboard")}
@@ -187,7 +238,7 @@ export default function AdminPage() {
         {/* CARDS PRINCIPALES */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* CARD USUARIOS */}
-          <div 
+          <div
             onClick={handleGoToUsers}
             className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
           >
@@ -199,7 +250,7 @@ export default function AdminPage() {
           </div>
 
           {/* CARD EVENTOS */}
-          <div 
+          <div
             onClick={() => router.push("/admin/events")}
             className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
           >
@@ -210,8 +261,8 @@ export default function AdminPage() {
             </button>
           </div>
 
-          {/* CARD TICKETS */}
-          <div 
+          {/* CARD SOPORTE */}
+          <div
             onClick={() => router.push("/admin/support")}
             className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
           >
@@ -241,9 +292,7 @@ export default function AdminPage() {
           {loadingEvents ? (
             <p className="text-sm text-gray-500">Cargando eventos...</p>
           ) : events.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              No hay eventos creados todavía.
-            </p>
+            <p className="text-sm text-gray-500">No hay eventos creados todavía.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -258,20 +307,13 @@ export default function AdminPage() {
                 </thead>
                 <tbody>
                   {events.map((ev) => (
-                    <tr
-                      key={ev.id}
-                      className="border-b border-gray-50 hover:bg-gray-50"
-                    >
+                    <tr key={ev.id} className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="py-2 pr-4 text-gray-900">{ev.title}</td>
                       <td className="py-2 pr-4 text-gray-700">
                         {formatEventDate(ev.starts_at)}
                       </td>
-                      <td className="py-2 pr-4 text-gray-700">
-                        {ev.venue || "—"}
-                      </td>
-                      <td className="py-2 pr-4 text-gray-700">
-                        {ev.city || "—"}
-                      </td>
+                      <td className="py-2 pr-4 text-gray-700">{ev.venue || "—"}</td>
+                      <td className="py-2 pr-4 text-gray-700">{ev.city || "—"}</td>
                       <td className="py-2 pr-0 text-right">
                         <button
                           type="button"
@@ -298,9 +340,7 @@ export default function AdminPage() {
           {loadingTickets ? (
             <p className="text-sm text-gray-500">Cargando tickets...</p>
           ) : tickets.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              Aún no hay tickets de soporte.
-            </p>
+            <p className="text-sm text-gray-500">Aún no hay tickets de soporte.</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
               <div>
@@ -347,7 +387,7 @@ function TicketCard({ ticket, formatDate }) {
   return (
     <div className="border border-gray-100 rounded-xl p-3 bg-gray-50">
       <p className="text-xs text-gray-500 mb-1">
-        {ticket.email || "Usuario sin email"}
+        {ticket.requester_email || "Usuario sin email"}
       </p>
       <p className="text-gray-900 font-medium line-clamp-2">{ticket.subject}</p>
       <p className="text-xs text-gray-500 mt-1">
@@ -356,3 +396,4 @@ function TicketCard({ ticket, formatDate }) {
     </div>
   );
 }
+
