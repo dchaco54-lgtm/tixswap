@@ -1,128 +1,112 @@
+// app/api/tickets/[id]/pdf/route.js
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createClient } from "@supabase/supabase-js";
 
-// Genera signed URL del PDF de un ticket.
-// Solo comprador (con orden pagada) o vendedor.
+export const runtime = "nodejs";
+
+function getSupabaseAdmin() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL");
+  if (!serviceKey) throw new Error("Missing env: SUPABASE_SERVICE_ROLE_KEY");
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
+}
+
 export async function GET(req, { params }) {
   try {
-    const { id: ticketId } = params;
+    const supabase = getSupabaseAdmin();
+    const ticketId = params?.id;
 
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData?.user;
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+    if (!token) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
 
-    if (!user) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
+    const { data: uData, error: uErr } = await supabase.auth.getUser(token);
+    if (uErr || !uData?.user) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+    const user = uData.user;
 
-    const admin = supabaseAdmin();
-
-    // 1) Buscar orden que autorice acceso (buyer o seller)
-    const { data: anyOrder, error: ordErr } = await admin
-      .from("orders")
-      .select("id, status, payment_state, buyer_id, seller_id, user_id, ticket_id")
-      .eq("ticket_id", ticketId)
-      .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id},user_id.eq.${user.id}`)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (ordErr) {
-      console.error("GET /api/tickets/[id]/pdf ordErr", ordErr);
-      return NextResponse.json(
-        { error: "Error validando permisos" },
-        { status: 500 }
-      );
-    }
-
-    if (!anyOrder) {
-      return NextResponse.json(
-        { error: "No tienes acceso a este ticket" },
-        { status: 403 }
-      );
-    }
-
-    // 2) Traer ticket (para seller_id / posibles columnas)
-    const { data: ticket, error: tErr } = await admin
+    // 1) Traer ticket
+    const { data: ticket, error: tErr } = await supabase
       .from("tickets")
-      .select("*")
+      .select("id, ticket_upload_id, storage_bucket, storage_path")
       .eq("id", ticketId)
-      .maybeSingle();
+      .single();
 
-    if (tErr) console.error("GET /api/tickets/[id]/pdf tErr", tErr);
-
-    const sellerId = ticket?.seller_id || anyOrder?.seller_id;
-
-    // 3) Intentar resolver PDF desde ticket_uploads
-    let bucket = null;
-    let path = null;
-
-    // Caso nuevo: ticket tiene source_pdf_bucket / source_pdf_path
-    if (ticket?.source_pdf_bucket && ticket?.source_pdf_path) {
-      bucket = ticket.source_pdf_bucket;
-      path = ticket.source_pdf_path;
+    if (tErr || !ticket) {
+      return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
     }
 
-    // Caso nuevo: ticket tiene ticket_upload_id
-    if (!path && ticket?.ticket_upload_id) {
-      const { data: up, error: upErr } = await admin
+    // 2) Verificar que sea comprador o vendedor de alguna orden con este ticket
+    const { data: order } = await supabase
+      .from("orders")
+      .select("id, buyer_id, seller_id, status, renominated_storage_bucket, renominated_storage_path")
+      .eq("ticket_id", ticket.id)
+      .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+      .maybeSingle();
+
+    if (!order) {
+      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    }
+
+    const isBuyer = order.buyer_id === user.id;
+    const isSeller = order.seller_id === user.id;
+
+    // 3) Saber si es nominada (desde ticket_uploads)
+    let isNominada = false;
+    if (ticket.ticket_upload_id) {
+      const { data: tu } = await supabase
+        .from("ticket_uploads")
+        .select("is_nominada")
+        .eq("id", ticket.ticket_upload_id)
+        .maybeSingle();
+      isNominada = !!tu?.is_nominada;
+    }
+
+    // 4) Si es nominada y comprador intenta descargar pero NO existe renominado => bloquear
+    if (isNominada && isBuyer && !order.renominated_storage_path) {
+      return NextResponse.json(
+        { error: "RENOMINATION_PENDING", message: "Ticket nominada: falta subir el PDF renominado." },
+        { status: 409 }
+      );
+    }
+
+    // 5) Elegir qué archivo entregar
+    let bucket = ticket.storage_bucket || "tickets";
+    let path = ticket.storage_path || null;
+
+    // Si hay renominado, usarlo (para buyer y seller)
+    if (order.renominated_storage_path) {
+      bucket = order.renominated_storage_bucket || "tickets";
+      path = order.renominated_storage_path;
+    }
+
+    // Fallback: si ticket no tiene storage_path, intentar desde ticket_upload
+    if (!path && ticket.ticket_upload_id) {
+      const { data: tu2 } = await supabase
         .from("ticket_uploads")
         .select("storage_bucket, storage_path")
         .eq("id", ticket.ticket_upload_id)
         .maybeSingle();
-
-      if (upErr) console.error("GET /api/tickets/[id]/pdf upErr", upErr);
-      if (up?.storage_path) {
-        bucket = up.storage_bucket;
-        path = up.storage_path;
-      }
+      bucket = tu2?.storage_bucket || bucket;
+      path = tu2?.storage_path || path;
     }
 
-    // Caso legacy (tu caso): no hay relación, fallback por seller_id
-    if (!path && sellerId) {
-      const { data: up2, error: upErr2 } = await admin
-        .from("ticket_uploads")
-        .select("storage_bucket, storage_path")
-        .eq("seller_id", sellerId)
-        .eq("status", "uploaded")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (upErr2) console.error("GET /api/tickets/[id]/pdf upErr2", upErr2);
-      if (up2?.storage_path) {
-        bucket = up2.storage_bucket;
-        path = up2.storage_path;
-      }
+    if (!path) {
+      return NextResponse.json({ error: "FILE_NOT_FOUND" }, { status: 404 });
     }
 
-    if (!bucket || !path) {
-      return NextResponse.json(
-        { error: "No se encontró el PDF del ticket" },
-        { status: 404 }
-      );
-    }
-
-    // 4) Signed URL
-    const { data: signed, error: sErr } = await admin.storage
+    // 6) Signed URL
+    const { data: signed, error: sErr } = await supabase.storage
       .from(bucket)
       .createSignedUrl(path, 60 * 10); // 10 min
 
-    if (sErr) {
-      console.error("GET /api/tickets/[id]/pdf signedErr", sErr);
-      return NextResponse.json(
-        { error: "No se pudo generar el link" },
-        { status: 500 }
-      );
+    if (sErr || !signed?.signedUrl) {
+      return NextResponse.json({ error: "SIGNED_URL_ERROR", details: sErr?.message }, { status: 500 });
     }
 
-    return NextResponse.json({ url: signed.signedUrl });
-  } catch (err) {
-    console.error("GET /api/tickets/[id]/pdf fatal", err);
-    return NextResponse.json({ error: "Error interno" }, { status: 500 });
+    return NextResponse.json({ ok: true, url: signed.signedUrl, isNominada, deliveredRenominated: !!order.renominated_storage_path });
+  } catch (e) {
+    return NextResponse.json({ error: "Server error", details: e?.message || String(e) }, { status: 500 });
   }
 }
 
