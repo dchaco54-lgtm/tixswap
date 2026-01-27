@@ -1,207 +1,200 @@
-// app/api/tickets/register/route.js
-import { NextResponse } from "next/server";
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
-import pdfParse from "pdf-parse";
-import { detectProviderAndParse, validateParsedTicket } from "@/lib/ticket-parsers";
+import crypto from "crypto";
 
-export const runtime = "nodejs";
+export const runtime = "nodejs"; // necesario para crypto + Buffer
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url) throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL");
-  if (!serviceKey) throw new Error("Missing env: SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, serviceKey, { auth: { persistSession: false } });
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
-async function columnExists(supabase, table, column) {
-  const { data, error } = await supabase.rpc("column_exists", {
-    tbl: table,
-    col: column,
-  });
-  if (error) return false;
-  return !!data;
+function getEnv(name) {
+  const v = process.env[name];
+  return v && String(v).trim().length ? String(v).trim() : null;
+}
+
+function safeFileName(name) {
+  // deja letras/números/._- y reemplaza espacios
+  return String(name || "ticket.pdf")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .slice(0, 180);
 }
 
 export async function POST(req) {
   try {
-    const supabase = getSupabaseAdmin();
+    const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL");
+    const serviceKey = getEnv("SUPABASE_SERVICE_ROLE_KEY");
 
+    if (!supabaseUrl) return json({ error: "Missing NEXT_PUBLIC_SUPABASE_URL" }, 500);
+    if (!serviceKey) return json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" }, 500);
 
-    // Multipart
+    const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false },
+    });
+
     const form = await req.formData();
     const file = form.get("file");
-    const is_nominada = String(form.get("is_nominada") || "false") === "true";
-    let sellerId = form.get("sellerId");
 
-    // Auth: si no viene sellerId, derivarlo del token
-    let user = null;
-    if (!sellerId) {
-      const authHeader = req.headers.get("authorization") || "";
-      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-      if (!token) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-      const { data: uData, error: uErr } = await supabase.auth.getUser(token);
-      if (uErr || !uData?.user) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-      user = uData.user;
-      sellerId = user.id;
-    } else {
-      user = { id: sellerId };
+    // OJO: esto es el “seller” (quien sube el ticket)
+    const sellerId = (form.get("sellerId") || "").toString() || null;
+    const userId = (form.get("userId") || "").toString() || null;
+
+    // vienen con distintos nombres según pantallas
+    const isNominated =
+      (form.get("isNominated") || form.get("isNominada") || "false").toString() === "true";
+
+    const qrPayload = (form.get("qr_payload") || "").toString() || "";
+
+    // Opcional: si en algún flujo te llegan estos, los guardamos donde corresponde
+    const buyerName = (form.get("buyer_name") || "").toString() || null;
+    const buyerRut = (form.get("buyer_rut") || "").toString() || null;
+
+    if (!file) return json({ error: "Missing file" }, 400);
+    if (!(file instanceof File)) return json({ error: "Invalid file" }, 400);
+
+    if (file.type !== "application/pdf") {
+      return json({ error: "Solo PDF (application/pdf)" }, 400);
     }
 
-    if (!file || typeof file === "string") {
-      return NextResponse.json({ error: "Falta el archivo PDF." }, { status: 400 });
+    const maxBytes = 8 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      return json({ error: "PDF supera 8MB" }, 400);
     }
 
-    // Basic checks
-    const filename = file.name || "ticket.pdf";
-    const size = file.size || 0;
-    if (size <= 0) return NextResponse.json({ error: "Archivo vacío." }, { status: 400 });
-    if (size > 8 * 1024 * 1024) {
-      return NextResponse.json({ error: "Máx 8MB." }, { status: 400 });
+    const ab = await file.arrayBuffer();
+    const buf = Buffer.from(ab);
+
+    // header PDF real
+    const header = buf.subarray(0, 5).toString("utf8");
+    if (header !== "%PDF-") {
+      return json({ error: "Archivo no parece un PDF válido" }, 400);
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // Hash anti-duplicado
+    const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
 
-    // PDF magic header
-    if (buffer.slice(0, 4).toString() !== "%PDF") {
-      return NextResponse.json({ error: "Debe ser un PDF válido." }, { status: 400 });
+    // Tabla real usa file_hash (y también tiene sha256, pero históricamente lo tienes null)
+    // 1) Duplicado en DB
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("ticket_uploads")
+      .select("id, file_hash, storage_bucket, storage_path, created_at")
+      .eq("file_hash", sha256)
+      .maybeSingle();
+
+    if (existingErr) {
+      return json(
+        { error: "DB duplicate-check failed", details: existingErr.message, hint: existingErr.hint },
+        500
+      );
     }
 
-    // Hash (anti-duplicado global)
-    const file_hash = crypto.createHash("sha256").update(buffer).digest("hex");
+    const bucket = "ticket-pdfs"; // ✅ tu bucket real
+    const ts = Date.now();
+    const cleanName = safeFileName(file.name || "ticket.pdf");
+    const storagePath = `tickets/${sha256}/${ts}_${cleanName}`; // ✅ tu formato real
 
-    // Insert into ticket_files (if exists) for dedupe
-    // (si tu proyecto usa esta tabla, perfecto; si no existe, lo salta)
-    const hasTicketFiles = await columnExists(supabase, "ticket_files", "file_hash");
-    if (hasTicketFiles) {
-      const { data: existing } = await supabase
-        .from("ticket_files")
-        .select("id")
-        .eq("file_hash", file_hash)
-        .maybeSingle();
+    if (existing) {
+      // signed url para verlo
+      const { data: signed, error: signedErr } = await supabaseAdmin.storage
+        .from(bucket)
+        .createSignedUrl(existing.storage_path, 60 * 30);
 
-      if (existing?.id) {
-        return NextResponse.json(
-          { error: "Este PDF ya fue subido (anti-duplicado)." },
-          { status: 409 }
-        );
-      }
-
-      await supabase.from("ticket_files").insert({
-        file_hash,
-        original_name: filename,
-        size_bytes: size,
-        uploaded_by: user.id,
-      });
+      return json(
+        {
+          error: "DUPLICATE",
+          message: "Entrada ya subida en Tixswap",
+          sha256,
+          ticketUploadId: existing.id,
+          filePath: existing.storage_path,
+          viewUrl: signedErr ? null : signed?.signedUrl || null,
+          createdAt: existing.created_at,
+        },
+        409
+      );
     }
 
-
-    // Bucket configurable para PDFs
-    const BUCKET = process.env.TICKET_PDF_BUCKET ?? "ticket-pdfs";
-    const bucket = BUCKET;
-    const storage_path = `uploads/${user.id}/${crypto.randomUUID()}.pdf`;
-
-    const { error: upErr } = await supabase.storage.from(bucket).upload(storage_path, buffer, {
+    // 2) Subir a Storage
+    const { error: uploadErr } = await supabaseAdmin.storage.from(bucket).upload(storagePath, buf, {
       contentType: "application/pdf",
       upsert: false,
     });
 
-    if (upErr) {
-      return NextResponse.json({ error: "Storage error", details: upErr.message }, { status: 500 });
+    if (uploadErr) {
+      return json(
+        { error: "Storage upload failed", details: uploadErr.message, hint: uploadErr.hint },
+        500
+      );
     }
 
-    // Parse text
-    let text = "";
-    try {
-      const parsedPdf = await pdfParse(buffer);
-      text = (parsedPdf?.text || "").trim();
-    } catch {
-      text = "";
-    }
-
-    // Detect provider + parse
-    let provider = null;
-    let parsed = null;
-    let manual_review = false;
-
-    try {
-      const out = detectProviderAndParse(text);
-      provider = out?.provider || null;
-      parsed = out?.parsed || null;
-    } catch {
-      provider = null;
-      parsed = null;
-    }
-
-    // ✅ MVP: si no hay proveedor, NO bloquear => manual review
-    if (!provider || !parsed) {
-      manual_review = true;
-      provider = "manual";
-      parsed = {
-        ticket_number: null,
-        event_name: null,
-        event_date: null,
-        seat_info: null,
-        raw_text: text || null,
-      };
-    } else {
-      // Validación del parse solo si detectó proveedor real
-      const v = validateParsedTicket(parsed);
-      if (!v.ok) {
-        // igual lo guardamos (pero como manual), para que no se pierda
-        manual_review = true;
-        provider = provider || "manual";
-      }
-    }
-
-    // Solo insertar columnas válidas en ticket_uploads
-    const allowedKeys = [
-      "user_id", "provider", "file_hash", "storage_bucket", "storage_path", "is_nominada",
-      "ticket_number", "event_name", "event_date", "seat_info", "raw_text", "parsed_data",
-      "status", "validation_status", "updated_at"
-    ];
-    const nowIso = new Date().toISOString();
-    const toSetRaw = {
-      user_id: user.id,
-      provider,
-      file_hash,
+    // 3) Insert DB (ALINEADO A TU ESQUEMA REAL)
+    const insertPayload = {
+      user_id: userId || null,
+      file_hash: sha256,
+      sha256: sha256, // existe en tu tabla, aunque antes lo dejabas null
       storage_bucket: bucket,
-      storage_path,
-      is_nominada,
-      ticket_number: parsed?.ticket_number || null,
-      event_name: parsed?.event_name || null,
-      event_date: parsed?.event_date || null,
-      seat_info: parsed?.seat_info || null,
-      raw_text: text || null,
-      parsed_data: parsed || null,
+      storage_path: storagePath,
+      original_name: file.name || null,
+      original_filename: null, // lo mantienes null en tu ejemplo
+      file_size: file.size,
+      mime_type: file.type,
+      is_nominated: isNominated,
+      is_nominada: isNominated,
+      seller_id: sellerId || null,
       status: "uploaded",
-      validation_status: manual_review ? "pending_manual" : "parsed_ok",
-      updated_at: nowIso,
+      qr_payload: qrPayload || "",
+      // buyer_* NO existe => usamos attendee_*
+      attendee_name: buyerName,
+      attendee_rut: buyerRut,
+      // meta como JSON para debug (tu tabla tiene meta)
+      meta: {
+        debug: {
+          uploadedAt: new Date().toISOString(),
+          fileName: file.name,
+          fileSize: file.size,
+          hasQR: Boolean(qrPayload && qrPayload.length),
+          qrLength: qrPayload ? qrPayload.length : 0,
+        },
+      },
     };
-    // pick solo allowedKeys
-    const toSet = Object.fromEntries(Object.entries(toSetRaw).filter(([k]) => allowedKeys.includes(k)));
 
-    const { data: uploadRow, error: insErr } = await supabase
+    const { data: inserted, error: insertErr } = await supabaseAdmin
       .from("ticket_uploads")
-      .insert(toSet)
-      .select("id, provider, event_name, event_date, seat_info, ticket_number, validation_status")
+      .insert(insertPayload)
+      .select("id, created_at, storage_path")
       .single();
 
-    if (insErr) {
-      console.error("[ticket_uploads insert error]", insErr);
-      return NextResponse.json({ error: "DB error", details: insErr.message, hint: insErr.hint }, { status: 500 });
+    if (insertErr) {
+      // rollback storage
+      await supabaseAdmin.storage.from(bucket).remove([storagePath]);
+      return json(
+        { error: "DB insert failed", details: insertErr.message, hint: insertErr.hint },
+        500
+      );
     }
 
-    return NextResponse.json({
+    // 4) Signed URL para ver/descargar
+    const { data: signed, error: signedErr } = await supabaseAdmin.storage
+      .from(bucket)
+      .createSignedUrl(storagePath, 60 * 30);
+
+    return json({
       ok: true,
-      upload_id: uploadRow.id,
-      manual_review,
-      upload_summary: uploadRow,
+      ticketUploadId: inserted.id,
+      sha256,
+      filePath: storagePath,
+      viewUrl: signedErr ? null : signed?.signedUrl || null,
+      createdAt: inserted.created_at,
+      summary: {
+        bucket,
+        isNominated,
+      },
+      parsed: null, // si después quieres parsear QR en backend, lo agregamos aquí sin romper nada
     });
   } catch (e) {
-    return NextResponse.json({ error: "Server error", details: e?.message || String(e) }, { status: 500 });
+    return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);
   }
 }
 
