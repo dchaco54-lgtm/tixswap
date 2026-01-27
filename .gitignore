@@ -14,4 +14,4 @@
 # vercel
 .vercel
 *.sql
-*.ts
+supabase/.temp/
