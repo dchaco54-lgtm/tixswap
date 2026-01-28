@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import OrderChat from "@/app/components/OrderChat";
+import RatingModal from "@/components/RatingModal";
+import StarRating from "@/components/StarRating";
 
 function formatCLP(n) {
   const value = Number(n || 0);
@@ -52,6 +54,10 @@ export default function PurchaseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [chatOpen, setChatOpen] = useState(false);
+  const [ratingOpen, setRatingOpen] = useState(false);
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingError, setRatingError] = useState("");
+  const [myRating, setMyRating] = useState(null);
 
   async function load() {
     setErr("");
@@ -84,6 +90,60 @@ export default function PurchaseDetailPage() {
     String(order?.payment_state || "").toUpperCase() === "AUTHORIZED";
 
   const pdfHref = order ? `/api/orders/${order.id}/pdf` : "#";
+  const canRate = String(t?.status || "").toLowerCase() === "sold";
+  const hasRated = Boolean(myRating?.id);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRating() {
+      if (!order?.id || !canRate) {
+        if (!cancelled) setMyRating(null);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/ratings?orderId=${order.id}&role=buyer`,
+          { cache: "no-store" }
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!cancelled) setMyRating(res.ok ? json?.rating || null : null);
+      } catch {
+        if (!cancelled) setMyRating(null);
+      }
+    }
+
+    loadRating();
+    return () => {
+      cancelled = true;
+    };
+  }, [order?.id, canRate]);
+
+  const handleSubmitRating = async ({ stars, comment }) => {
+    if (!order?.id) return;
+    setRatingError("");
+    setRatingSubmitting(true);
+    try {
+      const res = await fetch("/api/ratings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: order.id,
+          role: "buyer",
+          stars,
+          comment,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "No se pudo calificar");
+      setMyRating(json?.rating || null);
+      setRatingOpen(false);
+    } catch (e) {
+      setRatingError(e?.message || "No se pudo calificar");
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -205,7 +265,32 @@ export default function PurchaseDetailPage() {
                 >
                   Soporte
                 </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setRatingOpen(true)}
+                  disabled={!canRate || hasRated}
+                  className={`inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm ${
+                    !canRate
+                      ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      : hasRated
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200 cursor-not-allowed"
+                      : "bg-white hover:bg-slate-50"
+                  }`}
+                >
+                  {hasRated ? "Calificado" : "Calificar"}
+                </button>
               </div>
+
+              {hasRated ? (
+                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                  <div className="font-semibold text-slate-700 mb-1">Tu calificación</div>
+                  <StarRating value={Number(myRating.stars || 0)} text={`${myRating.stars}/5`} size={14} />
+                  <div className="mt-1 text-slate-600">
+                    {myRating.comment || "Sin comentario"}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -264,6 +349,20 @@ export default function PurchaseDetailPage() {
       {chatOpen && order?.id ? (
         <OrderChat orderId={order.id} onClose={() => setChatOpen(false)} />
       ) : null}
+
+      <RatingModal
+        open={ratingOpen}
+        title="Calificar como comprador"
+        onClose={() => {
+          if (!ratingSubmitting) {
+            setRatingOpen(false);
+            setRatingError("");
+          }
+        }}
+        onSubmit={handleSubmitRating}
+        submitting={ratingSubmitting}
+        error={ratingError}
+      />
     </div>
   );
 }

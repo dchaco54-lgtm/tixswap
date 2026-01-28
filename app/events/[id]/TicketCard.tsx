@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import TrustBadges from "@/components/TrustBadges";
+import StarRating from "@/components/StarRating";
 import type { Database } from "@/src/types/database.types";
 
 function formatCLP(value: number | null) {
@@ -30,10 +31,15 @@ type SellerLike = {
   email?: string | null;
 };
 
+type TrustSignalsLike = {
+  ratingCount?: number;
+  avgRating?: number | null;
+};
+
 interface TicketCardProps {
   ticket: TicketLike;
   seller?: SellerLike | null;
-  trustSignals?: unknown;
+  trustSignals?: TrustSignalsLike | null;
 }
 
 export default function TicketCard({ ticket, seller, trustSignals }: TicketCardProps) {
@@ -62,6 +68,20 @@ export default function TicketCard({ ticket, seller, trustSignals }: TicketCardP
               <TrustBadges trustSignals={trustSignals} compact />
             </div>
           )}
+
+          {trustSignals ? (
+            trustSignals.ratingCount > 0 ? (
+              <div className="mt-2">
+                <StarRating
+                  value={Number(trustSignals.avgRating || 0)}
+                  text={`${Number(trustSignals.avgRating || 0).toFixed(1)} (${trustSignals.ratingCount})`}
+                  size={14}
+                />
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-slate-500">Sin calificaciones</div>
+            )
+          ) : null}
           
           {/* Microcopy de confianza */}
           <div className="mt-3 text-xs text-gray-500">

@@ -32,6 +32,7 @@ export default function DashboardSidebar() {
       { label: 'Mis datos', href: '/dashboard', icon: '👤' },
       { label: 'Mis compras', href: '/dashboard/purchases', icon: '🎟️' },
       { label: 'Mis publicaciones', href: '/dashboard/publicaciones', icon: '💰' },
+      { label: 'Mis calificaciones', href: '/dashboard/calificaciones', icon: '⭐' },
       { label: 'Wallet', href: '/dashboard/wallet', icon: '💳' },
       { label: 'Vender', href: '/sell', icon: '📤' },
       { label: 'Soporte', href: '/dashboard/soporte', icon: '🆘' },
@@ -110,4 +111,3 @@ export default function DashboardSidebar() {
     </aside>
   );
 }
-

@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import OrderChat from "@/app/components/OrderChat";
 import { createClient } from "@/lib/supabase/client";
+import RatingModal from "@/components/RatingModal";
+import StarRating from "@/components/StarRating";
 
 function formatCLP(n) {
   const num = Number(n) || 0;
@@ -51,6 +53,10 @@ export default function PublicationDetailPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [renominatedUploading, setRenominatedUploading] = useState(false);
   const [renominatedMsg, setRenominatedMsg] = useState("");
+  const [ratingOpen, setRatingOpen] = useState(false);
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingError, setRatingError] = useState("");
+  const [myRating, setMyRating] = useState(null);
   const fileInputRef = useRef(null);
   const supabaseRef = useRef(null);
   const getSupabase = () => {
@@ -152,6 +158,8 @@ export default function PublicationDetailPage() {
   const summaryEntry = isSold && order ? order.ticket_price : (ticket?.price ?? 0);
   const summaryFee = isSold && order ? order.platform_fee : (ticket?.platform_fee ?? 0);
   const summaryTotal = Number(summaryEntry || 0) + Number(summaryFee || 0);
+  const canRate = isSold && !!order?.id;
+  const hasRated = Boolean(myRating?.id);
 
   const pdfHref = ticket
     ? isSold && order?.id
@@ -160,6 +168,58 @@ export default function PublicationDetailPage() {
     : "#";
 
   const canUploadRenominated = Boolean(isSold && nominated && order?.id && !renominatedUploading);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadRating() {
+      if (!order?.id || !isSold) {
+        if (!cancelled) setMyRating(null);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/ratings?orderId=${order.id}&role=seller`,
+          { cache: "no-store" }
+        );
+        const json = await res.json().catch(() => ({}));
+        if (!cancelled) setMyRating(res.ok ? json?.rating || null : null);
+      } catch {
+        if (!cancelled) setMyRating(null);
+      }
+    }
+
+    loadRating();
+    return () => {
+      cancelled = true;
+    };
+  }, [order?.id, isSold]);
+
+  const handleSubmitRating = async ({ stars, comment }) => {
+    if (!order?.id) return;
+    setRatingError("");
+    setRatingSubmitting(true);
+    try {
+      const res = await fetch("/api/ratings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: order.id,
+          role: "seller",
+          stars,
+          comment,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "No se pudo calificar");
+      setMyRating(json?.rating || null);
+      setRatingOpen(false);
+    } catch (e) {
+      setRatingError(e?.message || "No se pudo calificar");
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
 
   const onPickRenominated = () => {
     setRenominatedMsg("");
@@ -345,7 +405,32 @@ export default function PublicationDetailPage() {
                   >
                     Soporte
                   </Link>
+
+                  <button
+                    type="button"
+                    onClick={() => setRatingOpen(true)}
+                    disabled={!canRate || hasRated}
+                    className={`inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm ${
+                      !canRate
+                        ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                        : hasRated
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 cursor-not-allowed"
+                        : "bg-white hover:bg-slate-50"
+                    }`}
+                  >
+                    {hasRated ? "Calificado" : "Calificar"}
+                  </button>
                 </div>
+
+                {hasRated ? (
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                    <div className="font-semibold text-slate-700 mb-1">Tu calificación</div>
+                    <StarRating value={Number(myRating.stars || 0)} text={`${myRating.stars}/5`} size={14} />
+                    <div className="mt-1 text-slate-600">
+                      {myRating.comment || "Sin comentario"}
+                    </div>
+                  </div>
+                ) : null}
 
                 {/* Re-nominado (solo vendida + nominada) */}
                 {isSold && nominated ? (
@@ -462,6 +547,20 @@ export default function PublicationDetailPage() {
           <OrderChat orderId={order.id} onClose={() => setChatOpen(false)} />
         ) : null}
       </main>
+
+      <RatingModal
+        open={ratingOpen}
+        title="Calificar como vendedor"
+        onClose={() => {
+          if (!ratingSubmitting) {
+            setRatingOpen(false);
+            setRatingError("");
+          }
+        }}
+        onSubmit={handleSubmitRating}
+        submitting={ratingSubmitting}
+        error={ratingError}
+      />
     </div>
   );
 }
