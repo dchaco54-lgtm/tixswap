@@ -155,6 +155,17 @@ export default function MisPublicaciones() {
     return `$${val.toLocaleString("es-CL")}`;
   };
 
+  const fmtDate = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return new Intl.DateTimeFormat("es-CL", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(d);
+  };
+
   const computeSummary = (list) => {
     const summary = { total: list.length, active: 0, paused: 0, sold: 0 };
     for (const t of list) {
@@ -406,180 +417,145 @@ export default function MisPublicaciones() {
           </div>
         </div>
 
-        {/* Tabla */}
+        {/* Cards (estilo Mis compras) */}
         {filteredTickets.length === 0 ? (
           <div className="rounded-2xl border bg-white p-8 text-center text-gray-500 shadow-sm">
             No tienes publicaciones para mostrar.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border bg-white shadow-sm">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600">
-                <tr>
-                  <th className="p-4 text-left font-medium">Evento</th>
-                  <th className="p-4 text-left font-medium">Ubicación</th>
-                  <th className="p-4 text-left font-medium">Asiento</th>
-                  <th className="p-4 text-left font-medium">Precio</th>
-                  <th className="p-4 text-left font-medium">Estado</th>
-                  <th className="p-4 text-right font-medium">Acciones</th>
-                </tr>
-              </thead>
+          <div className="grid gap-4">
+            {filteredTickets.map((t) => {
+              const blocked = isBlocked(t);
+              const nominated = Boolean(t.is_nominated);
+              const blockedMsg =
+                t.status === "sold"
+                  ? "Vendida: edición bloqueada"
+                  : t.status === "locked"
+                  ? "Bloqueada: no editable"
+                  : t.status === "processing"
+                  ? "En proceso: no editable"
+                  : null;
 
-              <tbody>
-                {filteredTickets.map((t) => {
-                  const blocked = isBlocked(t);
-                  const nominated = Boolean(t.is_nominated);
-                  const upload = t.ticket_upload || null;
-                  const validationStatus = upload?.validation_status || upload?.status || null;
-                  const validationReason = upload?.validation_reason || null;
-                  const provider = upload?.provider || null;
-                  const originalName = upload?.original_name || null;
-                  const uploadedAt = upload?.created_at ? new Date(upload.created_at) : null;
-                  const blockedMsg =
-                    t.status === "sold"
-                      ? "Vendida: edición bloqueada"
-                      : t.status === "locked"
-                      ? "Bloqueada: no editable"
-                      : t.status === "processing"
-                      ? "En proceso: no editable"
-                      : null;
+              const eventLine = [
+                t.event?.city || null,
+                t.event?.venue || null,
+                t.event?.starts_at ? fmtDate(t.event.starts_at) : null,
+              ]
+                .filter(Boolean)
+                .join(" \u00b7 ");
 
-                  return (
-                    <tr
-                      key={t.id}
-                      className="border-t hover:bg-gray-50 transition"
-                    >
-                      <td className="p-4">
-                        <div className="font-semibold text-gray-900">
-                          {t.event?.title || "-"}
+              const seatLine = [
+                t.section ? `Sector ${t.section}` : null,
+                t.row ? `Fila ${t.row}` : null,
+                t.seat ? `Asiento ${t.seat}` : null,
+              ]
+                .filter(Boolean)
+                .join(" \u2022 ");
+
+              return (
+                <div key={t.id} className="rounded-2xl border bg-white p-5 shadow-sm">
+                  <div className="flex gap-4">
+                    <div className="w-24 h-24 rounded-xl overflow-hidden bg-slate-100 shrink-0">
+                      {t.event?.image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={t.event.image_url}
+                          alt={t.event?.title || "Evento"}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : null}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-lg font-semibold truncate">
+                            {t.event?.title || "Publicación"}
+                          </div>
+
+                          <div className="text-sm text-slate-600">
+                            {eventLine || "\u2014"}
+                          </div>
+
+                          <div className="text-sm text-slate-600 mt-1">
+                            {seatLine || "Sector \u2022 Fila \u2022 Asiento"}
+                          </div>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <StatusBadge status={t.status} />
+                            <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-slate-50 text-slate-700 border-slate-200">
+                              Nominada: {nominated ? "Sí" : "No"}
+                            </span>
+                            {blockedMsg ? (
+                              <span className="text-xs text-slate-500">{blockedMsg}</span>
+                            ) : null}
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-500">
-                          {t.event?.venue || "-"} — {t.event?.city || "-"}
-                        </div>
-                      </td>
 
-                      <td className="p-4 text-gray-800">
-                        {t.section || "-"} / Fila {t.row || "-"} / Asiento{" "}
-                        {t.seat || "-"}
-                      </td>
-
-                      <td className="p-4">
-                        <span className="inline-flex items-center rounded-lg border px-2 py-1 text-xs text-gray-700 bg-white">
-                          {(t.section || "-") +
-                            "-" +
-                            (t.row || "-") +
-                            "-" +
-                            (t.seat || "-")}
-                        </span>
-                      </td>
-
-                      <td className="p-4 font-semibold text-gray-900">
-                        {fmtCLP(t.price)}
-                      </td>
-
-                      <td className="p-4">
-                        <div className="flex flex-col gap-1">
-                          <StatusBadge status={t.status} />
-                          <span className="text-[11px] text-emerald-700">
-                            Nominada: {nominated ? "Sí ✅" : "No"}
-                          </span>
-                          {validationStatus && (
-                            <span className="text-[11px] text-slate-600">
-                              Validación: {validationStatus}
-                            </span>
-                          )}
-                          {validationReason && (
-                            <span className="text-[11px] text-amber-700">
-                              Motivo: {validationReason}
-                            </span>
-                          )}
-                          {provider && (
-                            <span className="text-[11px] text-slate-600">
-                              Proveedor: {provider}
-                            </span>
-                          )}
-                          {originalName && (
-                            <span className="text-[11px] text-slate-600">
-                              Archivo: {originalName}
-                            </span>
-                          )}
-                          {uploadedAt && (
-                            <span className="text-[11px] text-slate-600">
-                              Subido: {uploadedAt.toLocaleDateString("es-CL", { day: "2-digit" })}
-                            </span>
-                          )}
-                          {blockedMsg && (
-                            <span className="text-[11px] text-gray-500">
-                              {blockedMsg}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-
-                      <td className="p-4">
-                        <div className="flex items-center justify-end gap-2">
-                          {t.status === "sold" && t.sale_order?.id && (
-                            <Link
-                              href={`/dashboard/chat/${t.sale_order.id}`}
-                              className="px-3 py-2 rounded-xl text-sm border transition bg-white hover:bg-gray-50 text-gray-700"
-                              title="Ver chat con el comprador"
-                            >
-                              Ver chat
-                            </Link>
-                          )}
-                          <button
-                            onClick={() => onOpenEdit(t)}
-                            disabled={blocked}
-                            className={`px-3 py-2 rounded-xl text-sm border transition ${
-                              blocked
-                                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                                : "bg-white hover:bg-gray-50 text-gray-700"
-                            }`}
-                            title={blocked ? blockedMsg || "Bloqueado" : "Editar"}
+                        <div className="text-right shrink-0">
+                          <div className="text-xl font-semibold text-slate-900">
+                            {fmtCLP(t.price)}
+                          </div>
+                          <Link
+                            href={`/dashboard/publications/${t.id}`}
+                            className="inline-flex items-center justify-center mt-2 rounded-xl bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700"
                           >
-                            Editar
-                          </button>
-
-                          <button
-                            onClick={() => onTogglePause(t)}
-                            disabled={blocked}
-                            className={`px-3 py-2 rounded-xl text-sm border transition ${
-                              blocked
-                                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                                : t.status === "paused"
-                                ? "bg-white hover:bg-gray-50 text-gray-700"
-                                : "bg-white hover:bg-gray-50 text-gray-700"
-                            }`}
-                            title={
-                              blocked
-                                ? blockedMsg || "Bloqueado"
-                                : t.status === "paused"
-                                ? "Reanudar"
-                                : "Pausar"
-                            }
-                          >
-                            {t.status === "paused" ? "Reanudar" : "Pausar"}
-                          </button>
-
-                          <button
-                            onClick={() => onDelete(t)}
-                            disabled={blocked}
-                            className={`px-3 py-2 rounded-xl text-sm border transition ${
-                              blocked
-                                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                                : "bg-white hover:bg-red-50 text-red-600 border-red-200"
-                            }`}
-                            title={blocked ? blockedMsg || "Bloqueado" : "Eliminar"}
-                          >
-                            Eliminar
-                          </button>
+                            Ver más →
+                          </Link>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </div>
+
+                      <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-end">
+                        <button
+                          onClick={() => onOpenEdit(t)}
+                          disabled={blocked}
+                          className={`px-3 py-2 rounded-xl text-sm border transition ${
+                            blocked
+                              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                              : "bg-white hover:bg-gray-50 text-gray-700"
+                          }`}
+                          title={blocked ? blockedMsg || "Bloqueado" : "Editar"}
+                        >
+                          Editar
+                        </button>
+
+                        <button
+                          onClick={() => onTogglePause(t)}
+                          disabled={blocked}
+                          className={`px-3 py-2 rounded-xl text-sm border transition ${
+                            blocked
+                              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                              : "bg-white hover:bg-gray-50 text-gray-700"
+                          }`}
+                          title={
+                            blocked
+                              ? blockedMsg || "Bloqueado"
+                              : t.status === "paused"
+                              ? "Reanudar"
+                              : "Pausar"
+                          }
+                        >
+                          {t.status === "paused" ? "Reanudar" : "Pausar"}
+                        </button>
+
+                        <button
+                          onClick={() => onDelete(t)}
+                          disabled={blocked}
+                          className={`px-3 py-2 rounded-xl text-sm border transition ${
+                            blocked
+                              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                              : "bg-white hover:bg-red-50 text-red-600 border-red-200"
+                          }`}
+                          title={blocked ? blockedMsg || "Bloqueado" : "Eliminar"}
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 

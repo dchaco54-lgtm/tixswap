@@ -119,7 +119,9 @@ export async function GET(req, { params }) {
     // Buscar order (admin bypass RLS)
     const { data: order, error: oErr } = await admin
       .from("orders")
-      .select("id, buyer_id, seller_id, ticket_id, status, payment_state")
+      .select(
+        "id, buyer_id, seller_id, ticket_id, status, payment_state, renominated_storage_bucket, renominated_storage_path"
+      )
       .eq("id", orderId)
       .single();
 
@@ -145,6 +147,27 @@ export async function GET(req, { params }) {
         { error: "La orden aún no está pagada." },
         { status: 400 }
       );
+    }
+
+    // 0) Si existe PDF re-nominado, el comprador debe descargar ese.
+    if (order.renominated_storage_path) {
+      const bucket = order.renominated_storage_bucket || "ticket-pdfs";
+      const path = order.renominated_storage_path;
+
+      const { data: signed, error: sErr } = await admin.storage
+        .from(bucket)
+        .createSignedUrl(path, 60 * 10);
+
+      if (sErr || !signed?.signedUrl) {
+        return NextResponse.json(
+          { error: sErr?.message || "No se pudo firmar el PDF" },
+          { status: 500 }
+        );
+      }
+
+      const res = NextResponse.redirect(signed.signedUrl, 302);
+      res.headers.set("Cache-Control", "no-store");
+      return res;
     }
 
     const resolved = await resolvePdfForTicket(admin, order.ticket_id);
