@@ -1,45 +1,43 @@
-# TixSwap – AI Operating Rules (AGENTS.md)
+# TixSwap – Reglas de trabajo del agente (AGENTS)
 
-## Idioma y tono
-- Responde SIEMPRE en español (Chile), directo, sin relleno.
-- Si hay ambigüedad, asume lo más probable y ofrece 1 alternativa (no 10).
+## Idioma / tono
+- Español (Chile), directo, sin humo.
 
-## Estilo de trabajo (lo más importante)
-- NO reescribas archivos enteros “porque sí”.
-- Preferir cambios mínimos: editar líneas puntuales, mantener firmas, mantener el shape de respuestas.
-- Si un endpoint ya funciona, NO cambies su contract (shape) sin dejar retrocompatibilidad.
-- Antes de tocar BD, SIEMPRE verificar con information_schema / queries de inspección.
+## Objetivo Nº1 (anti-rupturas)
+- NO romper endpoints existentes (misma forma del JSON).
+- Cambios mínimos: editar líneas puntuales, NO reescrituras masivas.
+- Si hay duda, primero INSPECCIÓN (queries, grep, revisar schema) antes de codear.
+- Nunca inventar campos/tablas: si no existe en schema.json, se pregunta o se inspecciona.
 
-## Output esperado (cómo debes entregar cambios)
-1) Qué archivo(s) tocar (rutas exactas)
-2) Qué cambia (bullet points)
-3) Patch/diff o edición precisa (sin inventar)
-4) Comandos a correr (npm run build, etc.)
-5) Qué revisar en UI / endpoints (checklist)
+## Quality gate (bloqueante)
+- CERO errores ESLint/TS en build de Vercel.
+- Variables no usadas = build roto. Se arregla sí o sí.
 
-## Reglas de calidad (anti-parto)
-- Cero ESLint errors en build. Evitar variables no usadas.
-- Nunca introducir secretos en el repo:
-  - NO commitear `.env.local`
-  - Sí commitear `.env.local.example`
-- Siempre mantener `.gitignore` sano (NO ignorar `*.ts` globalmente).
-- Si agregas columnas en Supabase: incluye SQL de migración + validación SELECT.
+## Seguridad
+- Nunca commitear .env.local ni claves.
+- Solo .env.local.example con nombres de variables, sin valores.
 
-## Next.js / App Router
-- Rutas API: `app/api/**/route.(js|ts)`
-- Respuestas deben ser JSON consistente:
-  - `200` ok
-  - `401` no auth
-  - `500` error interno con mensaje claro
-- No romper endpoints críticos:
-  - `/api/tickets/my-publications` debe devolver `{ tickets: [], summary: {total, active, paused, sold} }`
+## Zonas intocables (salvo orden explícita)
+- app/api/payments/** y todo Webpay/BancoChile: NO tocar si funciona.
+- Si hay que tocarlo: cambios mínimos y con checklist de regresión.
 
-## Supabase
-- Client components: solo `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- Service role SOLO en server (route handlers/utilities server). Nunca en "use client".
-- Si falta env var en build/local:
-  - manejarlo dentro del handler (lazy) y responder 500 JSON claro.
+## Regla especial: “Mis publicaciones”
+- /api/tickets/my-publications debe:
+  - filtrar por seller_id del usuario autenticado
+  - retornar tickets + event + ticket_upload (si existe)
+  - mantener summary {total, active, paused, sold}
+- Si ticket_upload_id está null, el endpoint debe seguir funcionando (ticket_upload = null, is_nominated = false).
 
-## Commit / Deploy
-- Commits chicos, mensaje claro: `fix: ...`, `chore: ...`, `feat: ...`
-- Antes de push: `npm run build` (y si existe, `npm run lint`)
+## Regla especial: “Nominadas”
+- La verdad está en ticket_uploads (is_nominated / is_nominada).
+- tickets.ticket_upload_id es el vínculo.
+- is_nominated que consume el front debe salir “normalizado”:
+  - ticket_upload?.is_nominated ?? ticket_upload?.is_nominada ?? false
+
+## Formato obligatorio de entrega cuando se implementa algo
+1) Archivos exactos a tocar
+2) Qué cambia (bullets)
+3) Patch/diff preciso
+4) Comandos a correr (npm run build)
+5) Checklist final (UI + endpoint + prod)
+
