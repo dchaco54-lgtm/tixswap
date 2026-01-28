@@ -11,3 +11,4 @@ applyTo: "**"
 - Si falta data (relación null / columna inexistente / env var): responder seguro (null/false) y mensaje claro; nunca reventar build.
 - Nunca commitear secretos: nada de passwords/keys en .vscode/, .env.local, etc. Solo .env.local.example.
 - Siempre evitar ESLint build-breakers (unused vars, etc.).
+- Lee docs/AI_WORKFLOW.md antes de proponer cambios.
