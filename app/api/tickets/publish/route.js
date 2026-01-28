@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
+import { detectTicketColumns } from '@/lib/db/ticketSchema';
 
 export async function POST(request) {
   try {
@@ -30,7 +31,7 @@ export async function POST(request) {
 
     // Ahora leemos el body (sin userId)
     const body = await request.json();
-    const { eventId, sector, fila, asiento, price } = body || {};
+    const { eventId, sector, fila, asiento, price, ticketUploadId } = body || {};
 
     console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento, sellerId });
 
@@ -60,6 +61,27 @@ export async function POST(request) {
       isFreeOrAdmin: userRole === 'free' || userRole === 'admin'
     });
 
+    let upload = null;
+    if (ticketUploadId) {
+      const { data: uploadRow, error: uploadErr } = await supabase
+        .from('ticket_uploads')
+        .select(
+          'id,seller_id,is_nominated,is_nominada,storage_bucket,storage_path,original_name,mime_type,file_size,validation_status,validation_reason,provider'
+        )
+        .eq('id', ticketUploadId)
+        .maybeSingle();
+
+      if (uploadErr) {
+        return NextResponse.json({ error: uploadErr.message }, { status: 500 });
+      }
+
+      if (!uploadRow || uploadRow.seller_id !== sellerId) {
+        return NextResponse.json({ error: 'ticketUploadId inválido' }, { status: 400 });
+      }
+
+      upload = uploadRow;
+    }
+
     const insertPayload = {
       event_id: eventId,
       seller_id: sellerId,
@@ -76,6 +98,19 @@ export async function POST(request) {
       row_label: fila || null,
       seat_label: asiento || null,
     };
+
+    if (upload) {
+      const columns = await detectTicketColumns(supabase);
+
+      // Si tu tabla aún no tiene ticket_upload_id, ver docs/ticket_upload_id.sql
+      if (columns.has('ticket_upload_id')) insertPayload.ticket_upload_id = upload.id;
+      if (columns.has('upload_bucket')) insertPayload.upload_bucket = upload.storage_bucket ?? null;
+      if (columns.has('upload_path')) insertPayload.upload_path = upload.storage_path ?? null;
+
+      const nominated = upload.is_nominated ?? upload.is_nominada ?? false;
+      if (columns.has('is_nominated')) insertPayload.is_nominated = nominated;
+      if (columns.has('is_nominada')) insertPayload.is_nominada = nominated;
+    }
 
     const { data: created, error: insertErr } = await supabase
       .from('tickets')

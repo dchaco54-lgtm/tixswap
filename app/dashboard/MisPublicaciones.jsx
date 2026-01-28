@@ -416,6 +416,7 @@ export default function MisPublicaciones() {
               <tbody>
                 {filteredTickets.map((t) => {
                   const blocked = isBlocked(t);
+                  const nominated = Boolean(t.is_nominated);
                   const blockedMsg =
                     t.status === "sold"
                       ? "Vendida: edición bloqueada"
@@ -461,6 +462,11 @@ export default function MisPublicaciones() {
                       <td className="p-4">
                         <div className="flex flex-col gap-1">
                           <StatusBadge status={t.status} />
+                          {nominated && (
+                            <span className="text-[11px] text-emerald-700">
+                              Nominada ✅
+                            </span>
+                          )}
                           {blockedMsg && (
                             <span className="text-[11px] text-gray-500">
                               {blockedMsg}
@@ -689,7 +695,6 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
-
 
 
 

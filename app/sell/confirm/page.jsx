@@ -225,6 +225,13 @@ export default function SellConfirmPage() {
         return;
       }
 
+      let ticketUploadId = null;
+      try {
+        const rawDraft = localStorage.getItem(DRAFT_KEY);
+        const parsedDraft = rawDraft ? JSON.parse(rawDraft) : {};
+        ticketUploadId = parsedDraft?.ticketUpload?.ticketUploadId || null;
+      } catch {}
+
       const payload = {
         eventId: selectedEvent?.id,
         price: Number(String(price).replace(/[^\d]/g, "")),
@@ -233,6 +240,7 @@ export default function SellConfirmPage() {
         sector: draft?.sector || null,
         fila: draft?.fila || null,
         asiento: draft?.asiento || null,
+        ticketUploadId,
       };
 
       console.log('[Confirm] Enviando payload:', payload);
