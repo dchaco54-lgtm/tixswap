@@ -8,3 +8,6 @@
 ## DB truth
 - Nominadas: ticket_uploads.is_nominated / is_nominada
 - Link: tickets.ticket_upload_id -> ticket_uploads.id
+
+## Logs de fixes
+- Ver `docs/BUGFIX_LOG.md` para histórico de incidentes y soluciones.
