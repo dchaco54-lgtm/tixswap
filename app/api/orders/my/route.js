@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { detectTicketColumns } from "@/lib/db/ticketSchema";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -44,15 +45,49 @@ export async function GET() {
     const ticketIds = [...new Set(mine.map((o) => o.ticket_id).filter(Boolean))];
     let ticketsById = {};
     if (ticketIds.length) {
+      const ticketCols = await detectTicketColumns(admin);
+      let ticketSelect = "id, event_id, sector, row_label, seat_label, section_label, price, original_price, sale_type, status, currency";
+      if (ticketCols.has("ticket_upload_id")) ticketSelect += ", ticket_upload_id";
+      if (ticketCols.has("ticket_uploads_id")) ticketSelect += ", ticket_uploads_id";
+      if (ticketCols.has("is_nominated")) ticketSelect += ", is_nominated";
+      if (ticketCols.has("is_nominada")) ticketSelect += ", is_nominada";
+
       const { data: tickets, error: tErr } = await admin
         .from("tickets")
-        .select("id, event_id, sector, row_label, seat_label, section_label, price, original_price, sale_type, status, currency")
+        .select(ticketSelect)
         .in("id", ticketIds);
 
       if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
 
+      const uploadsIds = Array.from(
+        new Set(
+          (tickets || [])
+            .map((t) => t.ticket_upload_id || t.ticket_uploads_id)
+            .filter(Boolean)
+        )
+      );
+      let uploadMap = {};
+      if (uploadsIds.length) {
+        const { data: uploads } = await admin
+          .from("ticket_uploads")
+          .select("id, is_nominated, is_nominada")
+          .in("id", uploadsIds);
+        if (Array.isArray(uploads)) {
+          uploadMap = Object.fromEntries(uploads.map((u) => [u.id, u]));
+        }
+      }
+
       ticketsById = (tickets || []).reduce((acc, t) => {
-        acc[t.id] = t;
+        const uploadId = t.ticket_upload_id || t.ticket_uploads_id;
+        const upload = uploadId ? uploadMap[uploadId] : null;
+        const nominated = Boolean(
+          t.is_nominated ??
+          t.is_nominada ??
+          upload?.is_nominated ??
+          upload?.is_nominada ??
+          false
+        );
+        acc[t.id] = { ...t, is_nominated: nominated };
         return acc;
       }, {});
     }
@@ -129,6 +164,5 @@ export async function GET() {
     return NextResponse.json({ error: e?.message || "Unknown error" }, { status: 500 });
   }
 }
-
 
 

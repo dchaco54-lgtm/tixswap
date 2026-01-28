@@ -337,6 +337,11 @@ export default function PublicationDetailPage() {
 
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                   <div className="absolute bottom-0 left-0 right-0 p-5 text-white">
+                    {nominated ? (
+                      <span className="mb-2 inline-flex items-center rounded-full border border-amber-200/60 bg-amber-50/90 px-3 py-1 text-xs font-semibold text-amber-900 shadow-sm">
+                        ⭐ Entrada nominada
+                      </span>
+                    ) : null}
                     <div className="text-xl font-semibold">
                       {ticket.event?.title || "Evento"}
                     </div>
@@ -365,9 +370,15 @@ export default function PublicationDetailPage() {
                   </div>
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-slate-50 text-slate-700 border-slate-200">
-                      Nominada: {nominated ? "Sí" : "No"}
-                    </span>
+                    {nominated ? (
+                      <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-amber-50 text-amber-800 border-amber-200">
+                        ⭐ Nominada
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-slate-50 text-slate-600 border-slate-200">
+                        No nominada
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

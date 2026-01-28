@@ -482,10 +482,17 @@ export default function MisPublicaciones() {
                           </div>
 
                           <div className="mt-3 flex flex-wrap items-center gap-2">
+                            {nominated ? (
+                              <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-amber-50 text-amber-800 border-amber-200">
+                                ⭐ Nominada
+                              </span>
+                            ) : null}
                             <StatusBadge status={t.status} />
-                            <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-slate-50 text-slate-700 border-slate-200">
-                              Nominada: {nominated ? "Sí" : "No"}
-                            </span>
+                            {!nominated ? (
+                              <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-slate-50 text-slate-600 border-slate-200">
+                                No nominada
+                              </span>
+                            ) : null}
                             {blockedMsg ? (
                               <span className="text-xs text-slate-500">{blockedMsg}</span>
                             ) : null}

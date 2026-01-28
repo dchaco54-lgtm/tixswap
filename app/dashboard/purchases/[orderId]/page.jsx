@@ -92,6 +92,16 @@ export default function PurchaseDetailPage() {
   const pdfHref = order ? `/api/orders/${order.id}/pdf` : "#";
   const canRate = String(t?.status || "").toLowerCase() === "sold";
   const hasRated = Boolean(myRating?.id);
+  const isNominated = Boolean(
+    order?.renominated_storage_path ||
+      t?.is_nominated ||
+      t?.is_nominada ||
+      String(t?.sale_type || "").toLowerCase().includes("nomin")
+  );
+  const hoursToEvent = e?.starts_at
+    ? (new Date(e.starts_at).getTime() - Date.now()) / (1000 * 60 * 60)
+    : null;
+  const isUrgent = isNominated && !order?.renominated_storage_path && hoursToEvent !== null && hoursToEvent <= 48 && hoursToEvent > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -230,6 +240,33 @@ export default function PurchaseDetailPage() {
               <div className="text-sm text-slate-600 mb-4">
                 Descarga tu entrada y contacta al vendedor cuando quieras.
               </div>
+
+              {isNominated ? (
+                <div
+                  className={`mb-3 rounded-xl border px-3 py-2 text-xs ${
+                    isUrgent
+                      ? "border-red-200 bg-red-50 text-red-800"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-base leading-none">⚠️</span>
+                    <div>
+                      <span className="font-semibold">Entrada nominada.</span>{" "}
+                      El vendedor tiene hasta 5 días para subir el PDF re-nominado.
+                      <span className="block mt-1">
+                        Puedes escribirle por el chat y descargar la nueva entrada cuando esté lista.
+                      </span>
+                      {isUrgent ? (
+                        <span className="block mt-1">
+                          Faltan menos de 48 horas para el evento. Si no recibes la re-nominación,
+                          contacta a Soporte para evaluar la cancelación.
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <a

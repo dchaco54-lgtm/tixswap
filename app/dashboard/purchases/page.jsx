@@ -127,12 +127,17 @@ export default function PurchasesPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${badge.className}`}>
                       {badge.text}
                       <span className="text-slate-400">·</span>
                       <span className="text-slate-500">{formatDate(o.created_at)}</span>
                     </span>
+                    {t?.is_nominated ? (
+                      <span className="inline-flex items-center rounded-full border px-3 py-1 text-xs bg-amber-50 text-amber-800 border-amber-200">
+                        Nominada
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -143,5 +148,4 @@ export default function PurchasesPage() {
     </div>
   );
 }
-
 
