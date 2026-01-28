@@ -53,6 +53,7 @@ export default function PublicationDetailPage() {
   const [chatOpen, setChatOpen] = useState(false);
   const [renominatedUploading, setRenominatedUploading] = useState(false);
   const [renominatedMsg, setRenominatedMsg] = useState("");
+  const [renominatedStatus, setRenominatedStatus] = useState(null);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [ratingError, setRatingError] = useState("");
@@ -160,6 +161,7 @@ export default function PublicationDetailPage() {
   const summaryTotal = Number(summaryEntry || 0) + Number(summaryFee || 0);
   const canRate = isSold && !!order?.id;
   const hasRated = Boolean(myRating?.id);
+  const hasRenominated = Boolean(order?.renominated_storage_path);
 
   const pdfHref = ticket
     ? isSold && order?.id
@@ -168,6 +170,15 @@ export default function PublicationDetailPage() {
     : "#";
 
   const canUploadRenominated = Boolean(isSold && nominated && order?.id && !renominatedUploading);
+
+  useEffect(() => {
+    if (!renominatedMsg) return;
+    const t = setTimeout(() => {
+      setRenominatedMsg("");
+      setRenominatedStatus(null);
+    }, 3500);
+    return () => clearTimeout(t);
+  }, [renominatedMsg]);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,12 +273,14 @@ export default function PublicationDetailPage() {
       if (!res.ok) throw new Error(json?.error || json?.details || "No se pudo subir el PDF renominado.");
 
       setRenominatedMsg("PDF re-nominado subido ✅");
+      setRenominatedStatus("ok");
       // refrescar estado de orden (para que el comprador descargue el nuevo)
       const oRes = await fetch(`/api/orders/by-ticket/${id}?ts=${Date.now()}`, { cache: "no-store" });
       const oJson = await oRes.json().catch(() => ({}));
       if (oRes.ok) setOrder(oJson?.order || null);
     } catch (err) {
       setRenominatedMsg(err?.message || "No se pudo subir el PDF renominado.");
+      setRenominatedStatus("error");
     } finally {
       setRenominatedUploading(false);
     }
@@ -373,7 +386,13 @@ export default function PublicationDetailPage() {
                 ) : null}
 
                 {renominatedMsg ? (
-                  <div className="mb-3 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  <div
+                    className={`mb-3 text-sm rounded-lg px-3 py-2 border ${
+                      renominatedStatus === "error"
+                        ? "text-red-700 bg-red-50 border-red-200"
+                        : "text-emerald-700 bg-emerald-50 border-emerald-200"
+                    }`}
+                  >
                     {renominatedMsg}
                   </div>
                 ) : null}
@@ -435,6 +454,23 @@ export default function PublicationDetailPage() {
                 {/* Re-nominado (solo vendida + nominada) */}
                 {isSold && nominated ? (
                   <div className="mt-4">
+                    <div className="mb-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      <div className="flex items-start gap-2">
+                        <span className="text-base leading-none">⚠️</span>
+                        <div>
+                          Debes subir el PDF re-nominado dentro de 5 días.
+                          {hasRenominated ? (
+                            <span className="block mt-1">
+                              Ya subiste uno. Si necesitas corregirlo, puedes cargar uno nuevo.
+                            </span>
+                          ) : (
+                            <span className="block mt-1">
+                              Este archivo reemplazará el anterior para el comprador.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -446,11 +482,17 @@ export default function PublicationDetailPage() {
                       type="button"
                       onClick={onPickRenominated}
                       disabled={!canUploadRenominated}
-                      className={`inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm hover:bg-slate-50 ${
-                        canUploadRenominated ? "" : "opacity-50 cursor-not-allowed"
+                      className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm text-white ${
+                        canUploadRenominated
+                          ? "bg-blue-600 hover:bg-blue-700"
+                          : "bg-slate-300 cursor-not-allowed"
                       }`}
                     >
-                      {renominatedUploading ? "Subiendo..." : "Subir PDF re-nominado"}
+                      {renominatedUploading
+                        ? "Subiendo..."
+                        : hasRenominated
+                        ? "Cargar nuevo PDF"
+                        : "Subir PDF re-nominado"}
                     </button>
                   </div>
                 ) : null}
