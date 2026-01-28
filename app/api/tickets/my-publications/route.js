@@ -30,13 +30,13 @@ export async function GET(request) {
     const envError = getEnvErrorResponse();
     if (envError) return envError;
 
-    const authHeader = request.headers.get("authorization");
     const supabaseAuth = createRouteHandlerClient({ cookies });
+    const service = supabaseServiceOptional();
+    const authHeader = request.headers.get("authorization");
     let user = null;
 
     if (authHeader?.startsWith("Bearer ")) {
       const token = authHeader.replace("Bearer ", "");
-      const service = supabaseServiceOptional();
       const authDb = service || supabaseAuth;
       const { data: authData, error: authErr } = await authDb.auth.getUser(token);
       if (authErr || !authData?.user) {
@@ -51,7 +51,6 @@ export async function GET(request) {
       user = authData.user;
     }
 
-    const service = supabaseServiceOptional();
     const db = service || supabaseAuth;
 
     const columns = await detectTicketColumns(db);
@@ -70,13 +69,17 @@ export async function GET(request) {
       );
     }
 
-    const uploadIds = Array.from(
-      new Set(
-        (ticketRows || [])
-          .map((t) => t.ticket_upload_id || t.ticket_uploads_id || null)
-          .filter(Boolean)
-      )
-    );
+    const canJoinUploads =
+      columns.has("ticket_upload_id") || columns.has("ticket_uploads_id");
+    const uploadIds = canJoinUploads
+      ? Array.from(
+          new Set(
+            (ticketRows || [])
+              .map((t) => t.ticket_upload_id || t.ticket_uploads_id || null)
+              .filter(Boolean)
+          )
+        )
+      : [];
 
     let uploadsMap = {};
     if (uploadIds.length) {
@@ -97,7 +100,7 @@ export async function GET(request) {
     const tickets = (ticketRows || []).map((t) => {
       const uploadId = t.ticket_upload_id || t.ticket_uploads_id || null;
       const ticketUpload = uploadId ? uploadsMap[uploadId] ?? null : null;
-      if (uploadId && !ticketUpload) {
+      if (uploadId && !ticketUpload && process.env.NODE_ENV !== "production") {
         console.warn("[my-publications] ticket_upload no encontrado:", {
           ticketId: t.id,
           uploadId,

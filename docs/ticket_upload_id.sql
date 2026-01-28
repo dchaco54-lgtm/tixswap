@@ -5,3 +5,5 @@ ALTER TABLE public.tickets
   FOREIGN KEY (ticket_upload_id) REFERENCES public.ticket_uploads(id)
   ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS tickets_ticket_upload_id_idx ON public.tickets(ticket_upload_id);
+CREATE UNIQUE INDEX IF NOT EXISTS tickets_ticket_upload_id_unique
+  ON public.tickets(ticket_upload_id) WHERE ticket_upload_id IS NOT NULL;
