@@ -20,42 +20,43 @@ export async function GET() {
 
   try {
     const columns = await detectTicketColumns(supabase);
-    const selectStr = buildTicketSelect(columns);
+    const baseSelect = buildTicketSelect(columns);
+    const selectWithUpload = `${baseSelect}, ticket_upload:ticket_uploads (
+      id,
+      is_nominated,
+      is_nominada,
+      provider,
+      storage_bucket,
+      storage_path,
+      original_name,
+      file_size,
+      mime_type,
+      validation_status,
+      status
+    )`;
 
-    const { data, error } = await supabase
+    let data = null;
+    const { data: dataWithUpload, error: withUploadErr } = await supabase
       .from("tickets")
-      .select(selectStr)
+      .select(selectWithUpload)
       .eq("seller_id", user.id)
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    if (withUploadErr) {
+      console.error("[my-publications] embed ticket_uploads error:", withUploadErr);
+      const { data: fallbackData, error: fallbackErr } = await supabase
+        .from("tickets")
+        .select(baseSelect)
+        .eq("seller_id", user.id)
+        .order("created_at", { ascending: false });
 
-    const uploadIds = Array.from(
-      new Set(
-        (data || [])
-          .map((t) => t.ticket_upload_id || t.ticket_uploads_id || null)
-          .filter(Boolean)
-      )
-    );
-
-    let uploadsMap = {};
-    if (uploadIds.length) {
-      const { data: uploads, error: uploadsErr } = await supabase
-        .from("ticket_uploads")
-        .select(
-          "id,is_nominated,is_nominada,provider,storage_bucket,storage_path,original_name,mime_type,file_size,validation_status,validation_reason,status,created_at"
-        )
-        .in("id", uploadIds);
-
-      if (uploadsErr) throw uploadsErr;
-      uploadsMap = Object.fromEntries((uploads || []).map((u) => [u.id, u]));
+      if (fallbackErr) throw fallbackErr;
+      data = fallbackData;
+    } else {
+      data = dataWithUpload;
     }
 
-    const tickets = (data || []).map((t) => {
-      const uploadId = t.ticket_upload_id || t.ticket_uploads_id || null;
-      const withUpload = { ...t, ticket_upload: uploadsMap[uploadId] ?? null };
-      return normalizeTicket(withUpload, columns);
-    });
+    const tickets = (data || []).map((t) => normalizeTicket(t));
 
     return NextResponse.json({ tickets }, { status: 200 });
   } catch (err) {

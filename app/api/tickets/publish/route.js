@@ -102,8 +102,7 @@ export async function POST(request) {
     if (upload) {
       const columns = await detectTicketColumns(supabase);
 
-      // Si tu tabla aún no tiene ticket_upload_id, ver docs/ticket_upload_id.sql
-      if (columns.has('ticket_upload_id')) insertPayload.ticket_upload_id = upload.id;
+      insertPayload.ticket_upload_id = ticketUploadId;
       if (columns.has('upload_bucket')) insertPayload.upload_bucket = upload.storage_bucket ?? null;
       if (columns.has('upload_path')) insertPayload.upload_path = upload.storage_path ?? null;
 

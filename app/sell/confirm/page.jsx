@@ -225,12 +225,7 @@ export default function SellConfirmPage() {
         return;
       }
 
-      let ticketUploadId = null;
-      try {
-        const rawDraft = localStorage.getItem(DRAFT_KEY);
-        const parsedDraft = rawDraft ? JSON.parse(rawDraft) : {};
-        ticketUploadId = parsedDraft?.ticketUpload?.ticketUploadId || null;
-      } catch {}
+      const ticketUploadId = draft?.ticketUpload?.ticketUploadId ?? null;
 
       const payload = {
         eventId: selectedEvent?.id,
