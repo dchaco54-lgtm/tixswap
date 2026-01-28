@@ -417,6 +417,12 @@ export default function MisPublicaciones() {
                 {filteredTickets.map((t) => {
                   const blocked = isBlocked(t);
                   const nominated = Boolean(t.is_nominated);
+                  const upload = t.ticket_upload || null;
+                  const validationStatus = upload?.validation_status || upload?.status || null;
+                  const validationReason = upload?.validation_reason || null;
+                  const provider = upload?.provider || null;
+                  const originalName = upload?.original_name || null;
+                  const uploadedAt = upload?.created_at ? new Date(upload.created_at) : null;
                   const blockedMsg =
                     t.status === "sold"
                       ? "Vendida: edición bloqueada"
@@ -462,9 +468,32 @@ export default function MisPublicaciones() {
                       <td className="p-4">
                         <div className="flex flex-col gap-1">
                           <StatusBadge status={t.status} />
-                          {nominated && (
-                            <span className="text-[11px] text-emerald-700">
-                              Nominada ✅
+                          <span className="text-[11px] text-emerald-700">
+                            Nominada: {nominated ? "Sí ✅" : "No"}
+                          </span>
+                          {validationStatus && (
+                            <span className="text-[11px] text-slate-600">
+                              Validación: {validationStatus}
+                            </span>
+                          )}
+                          {validationReason && (
+                            <span className="text-[11px] text-amber-700">
+                              Motivo: {validationReason}
+                            </span>
+                          )}
+                          {provider && (
+                            <span className="text-[11px] text-slate-600">
+                              Proveedor: {provider}
+                            </span>
+                          )}
+                          {originalName && (
+                            <span className="text-[11px] text-slate-600">
+                              Archivo: {originalName}
+                            </span>
+                          )}
+                          {uploadedAt && (
+                            <span className="text-[11px] text-slate-600">
+                              Subido: {uploadedAt.toLocaleDateString("es-CL", { day: "2-digit" })}
                             </span>
                           )}
                           {blockedMsg && (
@@ -695,6 +724,3 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
-
-
-
