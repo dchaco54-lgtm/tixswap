@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
-import DashboardSidebar from "../../components/DashboardSidebar";
 import OrderChat from "@/app/components/OrderChat";
 import { createClient } from "@/lib/supabase/client";
 
@@ -150,6 +149,9 @@ export default function PublicationDetailPage() {
   const isSold = String(ticket?.status || "").toLowerCase() === "sold";
   const canEdit = !!ticket && !["sold", "locked", "processing"].includes(ticket.status);
   const nominated = Boolean(ticket?.is_nominated);
+  const summaryTotal = isSold && order ? order.total_amount : (ticket?.price ?? 0);
+  const summaryEntry = isSold && order ? order.ticket_price : (ticket?.price ?? 0);
+  const summaryFee = isSold && order ? order.platform_fee : (ticket?.platform_fee ?? 0);
 
   const pdfHref = ticket
     ? isSold && order?.id
@@ -213,7 +215,6 @@ export default function PublicationDetailPage() {
 
   return (
     <div className="flex min-h-screen bg-[#f4f7ff]">
-      <DashboardSidebar />
       <main className="flex-1 tix-container py-10">
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -416,35 +417,20 @@ export default function PublicationDetailPage() {
             {/* Sidebar */}
             <div className="space-y-6">
               <div className="rounded-2xl border bg-white p-5 shadow-sm">
-                <div className="text-lg font-semibold mb-3">Resumen</div>
+                <div className="text-base font-semibold text-slate-900 mb-2">Resumen</div>
 
                 <div className="flex items-center justify-between py-2 text-sm">
-                  <span className="text-slate-600">Precio</span>
-                  <span className="font-semibold">{formatCLP(ticket.price)}</span>
+                  <span className="text-slate-600">Total</span>
+                  <span className="font-semibold">{formatCLP(summaryTotal)}</span>
                 </div>
-
-                {isSold && order ? (
-                  <>
-                    <div className="flex items-center justify-between py-2 text-sm">
-                      <span className="text-slate-600">Total</span>
-                      <span className="font-semibold">
-                        {formatCLP(order.total_amount)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between py-2 text-sm">
-                      <span className="text-slate-600">Entrada</span>
-                      <span className="font-medium">
-                        {formatCLP(order.ticket_price)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between py-2 text-sm">
-                      <span className="text-slate-600">Fee</span>
-                      <span className="font-medium">
-                        {formatCLP(order.platform_fee)}
-                      </span>
-                    </div>
-                  </>
-                ) : null}
+                <div className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-slate-600">Entrada</span>
+                  <span className="font-medium">{formatCLP(summaryEntry)}</span>
+                </div>
+                <div className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-slate-600">Fee</span>
+                  <span className="font-medium">{formatCLP(summaryFee)}</span>
+                </div>
               </div>
 
               {isSold && order ? (
@@ -452,10 +438,6 @@ export default function PublicationDetailPage() {
                   <div className="text-lg font-semibold mb-3">Comprador</div>
                   <div className="text-sm">
                     <div className="font-semibold">{order.buyer_name || "Comprador"}</div>
-                    <div className="text-slate-600">{order.buyer_email || ""}</div>
-                    <div className="text-slate-500 text-xs mt-1">
-                      RUT: {order.buyer_rut || "-"}
-                    </div>
                   </div>
 
                   <div className="mt-4">

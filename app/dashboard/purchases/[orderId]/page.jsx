@@ -212,7 +212,7 @@ export default function PurchaseDetailPage() {
           {/* Sidebar */}
           <div className="space-y-6">
             <div className="rounded-2xl border bg-white p-5 shadow-sm">
-              <div className="text-lg font-semibold mb-3">Resumen</div>
+              <div className="text-base font-semibold text-slate-900 mb-2">Resumen</div>
 
               <div className="flex items-center justify-between py-2 text-sm">
                 <span className="text-slate-600">Total</span>
@@ -241,10 +241,6 @@ export default function PurchaseDetailPage() {
               <div className="text-lg font-semibold mb-3">Vendedor</div>
               <div className="text-sm">
                 <div className="font-semibold">{t?.seller_name || "Vendedor"}</div>
-                <div className="text-slate-600">{t?.seller_email || ""}</div>
-                <div className="text-slate-500 text-xs mt-1">
-                  RUT: {t?.seller_rut || "-"}
-                </div>
               </div>
 
               <div className="mt-4">
