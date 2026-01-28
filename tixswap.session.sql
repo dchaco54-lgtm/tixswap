@@ -1,0 +1,1 @@
+select now() as db_time, current_user;
