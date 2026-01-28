@@ -149,9 +149,9 @@ export default function PublicationDetailPage() {
   const isSold = String(ticket?.status || "").toLowerCase() === "sold";
   const canEdit = !!ticket && !["sold", "locked", "processing"].includes(ticket.status);
   const nominated = Boolean(ticket?.is_nominated);
-  const summaryTotal = isSold && order ? order.total_amount : (ticket?.price ?? 0);
   const summaryEntry = isSold && order ? order.ticket_price : (ticket?.price ?? 0);
   const summaryFee = isSold && order ? order.platform_fee : (ticket?.platform_fee ?? 0);
+  const summaryTotal = Number(summaryEntry || 0) + Number(summaryFee || 0);
 
   const pdfHref = ticket
     ? isSold && order?.id
