@@ -96,7 +96,14 @@ export async function GET(request) {
 
     const tickets = (ticketRows || []).map((t) => {
       const uploadId = t.ticket_upload_id || t.ticket_uploads_id || null;
-      const withUpload = { ...t, ticket_upload: uploadsMap[uploadId] ?? null };
+      const ticketUpload = uploadId ? uploadsMap[uploadId] ?? null : null;
+      if (uploadId && !ticketUpload) {
+        console.warn("[my-publications] ticket_upload no encontrado:", {
+          ticketId: t.id,
+          uploadId,
+        });
+      }
+      const withUpload = { ...t, ticket_upload: ticketUpload };
       return normalizeTicket(withUpload);
     });
     const summary = computeSummary(tickets);
