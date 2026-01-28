@@ -225,8 +225,6 @@ export default function SellConfirmPage() {
         return;
       }
 
-      const ticketUploadId = draft?.ticketUpload?.ticketUploadId ?? null;
-
       const payload = {
         eventId: selectedEvent?.id,
         price: Number(String(price).replace(/[^\d]/g, "")),
@@ -235,7 +233,7 @@ export default function SellConfirmPage() {
         sector: draft?.sector || null,
         fila: draft?.fila || null,
         asiento: draft?.asiento || null,
-        ticketUploadId,
+        ticketUploadId: draft?.ticketUpload?.ticketUploadId ?? null,
       };
 
       console.log('[Confirm] Enviando payload:', payload);

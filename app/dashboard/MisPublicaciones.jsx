@@ -97,9 +97,10 @@ export default function MisPublicaciones() {
       }
 
       const data = await res.json();
-      setTickets(data.tickets || []);
+      const nextTickets = data.tickets || [];
+      setTickets(nextTickets);
       setSummary(
-        data.summary || { total: 0, active: 0, paused: 0, sold: 0 }
+        data.summary || computeSummary(nextTickets)
       );
     } catch (err) {
       console.error("MisPublicaciones error:", err);
@@ -152,6 +153,17 @@ export default function MisPublicaciones() {
   const fmtCLP = (n) => {
     const val = Number(n || 0);
     return `$${val.toLocaleString("es-CL")}`;
+  };
+
+  const computeSummary = (list) => {
+    const summary = { total: list.length, active: 0, paused: 0, sold: 0 };
+    for (const t of list) {
+      const status = (t?.status || "").toLowerCase();
+      if (status === "active") summary.active += 1;
+      else if (status === "paused") summary.paused += 1;
+      else if (status === "sold") summary.sold += 1;
+    }
+    return summary;
   };
 
   /** =========================================================

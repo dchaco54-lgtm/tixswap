@@ -66,7 +66,7 @@ export async function POST(request) {
       const { data: uploadRow, error: uploadErr } = await supabase
         .from('ticket_uploads')
         .select(
-          'id,seller_id,is_nominated,is_nominada,storage_bucket,storage_path,original_name,mime_type,file_size,validation_status,validation_reason,provider'
+          'id,seller_id,is_nominated,is_nominada,storage_bucket,storage_path,original_name,mime_type,file_size,validation_status,validation_reason,provider,status'
         )
         .eq('id', ticketUploadId)
         .maybeSingle();
@@ -77,6 +77,20 @@ export async function POST(request) {
 
       if (!uploadRow || uploadRow.seller_id !== sellerId) {
         return NextResponse.json({ error: 'ticketUploadId inválido' }, { status: 400 });
+      }
+
+      const validStatuses = new Set(['uploaded', 'validated', 'approved', 'valid']);
+      if (uploadRow.status && !validStatuses.has(uploadRow.status)) {
+        return NextResponse.json(
+          { error: 'ticketUploadId inválido', details: 'Estado de upload no válido' },
+          { status: 400 }
+        );
+      }
+      if (uploadRow.validation_status && !validStatuses.has(uploadRow.validation_status)) {
+        return NextResponse.json(
+          { error: 'ticketUploadId inválido', details: 'Validación no aprobada' },
+          { status: 400 }
+        );
       }
 
       upload = uploadRow;
@@ -102,7 +116,7 @@ export async function POST(request) {
     if (upload) {
       const columns = await detectTicketColumns(supabase);
 
-      insertPayload.ticket_upload_id = ticketUploadId;
+      if (columns.has('ticket_upload_id')) insertPayload.ticket_upload_id = ticketUploadId;
       if (columns.has('upload_bucket')) insertPayload.upload_bucket = upload.storage_bucket ?? null;
       if (columns.has('upload_path')) insertPayload.upload_path = upload.storage_path ?? null;
 
