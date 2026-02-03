@@ -12,6 +12,7 @@ import {
   normalizePhoneCL,
   normalizeFormData,
   validateRegisterForm,
+  validatePasswordStrength,
 } from "@/lib/validations";
 
 export default function RegisterPage() {
@@ -29,9 +30,22 @@ export default function RegisterPage() {
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
+  const [passwordChecks, setPasswordChecks] = useState(() => validatePasswordStrength("").checks);
 
   const DEFAULT_USER_TYPE = "standard";
   const DEFAULT_SELLER_TIER = "basic";
+
+  const PASSWORD_CHECK_ITEMS = [
+    { key: "minLen", label: "Mínimo 10 caracteres" },
+    { key: "maxLen", label: "Máximo 72 caracteres" },
+    { key: "hasUpper", label: "Al menos una mayúscula" },
+    { key: "hasLower", label: "Al menos una minúscula" },
+    { key: "hasNumber", label: "Al menos un número" },
+    { key: "hasSpecial", label: "Al menos un caracter especial" },
+    { key: "noSpaces", label: "Sin espacios" },
+    { key: "notCommon", label: "No es una contraseña común" },
+    { key: "notBrand", label: "No contiene 'tixswap'" },
+  ];
 
   // ============================================
   // VALIDACIÓN EN TIEMPO REAL (onBlur)
@@ -81,15 +95,19 @@ export default function RegisterPage() {
         }
         break;
 
-      case "password":
+      case "password": {
+        const result = validatePasswordStrength(value);
+        setPasswordChecks(result.checks);
+
         if (!value) {
           newErrors.password = "Debes ingresar una contraseña";
-        } else if (value.length < 6) {
-          newErrors.password = "La contraseña debe tener al menos 6 caracteres";
+        } else if (!result.valid) {
+          newErrors.password = result.message;
         } else {
           delete newErrors.password;
         }
         break;
+      }
 
       case "confirmPassword":
         if (!value) {
@@ -130,6 +148,7 @@ export default function RegisterPage() {
 
     if (!validation.valid) {
       setErrors(validation.errors);
+      setPasswordChecks(validatePasswordStrength(password).checks);
       return;
     }
 
@@ -352,9 +371,13 @@ export default function RegisterPage() {
             <input
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setPassword(value);
+                setPasswordChecks(validatePasswordStrength(value).checks);
+              }}
               onBlur={() => handleBlur("password", password)}
-              placeholder="Mínimo 6 caracteres"
+              placeholder="Ej: Tixswap.cl9!"
               className={`w-full rounded-xl px-4 py-3 outline-none transition ${
                 touched.password && errors.password
                   ? "bg-red-50 border border-red-300"
@@ -366,6 +389,19 @@ export default function RegisterPage() {
             {touched.password && errors.password && (
               <p className="text-red-600 text-xs mt-1">{errors.password}</p>
             )}
+            <ul className="mt-2 space-y-1 text-xs">
+              {PASSWORD_CHECK_ITEMS.map((item) => {
+                const passed = Boolean(passwordChecks[item.key]);
+                return (
+                  <li
+                    key={item.key}
+                    className={passed ? "text-green-700" : "text-gray-500"}
+                  >
+                    {passed ? "✅" : "❌"} {item.label}
+                  </li>
+                );
+              })}
+            </ul>
           </div>
 
           {/* Repetir Contraseña */}
