@@ -2,12 +2,96 @@ import { NextResponse } from 'next/server';
 
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getWebpayTransaction } from '@/lib/webpay';
+import { sendEmail } from '@/lib/email/resend';
+import { templateOrderPaidBuyer, templateOrderPaidSeller } from '@/lib/email/templates';
 
 export const dynamic = 'force-dynamic';
 
 function normalizeBaseUrl(url) {
   if (!url) return '';
   return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+async function loadOrderEmailData(admin, order) {
+  const ids = [order.buyer_id, order.seller_id].filter(Boolean);
+  const profilesById = {};
+
+  if (ids.length) {
+    const { data: profiles } = await admin
+      .from('profiles')
+      .select('id, full_name, email')
+      .in('id', ids);
+
+    (profiles || []).forEach((p) => {
+      profilesById[p.id] = p;
+    });
+  }
+
+  let ticket = null;
+  if (order.ticket_id) {
+    const { data: t } = await admin
+      .from('tickets')
+      .select('id, event_id')
+      .eq('id', order.ticket_id)
+      .maybeSingle();
+    ticket = t || null;
+  }
+
+  const eventId = order.event_id || ticket?.event_id || null;
+  let eventName = null;
+  if (eventId) {
+    const { data: eventRow } = await admin
+      .from('events')
+      .select('title')
+      .eq('id', eventId)
+      .maybeSingle();
+    eventName = eventRow?.title || null;
+  }
+
+  return {
+    buyer: profilesById[order.buyer_id] || null,
+    seller: profilesById[order.seller_id] || null,
+    eventName,
+  };
+}
+
+async function sendPaidEmails(admin, order, baseUrl) {
+  try {
+    const { buyer, seller, eventName } = await loadOrderEmailData(admin, order);
+
+    if (buyer?.email) {
+      const { subject, html } = templateOrderPaidBuyer({
+        buyerName: buyer?.full_name || null,
+        eventName,
+        totalClp: order.total_clp ?? order.total_amount ?? null,
+        orderId: order.id,
+        link: `${baseUrl}/dashboard/purchases/${order.id}`,
+      });
+
+      const buyerRes = await sendEmail({ to: buyer.email, subject, html });
+      if (!buyerRes.ok && !buyerRes.skipped) {
+        console.warn('[Webpay Return] Buyer email error:', buyerRes.error);
+      }
+    }
+
+    if (seller?.email) {
+      const { subject, html } = templateOrderPaidSeller({
+        sellerName: seller?.full_name || null,
+        eventName,
+        amountClp: order.amount_clp ?? order.amount ?? null,
+        orderId: order.id,
+        ticketId: order.ticket_id,
+        link: `${baseUrl}/dashboard/publications/${order.ticket_id}`,
+      });
+
+      const sellerRes = await sendEmail({ to: seller.email, subject, html });
+      if (!sellerRes.ok && !sellerRes.skipped) {
+        console.warn('[Webpay Return] Seller email error:', sellerRes.error);
+      }
+    }
+  } catch (err) {
+    console.warn('[Webpay Return] Email error:', err);
+  }
 }
 
 export async function POST(req) {
@@ -29,7 +113,7 @@ export async function POST(req) {
     if (!token && tbkBuyOrder) {
       const { data: order } = await admin
         .from('orders')
-        .select('id, ticket_id')
+        .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
         .eq('buy_order', tbkBuyOrder)
         .single();
 
@@ -61,7 +145,7 @@ export async function POST(req) {
     // Buscar orden
     const { data: order, error: orderError } = await admin
       .from('orders')
-      .select('id, ticket_id')
+      .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
       .eq('buy_order', buyOrder)
       .single();
 
@@ -73,6 +157,12 @@ export async function POST(req) {
     const approved = Number(result?.response_code) === 0 && result?.status === 'AUTHORIZED';
 
     if (approved) {
+      if (order.status === 'paid') {
+        return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
+          status: 303,
+        });
+      }
+
       // Marcar orden pagada + ticket vendido
       await admin
         .from('orders')
@@ -89,6 +179,7 @@ export async function POST(req) {
         .eq('id', order.id);
 
       await admin.from('tickets').update({ status: 'sold' }).eq('id', order.ticket_id);
+      await sendPaidEmails(admin, order, baseUrl);
 
       return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
         status: 303,
@@ -136,7 +227,7 @@ export async function GET(req) {
     if (!token && tbkBuyOrder) {
       const { data: order } = await admin
         .from('orders')
-        .select('id, ticket_id')
+        .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
         .eq('buy_order', tbkBuyOrder)
         .single();
 
@@ -174,7 +265,7 @@ export async function GET(req) {
     // Buscar orden
     const { data: order, error: orderError } = await admin
       .from('orders')
-      .select('id, ticket_id')
+      .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
       .eq('buy_order', buyOrder)
       .single();
 
@@ -188,6 +279,12 @@ export async function GET(req) {
 
     if (approved) {
       console.log('[Webpay Return] Payment approved for order:', order.id);
+
+      if (order.status === 'paid') {
+        return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
+          status: 303,
+        });
+      }
       
       // Marcar orden pagada + ticket vendido
       await admin
@@ -205,6 +302,7 @@ export async function GET(req) {
         .eq('id', order.id);
 
       await admin.from('tickets').update({ status: 'sold' }).eq('id', order.ticket_id);
+      await sendPaidEmails(admin, order, baseUrl);
 
       return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
         status: 303,

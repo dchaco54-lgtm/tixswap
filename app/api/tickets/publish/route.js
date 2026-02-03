@@ -4,6 +4,8 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
 import { detectTicketColumns } from '@/lib/db/ticketSchema';
+import { sendEmail } from '@/lib/email/resend';
+import { templateTicketPublished } from '@/lib/email/templates';
 
 export async function POST(request) {
   try {
@@ -145,6 +147,45 @@ export async function POST(request) {
     } catch (revalErr) {
       console.warn('[Publish] Error revalidando:', revalErr);
       // No bloqueamos si falla
+    }
+
+    // ✅ Email al vendedor (no bloquea)
+    try {
+      const sellerEmail = profile?.email || user.email;
+      if (sellerEmail) {
+        let eventName = null;
+        if (eventId) {
+          const { data: eventRow, error: eventErr } = await supabase
+            .from('events')
+            .select('title')
+            .eq('id', eventId)
+            .maybeSingle();
+          if (eventErr) console.warn('[Publish] Error cargando evento:', eventErr);
+          eventName = eventRow?.title || null;
+        }
+
+        const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://tixswap.cl').replace(/\/+$/, '');
+        const link = `${baseUrl}/dashboard/publications/${created.id}`;
+
+        const { subject, html } = templateTicketPublished({
+          sellerName: profile?.full_name || null,
+          ticketId: created.id,
+          eventName,
+          price: created.price,
+          link,
+          sector: created.sector || sector || null,
+          sectionLabel: created.section_label || null,
+          rowLabel: created.row_label || fila || null,
+          seatLabel: created.seat_label || asiento || null,
+        });
+
+        const mailRes = await sendEmail({ to: sellerEmail, subject, html });
+        if (!mailRes.ok && !mailRes.skipped) {
+          console.warn('[Publish] Error enviando mail:', mailRes.error);
+        }
+      }
+    } catch (mailErr) {
+      console.warn('[Publish] Error enviando mail:', mailErr);
     }
 
     return NextResponse.json({ ok: true, ticket: created });

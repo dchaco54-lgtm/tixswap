@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { sendEmail } from '@/lib/email/resend';
+import { templateOrderChatMessage } from '@/lib/email/templates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -180,6 +182,47 @@ export async function POST(req, { params }) {
     if (insertError) {
       console.error('Error creating message:', insertError);
       return NextResponse.json({ error: 'Error creando mensaje' }, { status: 500 });
+    }
+
+    const recipientId = order.buyer_id === user.id ? order.seller_id : order.buyer_id;
+
+    if (recipientId) {
+      try {
+        const { data: profiles } = await admin
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', [user.id, recipientId]);
+
+        const byId = (profiles || []).reduce((acc, p) => {
+          acc[p.id] = p;
+          return acc;
+        }, {});
+
+        const recipient = byId[recipientId] || null;
+        const sender = byId[user.id] || null;
+
+        if (recipient?.email) {
+          const rawSnippet = newMessage.message || '';
+          const snippet = rawSnippet.length > 140 ? `${rawSnippet.slice(0, 140)}...` : rawSnippet;
+          const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin).replace(/\/+$/, '');
+          const link = `${baseUrl}/dashboard/chat/${orderId}`;
+
+          const { subject, html } = templateOrderChatMessage({
+            recipientName: recipient?.full_name || null,
+            senderName: sender?.full_name || null,
+            orderId,
+            messageSnippet: snippet,
+            link,
+          });
+
+          const mailRes = await sendEmail({ to: recipient.email, subject, html });
+          if (!mailRes.ok && !mailRes.skipped) {
+            console.warn('[Orders Messages] Email error:', mailRes.error);
+          }
+        }
+      } catch (mailErr) {
+        console.warn('[Orders Messages] Email error:', mailErr);
+      }
     }
 
     return NextResponse.json({ message: newMessage }, { status: 201 });

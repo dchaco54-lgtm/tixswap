@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { env, escapeHtml, sendEmail } from "@/lib/email/resend";
+import { templateSellRequestReceived } from "@/lib/email/templates";
 
 /**
  * POST /api/support/sell-request
@@ -58,51 +60,68 @@ export async function POST(req) {
     }
 
     // ✅ Email a soporte (OPCIONAL)
-    const apiKey = process.env.RESEND_API_KEY;
-    const supportEmail = process.env.SUPPORT_EMAIL || "soporte@tixswap.cl";
-    const fromEmail = process.env.RESEND_FROM || "TixSwap <no-reply@tixswap.cl>";
+    const supportEmail =
+      env("SUPPORT_EMAIL") || env("SUPPORT_INBOX_EMAIL") || "soporte@tixswap.cl";
 
     let emailSent = false;
     let emailError = null;
+    let userEmailSent = false;
+    let userEmailError = null;
 
-    if (apiKey) {
+    const supportHtml = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.45;">
+        <h2 style="margin:0 0 8px 0;">Solicitud de creación de evento</h2>
+        <p style="margin:0 0 6px 0;"><b>ID:</b> ${reqRow.id}</p>
+        <p style="margin:0 0 6px 0;"><b>Evento solicitado:</b> ${escapeHtml(requestedName)}</p>
+        <p style="margin:0 0 12px 0;"><b>Extra:</b> ${escapeHtml(insertObj.requested_event_extra || "-")}</p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;" />
+        <p style="margin:0 0 8px 0;"><b>Payload completo (3 pasos):</b></p>
+        <pre style="white-space: pre-wrap; background:#f6f7f9; padding:12px; border-radius:10px; margin:0;">${escapeHtml(
+          JSON.stringify(body, null, 2)
+        )}</pre>
+      </div>
+    `;
+
+    try {
+      const supportRes = await sendEmail({
+        to: supportEmail,
+        subject: `Solicitud evento + publicación pendiente (#${reqRow.id})`,
+        html: supportHtml,
+      });
+
+      if (supportRes.ok) {
+        emailSent = true;
+      } else if (!supportRes.skipped) {
+        emailError = supportRes.error || "No se pudo enviar correo (Resend).";
+      }
+    } catch (e) {
+      emailError = e?.message || "No se pudo enviar correo (Resend).";
+    }
+
+    if (body?.userEmail) {
       try {
-        const html = `
-          <div style="font-family: Arial, sans-serif; line-height: 1.45;">
-            <h2 style="margin:0 0 8px 0;">Solicitud de creación de evento</h2>
-            <p style="margin:0 0 6px 0;"><b>ID:</b> ${reqRow.id}</p>
-            <p style="margin:0 0 6px 0;"><b>Evento solicitado:</b> ${escapeHtml(requestedName)}</p>
-            <p style="margin:0 0 12px 0;"><b>Extra:</b> ${escapeHtml(insertObj.requested_event_extra || "-")}</p>
-            <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;" />
-            <p style="margin:0 0 8px 0;"><b>Payload completo (3 pasos):</b></p>
-            <pre style="white-space: pre-wrap; background:#f6f7f9; padding:12px; border-radius:10px; margin:0;">${escapeHtml(
-              JSON.stringify(body, null, 2)
-            )}</pre>
-          </div>
-        `;
-
-        const resp = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            from: fromEmail,
-            to: [supportEmail],
-            subject: `Solicitud evento + publicación pendiente (#${reqRow.id})`,
-            html,
-          }),
+        const baseUrl = (env("NEXT_PUBLIC_SITE_URL") || "https://tixswap.cl").replace(/\/+$/, "");
+        const link = baseUrl ? `${baseUrl}/dashboard` : null;
+        const { subject, html } = templateSellRequestReceived({
+          sellerName: body?.userName || null,
+          requestedEventName: requestedName,
+          requestId: reqRow.id,
+          link,
         });
 
-        if (!resp.ok) {
-          const t = await resp.text().catch(() => "");
-          throw new Error(`Resend error: ${resp.status} ${t}`);
-        }
+        const userRes = await sendEmail({
+          to: body.userEmail,
+          subject,
+          html,
+        });
 
-        emailSent = true;
+        if (userRes.ok) {
+          userEmailSent = true;
+        } else if (!userRes.skipped) {
+          userEmailError = userRes.error || "No se pudo enviar correo (Resend).";
+        }
       } catch (e) {
-        emailError = e?.message || "No se pudo enviar correo (Resend).";
+        userEmailError = e?.message || "No se pudo enviar correo (Resend).";
       }
     }
 
@@ -111,17 +130,11 @@ export async function POST(req) {
       requestId: reqRow.id,
       emailSent,
       emailError,
+      userEmailSent,
+      userEmailError,
     });
   } catch (e) {
     return NextResponse.json({ error: e?.message || "Error inesperado" }, { status: 500 });
   }
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}

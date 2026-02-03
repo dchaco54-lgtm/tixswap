@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { sendEmail } from "@/lib/email/resend";
+import { templateOrderPaidBuyer, templateOrderPaidSeller } from "@/lib/email/templates";
 
 export const runtime = "nodejs";
 
@@ -44,6 +46,93 @@ function mapPaymentState(state) {
   return { payment_state: "pending", status: "created" };
 }
 
+function normalizeSiteUrl(url) {
+  if (!url) return "";
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+async function loadOrderEmailData(admin, order) {
+  const ids = [order.buyer_id, order.seller_id].filter(Boolean);
+  const profilesById = {};
+
+  if (ids.length) {
+    const { data: profiles } = await admin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", ids);
+
+    (profiles || []).forEach((p) => {
+      profilesById[p.id] = p;
+    });
+  }
+
+  let ticket = null;
+  if (order.ticket_id) {
+    const { data: t } = await admin
+      .from("tickets")
+      .select("id, event_id")
+      .eq("id", order.ticket_id)
+      .maybeSingle();
+    ticket = t || null;
+  }
+
+  const eventId = order.event_id || ticket?.event_id || null;
+  let eventName = null;
+  if (eventId) {
+    const { data: eventRow } = await admin
+      .from("events")
+      .select("title")
+      .eq("id", eventId)
+      .maybeSingle();
+    eventName = eventRow?.title || null;
+  }
+
+  return {
+    buyer: profilesById[order.buyer_id] || null,
+    seller: profilesById[order.seller_id] || null,
+    eventName,
+  };
+}
+
+async function sendPaidEmails(admin, order, baseUrl) {
+  try {
+    const { buyer, seller, eventName } = await loadOrderEmailData(admin, order);
+
+    if (buyer?.email) {
+      const { subject, html } = templateOrderPaidBuyer({
+        buyerName: buyer?.full_name || null,
+        eventName,
+        totalClp: order.total_clp ?? order.total_amount ?? null,
+        orderId: order.id,
+        link: `${baseUrl}/dashboard/purchases/${order.id}`,
+      });
+
+      const buyerRes = await sendEmail({ to: buyer.email, subject, html });
+      if (!buyerRes.ok && !buyerRes.skipped) {
+        console.warn("[Banchile Confirm] Buyer email error:", buyerRes.error);
+      }
+    }
+
+    if (seller?.email) {
+      const { subject, html } = templateOrderPaidSeller({
+        sellerName: seller?.full_name || null,
+        eventName,
+        amountClp: order.amount_clp ?? order.amount ?? null,
+        orderId: order.id,
+        ticketId: order.ticket_id,
+        link: `${baseUrl}/dashboard/publications/${order.ticket_id}`,
+      });
+
+      const sellerRes = await sendEmail({ to: seller.email, subject, html });
+      if (!sellerRes.ok && !sellerRes.skipped) {
+        console.warn("[Banchile Confirm] Seller email error:", sellerRes.error);
+      }
+    }
+  } catch (err) {
+    console.warn("[Banchile Confirm] Email error:", err);
+  }
+}
+
 export async function POST(req) {
   try {
     const { orderId } = await req.json().catch(() => ({}));
@@ -53,7 +142,9 @@ export async function POST(req) {
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return NextResponse.json({ error: "No autorizado." }, { status: 401 });
 
-    const { data: userRes } = await supabaseAdmin.auth.getUser(token);
+    const admin = supabaseAdmin();
+
+    const { data: userRes } = await admin.auth.getUser(token);
     const userId = userRes?.user?.id;
     if (!userId) return NextResponse.json({ error: "No se pudo validar usuario." }, { status: 401 });
 
@@ -68,9 +159,9 @@ export async function POST(req) {
       );
     }
 
-    const { data: order, error: orderErr } = await supabaseAdmin
+    const { data: order, error: orderErr } = await admin
       .from("orders")
-      .select("id, user_id, ticket_id, payment_request_id")
+      .select("id, user_id, buyer_id, seller_id, ticket_id, event_id, payment_request_id, status, amount, amount_clp, total_amount, total_clp, fee_clp")
       .eq("id", orderId)
       .single();
 
@@ -108,8 +199,11 @@ export async function POST(req) {
 
     const upd = mapPaymentState(state);
 
+    const alreadyPaid = order.status === "paid";
+    const siteBaseUrl = normalizeSiteUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
+
     // actualizar orden
-    await supabaseAdmin
+    await admin
       .from("orders")
       .update({
         payment_state: upd.payment_state,
@@ -120,10 +214,14 @@ export async function POST(req) {
 
     // si aprobado -> marcar ticket sold
     if (state === "APPROVED" && order.ticket_id) {
-      await supabaseAdmin
+      await admin
         .from("tickets")
         .update({ status: "sold" })
         .eq("id", order.ticket_id);
+    }
+
+    if (state === "APPROVED" && !alreadyPaid) {
+      await sendPaidEmails(admin, order, siteBaseUrl);
     }
 
     return NextResponse.json({ state, details: j }, { status: 200 });
