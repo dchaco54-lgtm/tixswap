@@ -111,11 +111,23 @@ function rowToEvent(row) {
   return { payload, errors };
 }
 
+function isWarningsColumnMissingError(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    code === "PGRST204" ||
+    (message.includes("schema cache") && message.includes("warnings")) ||
+    message.includes("could not find the 'warnings' column")
+  );
+}
+
 export default function AdminEventsPage() {
   const router = useRouter();
 
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [hasWarningsColumn, setHasWarningsColumn] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
   const [editForm, setEditForm] = useState({ warnings: "" });
 
@@ -186,6 +198,25 @@ export default function AdminEventsPage() {
         return;
       }
 
+      try {
+        const { error: warningsError } = await supabase
+          .from("events")
+          .select("warnings")
+          .limit(1);
+
+        if (warningsError && isWarningsColumnMissingError(warningsError)) {
+          setHasWarningsColumn(false);
+        } else if (!warningsError) {
+          setHasWarningsColumn(true);
+        } else {
+          setHasWarningsColumn(true);
+          console.warn("[AdminEvents] warnings check error:", warningsError);
+        }
+      } catch (warningsCheckErr) {
+        setHasWarningsColumn(true);
+        console.warn("[AdminEvents] warnings check exception:", warningsCheckErr);
+      }
+
       await loadEvents();
     };
 
@@ -213,6 +244,7 @@ export default function AdminEventsPage() {
   };
 
   const openEditModal = (event) => {
+    if (hasWarningsColumn !== true) return;
     setEditingEvent(event);
     setEditForm({ warnings: event?.warnings || "" });
   };
@@ -253,8 +285,10 @@ export default function AdminEventsPage() {
         city: form.city.trim() || null,
         category: form.category.trim() || null,
         image_url: form.image_url.trim() || null,
-        warnings: null, // Se edita después en el modal
       };
+      if (hasWarningsColumn === true) {
+        payload.warnings = null; // Se edita después en el modal
+      }
 
       const { error } = await supabase.from("events").insert(payload);
       if (error) throw error;
@@ -403,6 +437,12 @@ export default function AdminEventsPage() {
                 {err}
               </div>
             )}
+          </div>
+        )}
+
+        {hasWarningsColumn === false && (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 font-semibold">
+            Tu BD aún no tiene la columna &apos;warnings&apos;. Ejecuta la migración MIGRATION_EVENTS_WARNINGS.sql y recarga.
           </div>
         )}
 
@@ -646,12 +686,18 @@ export default function AdminEventsPage() {
                         {ev.category || "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => openEditModal(ev)}
-                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                          Editar advertencias
-                        </button>
+                        {hasWarningsColumn === true ? (
+                          <button
+                            onClick={() => openEditModal(ev)}
+                            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                          >
+                            Editar advertencias
+                          </button>
+                        ) : (
+                          <span className="text-slate-400 text-sm">
+                            No disponible
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -662,7 +708,7 @@ export default function AdminEventsPage() {
         </div>
 
         {/* Modal de edición de advertencias */}
-        {editingEvent && (
+        {hasWarningsColumn === true && editingEvent && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-2xl max-w-4xl w-full p-8 shadow-xl">
               <h3 className="text-xl font-bold mb-4">
