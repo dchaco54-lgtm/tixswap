@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import PasswordField from "@/components/PasswordField";
 
 function LoginContent() {
   const router = useRouter();
@@ -196,13 +197,15 @@ function LoginContent() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Contraseña
               </label>
-              <input
-                type="password"
-                required
-                placeholder="********"
+              <PasswordField
                 value={form.password}
                 onChange={handleChange("password")}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="********"
+                inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+                autoComplete="current-password"
+                name="password"
+                id="password"
               />
             </div>
 

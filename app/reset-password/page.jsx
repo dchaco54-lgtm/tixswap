@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { validatePasswordStrength } from "@/lib/validations";
+import PasswordField from "@/components/PasswordField";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -110,17 +111,19 @@ export default function ResetPasswordPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Nueva contraseña
             </label>
-            <input
-              type="password"
-              required
-              placeholder="Ej: NuevaClave9!"
+            <PasswordField
               value={password}
               onChange={(e) => {
                 const value = e.target.value;
                 setPassword(value);
                 setPasswordChecks(validatePasswordStrength(value).checks);
               }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Ej: NuevaClave9!"
+              inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+              autoComplete="new-password"
+              name="password"
+              id="password"
             />
             <ul className="mt-2 space-y-1 text-xs">
               {PASSWORD_CHECK_ITEMS.map((item) => {
@@ -141,13 +144,15 @@ export default function ResetPasswordPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Confirmar nueva contraseña
             </label>
-            <input
-              type="password"
-              required
-              placeholder="********"
+            <PasswordField
               value={password2}
               onChange={(e) => setPassword2(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="********"
+              inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              required
+              autoComplete="new-password"
+              name="password2"
+              id="password2"
             />
           </div>
 

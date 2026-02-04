@@ -14,6 +14,7 @@ import {
   validateRegisterForm,
   validatePasswordStrength,
 } from "@/lib/validations";
+import PasswordField from "@/components/PasswordField";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -368,23 +369,26 @@ export default function RegisterPage() {
           {/* Contraseña */}
           <div>
             <label className="block text-sm font-medium mb-1">Contraseña</label>
-            <input
-              type="password"
+            <PasswordField
               value={password}
               onChange={(e) => {
                 const value = e.target.value;
                 setPassword(value);
                 setPasswordChecks(validatePasswordStrength(value).checks);
               }}
-              onBlur={() => handleBlur("password", password)}
+              onBlur={(e) => handleBlur("password", e.target.value)}
               placeholder="Ej: Tixswap.cl9!"
-              className={`w-full rounded-xl px-4 py-3 outline-none transition ${
+              inputClassName={`w-full rounded-xl px-4 py-3 outline-none transition ${
                 touched.password && errors.password
                   ? "bg-red-50 border border-red-300"
                   : "bg-white border border-gray-200"
               }`}
               required
               disabled={loading}
+              autoComplete="new-password"
+              name="password"
+              id="password"
+              ariaInvalid={touched.password && errors.password ? "true" : undefined}
             />
             {touched.password && errors.password && (
               <p className="text-red-600 text-xs mt-1">{errors.password}</p>
@@ -409,18 +413,23 @@ export default function RegisterPage() {
             <label className="block text-sm font-medium mb-1">
               Repetir contraseña
             </label>
-            <input
-              type="password"
+            <PasswordField
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              onBlur={() => handleBlur("confirmPassword", confirmPassword)}
-              className={`w-full rounded-xl px-4 py-3 outline-none transition ${
+              onBlur={(e) => handleBlur("confirmPassword", e.target.value)}
+              inputClassName={`w-full rounded-xl px-4 py-3 outline-none transition ${
                 touched.confirmPassword && errors.confirmPassword
                   ? "bg-red-50 border border-red-300"
                   : "bg-white border border-gray-200"
               }`}
               required
               disabled={loading}
+              autoComplete="new-password"
+              name="confirmPassword"
+              id="confirmPassword"
+              ariaInvalid={
+                touched.confirmPassword && errors.confirmPassword ? "true" : undefined
+              }
             />
             {touched.confirmPassword && errors.confirmPassword && (
               <p className="text-red-600 text-xs mt-1">
