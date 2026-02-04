@@ -122,6 +122,22 @@ function isWarningsColumnMissingError(error) {
   );
 }
 
+function isRowLevelSecurityError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("row-level security") ||
+    message.includes("violates row-level security policy")
+  );
+}
+
+function getAdminEventsErrorMessage(error, fallbackMessage) {
+  if (isRowLevelSecurityError(error)) {
+    return "No tienes permisos para crear eventos (RLS). Verifica policies de events para admin.";
+  }
+
+  return error?.message || fallbackMessage;
+}
+
 export default function AdminEventsPage() {
   const router = useRouter();
 
@@ -304,7 +320,7 @@ export default function AdminEventsPage() {
       });
       await loadEvents();
     } catch (e2) {
-      setErr(e2?.message || "Error creando evento");
+      setErr(getAdminEventsErrorMessage(e2, "Error creando evento"));
     } finally {
       setCreating(false);
     }
