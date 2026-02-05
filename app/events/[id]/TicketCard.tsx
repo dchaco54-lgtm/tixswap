@@ -3,7 +3,6 @@
 import Link from "next/link";
 import TrustBadges from "@/components/TrustBadges";
 import StarRating from "@/components/StarRating";
-import type { Database } from "@/src/types/database.types";
 
 function formatCLP(value: number | null) {
   const n = Number(value);
@@ -15,15 +14,22 @@ function formatCLP(value: number | null) {
   }).format(n);
 }
 
-type TicketRow = Database["public"]["Tables"]["tickets"]["Row"];
-type TicketLike = TicketRow & {
+type TicketLike = {
+  id: string;
+  price?: number | null;
   price_clp?: number | null;
   amount?: number | null;
-  row?: string | null;
-  seat?: string | null;
+  sector?: string | null;
   section?: string | null;
+  section_label?: string | null;
+  row_label?: string | null;
+  row?: string | null;
   fila?: string | null;
+  seat_label?: string | null;
+  seat?: string | null;
   asiento?: string | null;
+  seller_id?: string | null;
+  seller_name?: string | null;
 };
 
 type SellerLike = {
@@ -48,7 +54,7 @@ export default function TicketCard({ ticket, seller, trustSignals }: TicketCardP
   const section = ticket.section || ticket.sector || "";
   const row = ticket.row || ticket.row_label || ticket.fila || "";
   const seat = ticket.seat || ticket.seat_label || ticket.asiento || "";
-  const sellerName = seller?.full_name || seller?.email || "Vendedor";
+  const sellerName = seller?.full_name || seller?.email || ticket.seller_name || "Vendedor";
 
   return (
     <div className="p-5 rounded-2xl border bg-white hover:shadow-md transition-shadow">

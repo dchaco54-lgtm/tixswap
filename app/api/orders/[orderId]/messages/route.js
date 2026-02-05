@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { sendEmail } from '@/lib/email/resend';
 import { templateOrderChatMessage } from '@/lib/email/templates';
+import { sanitizeUserText } from '@/lib/security/sanitize';
+import { rateLimitByRequest } from '@/lib/security/rateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -145,7 +147,30 @@ export async function POST(req, { params }) {
     const body = await req.json().catch(() => ({}));
     const { message, attachment_url, attachment_name } = body;
 
-    if (!message || !message.trim()) {
+    const rate = rateLimitByRequest(req, {
+      bucket: `order-chat:${orderId}`,
+      limit: 30,
+      windowMs: 60 * 1000,
+    });
+
+    if (!rate.ok) {
+      return NextResponse.json(
+        { error: 'Demasiados mensajes. Espera un momento e inténtalo otra vez.' },
+        { status: 429 }
+      );
+    }
+
+    const cleanMessage = sanitizeUserText(message, { maxLen: 2000 });
+    const safeAttachmentUrl =
+      typeof attachment_url === "string"
+        ? sanitizeUserText(attachment_url, { maxLen: 500 })
+        : null;
+    const safeAttachmentName =
+      typeof attachment_name === "string"
+        ? sanitizeUserText(attachment_name, { maxLen: 180 })
+        : null;
+
+    if (!cleanMessage) {
       return NextResponse.json({ error: 'Mensaje requerido' }, { status: 400 });
     }
 
@@ -172,9 +197,9 @@ export async function POST(req, { params }) {
       .insert({
         order_id: orderId,
         sender_id: user.id,
-        message: message.trim(),
-        attachment_url: attachment_url || null,
-        attachment_name: attachment_name || null,
+        message: cleanMessage,
+        attachment_url: safeAttachmentUrl || null,
+        attachment_name: safeAttachmentName || null,
       })
       .select('id, message, attachment_url, attachment_name, created_at, sender_id')
       .single();

@@ -10,8 +10,13 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
-type TicketRow = Database["public"]["Tables"]["tickets"]["Row"];
-type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
+
+function isMissingRelationError(error: unknown) {
+  const msg = String((error as { message?: string })?.message || "").toLowerCase();
+  return msg.includes("tickets_public") && msg.includes("schema cache");
+}
+
+type TicketRow = Database["public"]["Views"]["tickets_public"]["Row"];
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -61,44 +66,48 @@ async function getEventData(id: string) {
   }
 
   // 2. Obtener tickets activos
-  const { data: tickets, error: ticketsError } = await supabase
-    .from("tickets")
-    .select("*")
+  let tickets: TicketRow[] = [];
+  const { data: publicTickets, error: ticketsError } = await supabase
+    .from("tickets_public")
+    .select("id, event_id, seller_id, seller_name, status, price, currency, sector, row_label, seat_label, section_label, created_at, title, sale_type")
     .eq("event_id", id)
-    .eq("status", "active")
+    .in("status", ["active", "available"])
     .order("created_at", { ascending: false });
 
   if (ticketsError) {
-    console.error("[EventPage] Error loading tickets:", ticketsError);
-    return { event, tickets: [], sellers: {}, trustSignals: {} };
+    if (!isMissingRelationError(ticketsError)) {
+      console.error("[EventPage] Error loading tickets:", ticketsError);
+      return { event, tickets: [], trustSignals: {} };
+    }
+
+    const { data: legacyTickets, error: legacyErr } = await supabase
+      .from("tickets")
+      .select("id, event_id, seller_id, seller_name, status, price, currency, sector, row_label, seat_label, section_label, created_at, title, sale_type")
+      .eq("event_id", id)
+      .in("status", ["active", "available"])
+      .order("created_at", { ascending: false });
+
+    if (legacyErr) {
+      console.error("[EventPage] Error loading legacy tickets:", legacyErr);
+      return { event, tickets: [], trustSignals: {} };
+    }
+
+    tickets = legacyTickets || [];
+  } else {
+    tickets = publicTickets || [];
   }
 
-  // 3. Obtener vendedores
+  // 3. Obtener trust signals de todos los vendedores
   const sellerIds = Array.from(
     new Set((tickets || []).map((t: TicketRow) => t.seller_id).filter(Boolean))
   );
-
-  const sellers: Record<string, Pick<ProfileRow, "id" | "full_name" | "email">> = {};
-
-  if (sellerIds.length > 0) {
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("id, full_name, email")
-      .in("id", sellerIds);
-
-    if (profiles) {
-      for (const p of profiles) {
-        sellers[p.id] = p;
-      }
-    }
-  }
 
   // 4. Obtener trust signals de todos los vendedores
   const trustSignals = await getBulkSellerTrustSignals(sellerIds);
 
   console.log(`[EventPage] Loaded ${tickets?.length || 0} tickets for event ${id}`);
 
-  return { event, tickets: tickets || [], sellers, trustSignals };
+  return { event, tickets: tickets || [], trustSignals };
 }
 
 export default async function EventDetailPage({ params }: { params: { id: string } }) {
@@ -108,7 +117,7 @@ export default async function EventDetailPage({ params }: { params: { id: string
     notFound();
   }
 
-  const { event, tickets, sellers, trustSignals } = data;
+  const { event, tickets, trustSignals } = data;
 
   const title = event.title || event.name || "Evento";
   const date = event.starts_at ? formatDateCL(event.starts_at) : "";
@@ -168,7 +177,6 @@ export default async function EventDetailPage({ params }: { params: { id: string
             <TicketCard 
               key={ticket.id} 
               ticket={ticket} 
-              seller={sellers[ticket.seller_id]}
               trustSignals={trustSignals[ticket.seller_id]}
             />
           ))}

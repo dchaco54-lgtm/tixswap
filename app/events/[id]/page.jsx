@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
 import TicketCard from "./TicketCard";
 
 function formatDateCL(value) {
@@ -34,7 +33,6 @@ export default function EventDetailPage() {
 
   const [event, setEvent] = useState(null);
   const [tickets, setTickets] = useState([]);
-  const [sellerMap, setSellerMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -78,23 +76,6 @@ export default function EventDetailPage() {
         const list = Array.isArray(tJson.tickets) ? tJson.tickets : [];
         setTickets(list);
 
-        // 3) Vendedores (best-effort, si falla no bloquea)
-        const sellerIds = Array.from(
-          new Set(list.map((t) => t?.seller_id).filter(Boolean))
-        );
-
-        if (sellerIds.length) {
-          const { data: profs, error: profErr } = await supabase
-            .from("profiles")
-            .select("id, full_name, email")
-            .in("id", sellerIds);
-
-          if (!profErr && Array.isArray(profs)) {
-            const map = {};
-            for (const p of profs) map[p.id] = p;
-            setSellerMap(map);
-          }
-        }
       } catch (e) {
         console.error(e);
         setErrorMsg(e?.message || "Ocurrió un error cargando el evento.");
@@ -188,7 +169,7 @@ export default function EventDetailPage() {
       {!loading && !errorMsg && tickets.length > 0 && (
         <div className="grid md:grid-cols-2 gap-6">
           {tickets.map((t) => (
-            <TicketCard key={t.id} ticket={t} seller={sellerMap[t.seller_id]} />
+            <TicketCard key={t.id} ticket={t} />
           ))}
         </div>
       )}

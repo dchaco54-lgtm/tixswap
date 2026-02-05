@@ -51,8 +51,6 @@ function normalizeTicket(ticket) {
     seller_id: ticket?.seller_id || ticket?.owner_id || ticket?.user_id || null,
 
     seller_name: ticket?.seller_name ?? ticket?.sellerName ?? null,
-    seller_email: ticket?.seller_email ?? ticket?.sellerEmail ?? null,
-    seller_rut: ticket?.seller_rut ?? ticket?.sellerRut ?? null,
 
     sector: ticket?.sector ?? ticket?.section ?? null,
     row_label: ticket?.row_label ?? ticket?.row ?? null,
@@ -73,7 +71,6 @@ function normalizeSeller(profile) {
   return {
     id: profile.id,
     full_name: full,
-    email: profile.email || null,
     avatar_url: profile.avatar_url || null,
   };
 }
@@ -107,7 +104,7 @@ async function getProfileSafe(admin, userId) {
   }
 
   const set = new Set((cols || []).map((x) => x.column_name));
-  const fields = ["id", "full_name", "name", "email", "avatar_url"].filter((f) => set.has(f));
+  const fields = ["id", "full_name", "name", "avatar_url"].filter((f) => set.has(f));
   const selectStr = fields.length ? fields.join(",") : "id";
 
   const { data: prof, error } = await admin
@@ -164,10 +161,7 @@ async function handlePreview(admin, ticketId) {
   const seller = {
     id: sellerId || sellerFromProfile?.id || null,
     full_name: sellerFromProfile?.full_name || ticketNorm.seller_name || null,
-    email: sellerFromProfile?.email || ticketNorm.seller_email || null,
-    rut: sellerFromProfile?.rut || ticketNorm.seller_rut || null,
     avatar_url: sellerFromProfile?.avatar_url || null,
-    phone: sellerFromProfile?.phone || null,
   };
 
   // 4) Fees (REGLA FIJA)

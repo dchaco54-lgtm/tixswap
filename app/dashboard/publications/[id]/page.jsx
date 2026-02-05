@@ -261,16 +261,52 @@ export default function PublicationDetailPage() {
         return;
       }
 
-      const fd = new FormData();
-      fd.append("file", file);
-
-      const res = await fetch(`/api/orders/${order.id}/renominated`, {
+      const signedRes = await fetch(`/api/orders/${order.id}/renominated/signed-url`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ fileName: file.name }),
       });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || json?.details || "No se pudo subir el PDF renominado.");
+      const signedJson = await signedRes.json().catch(() => ({}));
+      if (!signedRes.ok || !signedJson?.signedUrl || !signedJson?.path) {
+        throw new Error(
+          signedJson?.message ||
+            signedJson?.error ||
+            "No se pudo generar la URL segura de subida."
+        );
+      }
+
+      const uploadRes = await fetch(signedJson.signedUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: file,
+      });
+
+      if (!uploadRes.ok) {
+        throw new Error("No se pudo subir el archivo al storage.");
+      }
+
+      const confirmRes = await fetch(`/api/orders/${order.id}/renominated`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          bucket: signedJson.bucket,
+          path: signedJson.path,
+        }),
+      });
+      const confirmJson = await confirmRes.json().catch(() => ({}));
+      if (!confirmRes.ok) {
+        throw new Error(
+          confirmJson?.message ||
+            confirmJson?.error ||
+            "No se pudo confirmar el PDF renominado."
+        );
+      }
 
       setRenominatedMsg("PDF re-nominado subido ✅");
       setRenominatedStatus("ok");

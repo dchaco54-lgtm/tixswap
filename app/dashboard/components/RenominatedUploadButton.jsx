@@ -19,23 +19,59 @@ export default function RenominatedUploadButton({ orderId, disabled, onUploaded 
         return;
       }
 
-      const fd = new FormData();
-      fd.append("file", file);
-
-      const res = await fetch(`/api/orders/${orderId}/renominated`, {
+      const signedRes = await fetch(`/api/orders/${orderId}/renominated/signed-url`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ fileName: file.name }),
       });
 
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setErr(json?.message || json?.error || "No se pudo subir el PDF renominado.");
+      const signedJson = await signedRes.json().catch(() => ({}));
+      if (!signedRes.ok || !signedJson?.signedUrl || !signedJson?.path) {
+        setErr(
+          signedJson?.message ||
+            signedJson?.error ||
+            "No se pudo generar la URL segura de subida."
+        );
         return;
       }
 
-      onUploaded?.(json);
+      const uploadRes = await fetch(signedJson.signedUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: file,
+      });
+
+      if (!uploadRes.ok) {
+        setErr("No se pudo subir el archivo al storage.");
+        return;
+      }
+
+      const confirmRes = await fetch(`/api/orders/${orderId}/renominated`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          bucket: signedJson.bucket,
+          path: signedJson.path,
+        }),
+      });
+
+      const confirmJson = await confirmRes.json().catch(() => ({}));
+      if (!confirmRes.ok) {
+        setErr(
+          confirmJson?.message ||
+            confirmJson?.error ||
+            "No se pudo confirmar el archivo renominado."
+        );
+        return;
+      }
+
+      onUploaded?.(confirmJson);
     } catch (e) {
       setErr(e?.message || "Error subiendo archivo.");
     } finally {

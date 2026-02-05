@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { sanitizeUserText } from "@/lib/security/sanitize";
+import { rateLimitByRequest } from "@/lib/security/rateLimit";
 
 function makeCode(n) {
   return `TS-${String(n).padStart(4, "0")}`;
@@ -47,9 +49,22 @@ export async function POST(req) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
+  const rate = rateLimitByRequest(req, {
+    bucket: "support-ticket-create",
+    limit: 10,
+    windowMs: 10 * 60 * 1000,
+  });
+
+  if (!rate.ok) {
+    return NextResponse.json(
+      { error: "Demasiados tickets en poco tiempo. Intenta nuevamente en unos minutos." },
+      { status: 429 }
+    );
+  }
+
   const body = await req.json().catch(() => ({}));
-  const subject = String(body.subject ?? "").trim();
-  const message = String(body.message ?? "").trim();
+  const subject = sanitizeUserText(body.subject, { maxLen: 180 });
+  const message = sanitizeUserText(body.message, { maxLen: 3000 });
   const kind = body.kind === "dispute" ? "dispute" : "support";
 
   if (!subject) return NextResponse.json({ error: "Falta asunto" }, { status: 400 });

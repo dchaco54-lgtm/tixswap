@@ -86,6 +86,33 @@ export type Database = {
         }
         Relationships: []
       }
+      audit_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          order_id: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          order_id?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          order_id?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       order_messages: {
         Row: {
           attachment_name: string | null
@@ -797,6 +824,7 @@ export type Database = {
           seller_name: string | null
           seller_rut: string | null
           status: string
+          ticket_upload_id: string | null
           title: string | null
         }
         Insert: {
@@ -818,6 +846,7 @@ export type Database = {
           seller_name?: string | null
           seller_rut?: string | null
           status?: string
+          ticket_upload_id?: string | null
           title?: string | null
         }
         Update: {
@@ -839,6 +868,7 @@ export type Database = {
           seller_name?: string | null
           seller_rut?: string | null
           status?: string
+          ticket_upload_id?: string | null
           title?: string | null
         }
         Relationships: [
@@ -924,6 +954,57 @@ export type Database = {
       }
     }
     Views: {
+      tickets_public: {
+        Row: {
+          created_at: string | null
+          currency: string | null
+          event_id: string | null
+          id: string | null
+          price: number | null
+          row_label: string | null
+          sale_type: string | null
+          seat_label: string | null
+          section_label: string | null
+          sector: string | null
+          seller_id: string | null
+          seller_name: string | null
+          status: string | null
+          title: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          currency?: string | null
+          event_id?: string | null
+          id?: string | null
+          price?: number | null
+          row_label?: string | null
+          sale_type?: string | null
+          seat_label?: string | null
+          section_label?: string | null
+          sector?: string | null
+          seller_id?: string | null
+          seller_name?: string | null
+          status?: string | null
+          title?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          currency?: string | null
+          event_id?: string | null
+          id?: string | null
+          price?: number | null
+          row_label?: string | null
+          sale_type?: string | null
+          seat_label?: string | null
+          section_label?: string | null
+          sector?: string | null
+          seller_id?: string | null
+          seller_name?: string | null
+          status?: string | null
+          title?: string | null
+        }
+        Relationships: []
+      }
       profiles_with_role: {
         Row: {
           avatar_url: string | null

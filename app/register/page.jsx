@@ -15,6 +15,7 @@ import {
   validatePasswordStrength,
 } from "@/lib/validations";
 import PasswordField from "@/components/PasswordField";
+import { PASSWORD_POLICY } from "@/lib/security/passwordPolicy";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -37,7 +38,7 @@ export default function RegisterPage() {
   const DEFAULT_SELLER_TIER = "basic";
 
   const PASSWORD_CHECK_ITEMS = [
-    { key: "minLen", label: "Mínimo 10 caracteres" },
+    { key: "minLen", label: `Mínimo ${PASSWORD_POLICY.MIN_LEN} caracteres` },
     { key: "maxLen", label: "Máximo 72 caracteres" },
     { key: "hasUpper", label: "Al menos una mayúscula" },
     { key: "hasLower", label: "Al menos una minúscula" },
@@ -47,6 +48,14 @@ export default function RegisterPage() {
     { key: "notCommon", label: "No es una contraseña común" },
     { key: "notBrand", label: "No contiene 'tixswap'" },
   ];
+
+  const passwordValidation = validatePasswordStrength(password);
+  const canSubmit =
+    acceptedTerms &&
+    passwordValidation.valid &&
+    Boolean(confirmPassword) &&
+    confirmPassword === password &&
+    !loading;
 
   // ============================================
   // VALIDACIÓN EN TIEMPO REAL (onBlur)
@@ -159,6 +168,27 @@ export default function RegisterPage() {
     try {
       setLoading(true);
       setErrors({});
+
+      const policyRes = await fetch("/api/auth/password-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, context: "signup" }),
+      });
+      const policyJson = await policyRes.json().catch(() => ({}));
+
+      if (!policyRes.ok || !policyJson?.valid) {
+        setErrors((prev) => ({
+          ...prev,
+          password:
+            policyJson?.message ||
+            "La contraseña no cumple la política de seguridad.",
+        }));
+        if (policyJson?.checks) {
+          setPasswordChecks(policyJson.checks);
+        }
+        return;
+      }
+
       const supabase = createClient();
 
       // Validar RUT duplicado en backend
@@ -377,7 +407,7 @@ export default function RegisterPage() {
                 setPasswordChecks(validatePasswordStrength(value).checks);
               }}
               onBlur={(e) => handleBlur("password", e.target.value)}
-              placeholder="Ej: Tixswap.cl9!"
+              placeholder="Ej: MiClave!2026"
               inputClassName={`w-full rounded-xl px-4 py-3 outline-none transition ${
                 touched.password && errors.password
                   ? "bg-red-50 border border-red-300"
@@ -474,7 +504,7 @@ export default function RegisterPage() {
           {/* Botón Submit */}
           <button
             type="submit"
-            disabled={loading || !acceptedTerms}
+            disabled={!canSubmit}
             className="w-full rounded-xl py-3 font-semibold text-white bg-[#2563eb] hover:bg-[#1d4ed8] transition disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? "Creando..." : "Crear cuenta"}

@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { rateLimitByRequest } from "@/lib/security/rateLimit";
+import { logAuditEvent } from "@/lib/security/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +105,19 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: "Falta orderId" }, { status: 400 });
     }
 
+    const rate = rateLimitByRequest(req, {
+      bucket: `order-pdf:${orderId}`,
+      limit: 40,
+      windowMs: 10 * 60 * 1000,
+    });
+
+    if (!rate.ok) {
+      return NextResponse.json(
+        { error: "Demasiadas descargas en poco tiempo." },
+        { status: 429 }
+      );
+    }
+
     // Auth via cookies
     const supabase = createClient(cookies());
     const {
@@ -165,6 +180,13 @@ export async function GET(req, { params }) {
         );
       }
 
+      await logAuditEvent({
+        eventType: "TICKET_FILE_SHARED",
+        userId: user.id,
+        orderId: order.id,
+        metadata: { bucket, path, source: "order-pdf-route", kind: "renominated" },
+      });
+
       const res = NextResponse.redirect(signed.signedUrl, 302);
       res.headers.set("Cache-Control", "no-store");
       return res;
@@ -187,6 +209,13 @@ export async function GET(req, { params }) {
         { status: 500 }
       );
     }
+
+    await logAuditEvent({
+      eventType: "TICKET_FILE_SHARED",
+      userId: user.id,
+      orderId: order.id,
+      metadata: { bucket, path, source: "order-pdf-route", kind: "original" },
+    });
 
     const res = NextResponse.redirect(signed.signedUrl, 302);
     res.headers.set("Cache-Control", "no-store");

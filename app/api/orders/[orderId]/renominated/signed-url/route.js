@@ -1,4 +1,3 @@
-// app/api/orders/[orderId]/renominated/route.js
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
@@ -6,8 +5,6 @@ import { rateLimitByRequest } from "@/lib/security/rateLimit";
 import { logAuditEvent } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
-
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -34,7 +31,9 @@ async function getAuthContext(req, orderId) {
   const user = uData.user;
   const { data: order, error: oErr } = await supabase
     .from("orders")
-    .select("id, seller_id, buyer_id, ticket_id, status, payment_state")
+    .select(
+      "id, seller_id, buyer_id, status, payment_state, renominated_storage_bucket, renominated_storage_path"
+    )
     .eq("id", orderId)
     .single();
 
@@ -59,18 +58,7 @@ async function getAuthContext(req, orderId) {
   return { supabase, user, order, isAdmin, isSeller, isBuyer };
 }
 
-async function persistRenominatedFile({ supabase, orderId, bucket, path }) {
-  return supabase
-    .from("orders")
-    .update({
-      renominated_storage_bucket: bucket,
-      renominated_storage_path: path,
-      renominated_uploaded_at: new Date().toISOString(),
-    })
-    .eq("id", orderId);
-}
-
-export async function POST(req, { params }) {
+export async function GET(req, { params }) {
   try {
     const orderId = params?.orderId;
     if (!orderId) {
@@ -78,14 +66,14 @@ export async function POST(req, { params }) {
     }
 
     const rate = rateLimitByRequest(req, {
-      bucket: `renominated-upload:${orderId}`,
-      limit: 8,
+      bucket: `renominated-signed-read:${orderId}`,
+      limit: 30,
       windowMs: 10 * 60 * 1000,
     });
 
     if (!rate.ok) {
       return NextResponse.json(
-        { error: "Demasiados intentos de subida. Intenta nuevamente en unos minutos." },
+        { error: "Demasiadas solicitudes. Intenta nuevamente en unos minutos." },
         { status: 429 }
       );
     }
@@ -106,59 +94,32 @@ export async function POST(req, { params }) {
       );
     }
 
-    const form = await req.formData();
-    const file = form.get("file");
+    const bucket = order.renominated_storage_bucket || process.env.TICKET_PDF_BUCKET || "ticket-pdfs";
+    const path = order.renominated_storage_path;
 
-    if (!file || typeof file === "string") {
-      return NextResponse.json({ error: "Falta el PDF renominado (file)." }, { status: 400 });
-    }
-
-    if (typeof file.size === "number" && file.size > MAX_UPLOAD_BYTES) {
+    if (!path) {
       return NextResponse.json(
-        { error: "El PDF excede el tamaño permitido (10MB)." },
-        { status: 413 }
+        { error: "RENOMINATION_PENDING", message: "Aun no hay archivo renominado para esta orden." },
+        { status: 404 }
       );
     }
 
-    const buf = Buffer.from(await file.arrayBuffer());
-    if (buf.slice(0, 4).toString() !== "%PDF") {
-      return NextResponse.json({ error: "Debe ser un PDF válido." }, { status: 400 });
-    }
-
-    const bucket = process.env.TICKET_PDF_BUCKET ?? "ticket-pdfs";
-    const path = `orders/${orderId}/renominated-${crypto.randomUUID()}.pdf`;
-
-    const { error: upErr } = await supabase.storage.from(bucket).upload(path, buf, {
-      contentType: "application/pdf",
-      upsert: false,
-    });
-
-    if (upErr) {
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 10 * 60);
+    if (error || !data?.signedUrl) {
       return NextResponse.json(
-        { error: "Storage error", details: upErr.message },
+        { error: "SIGNED_URL_ERROR", details: error?.message || "No se pudo firmar la URL." },
         { status: 500 }
       );
     }
 
-    const { error: updErr } = await persistRenominatedFile({
-      supabase,
-      orderId,
-      bucket,
-      path,
-    });
-
-    if (updErr) {
-      return NextResponse.json({ error: "DB error", details: updErr.message }, { status: 500 });
-    }
-
     await logAuditEvent({
-      eventType: "RENOMINATION_UPLOADED",
+      eventType: "RENOMINATION_VIEWED",
       userId: user.id,
       orderId: order.id,
-      metadata: { bucket, path, method: "direct-upload" },
+      metadata: { bucket, path },
     });
 
-    return NextResponse.json({ ok: true, orderId, bucket, path });
+    return NextResponse.json({ ok: true, bucket, path, url: data.signedUrl });
   } catch (e) {
     return NextResponse.json(
       { error: "Server error", details: e?.message || String(e) },
@@ -167,7 +128,7 @@ export async function POST(req, { params }) {
   }
 }
 
-export async function PATCH(req, { params }) {
+export async function POST(req, { params }) {
   try {
     const orderId = params?.orderId;
     if (!orderId) {
@@ -175,14 +136,14 @@ export async function PATCH(req, { params }) {
     }
 
     const rate = rateLimitByRequest(req, {
-      bucket: `renominated-confirm:${orderId}`,
-      limit: 20,
+      bucket: `renominated-signed-write:${orderId}`,
+      limit: 12,
       windowMs: 10 * 60 * 1000,
     });
 
     if (!rate.ok) {
       return NextResponse.json(
-        { error: "Demasiados intentos. Espera unos minutos para reintentar." },
+        { error: "Demasiadas solicitudes. Espera unos minutos para reintentar." },
         { status: 429 }
       );
     }
@@ -204,39 +165,37 @@ export async function PATCH(req, { params }) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const bucket = String(body?.bucket || "").trim();
-    const path = String(body?.path || "").trim();
+    const fileName = String(body?.fileName || "renominated.pdf").trim().toLowerCase();
 
-    if (!bucket || !path) {
-      return NextResponse.json({ error: "bucket y path son requeridos." }, { status: 400 });
+    if (!fileName.endsWith(".pdf")) {
+      return NextResponse.json({ error: "Solo se permiten archivos PDF." }, { status: 400 });
     }
 
-    if (!path.startsWith(`orders/${orderId}/renominated-`)) {
+    const bucket = process.env.TICKET_PDF_BUCKET || "ticket-pdfs";
+    const path = `orders/${orderId}/renominated-${crypto.randomUUID()}.pdf`;
+
+    const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path);
+    if (error || !data?.signedUrl) {
       return NextResponse.json(
-        { error: "Ruta inválida para este orderId." },
-        { status: 400 }
+        { error: "SIGNED_UPLOAD_ERROR", details: error?.message || "No se pudo crear la URL firmada." },
+        { status: 500 }
       );
     }
 
-    const { error: updErr } = await persistRenominatedFile({
-      supabase,
-      orderId,
-      bucket,
-      path,
-    });
-
-    if (updErr) {
-      return NextResponse.json({ error: "DB error", details: updErr.message }, { status: 500 });
-    }
-
     await logAuditEvent({
-      eventType: "RENOMINATION_UPLOADED",
+      eventType: "TICKET_FILE_SHARED",
       userId: user.id,
       orderId: order.id,
-      metadata: { bucket, path, method: "signed-upload" },
+      metadata: { bucket, path, action: "signed-upload-issued" },
     });
 
-    return NextResponse.json({ ok: true, orderId, bucket, path });
+    return NextResponse.json({
+      ok: true,
+      bucket,
+      path,
+      token: data.token,
+      signedUrl: data.signedUrl,
+    });
   } catch (e) {
     return NextResponse.json(
       { error: "Server error", details: e?.message || String(e) },

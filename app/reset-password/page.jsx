@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import { validatePasswordStrength } from "@/lib/validations";
+import { PASSWORD_POLICY } from "@/lib/security/passwordPolicy";
 import PasswordField from "@/components/PasswordField";
 
 export default function ResetPasswordPage() {
@@ -18,7 +19,7 @@ export default function ResetPasswordPage() {
   const [passwordChecks, setPasswordChecks] = useState(() => validatePasswordStrength("").checks);
 
   const PASSWORD_CHECK_ITEMS = [
-    { key: "minLen", label: "Mínimo 10 caracteres" },
+    { key: "minLen", label: `Mínimo ${PASSWORD_POLICY.MIN_LEN} caracteres` },
     { key: "hasUpper", label: "Mayúscula" },
     { key: "hasLower", label: "Minúscula" },
     { key: "hasNumber", label: "Número" },
@@ -27,6 +28,13 @@ export default function ResetPasswordPage() {
     { key: "notCommon", label: "No común" },
     { key: "notBrand", label: "Sin 'tixswap'" },
   ];
+
+  const passwordValidation = validatePasswordStrength(password);
+  const canSubmit =
+    passwordValidation.valid &&
+    Boolean(password2) &&
+    password === password2 &&
+    !updating;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -53,6 +61,22 @@ export default function ResetPasswordPage() {
 
     try {
       setUpdating(true);
+
+      const policyRes = await fetch("/api/auth/password-policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, context: "reset" }),
+      });
+      const policyJson = await policyRes.json().catch(() => ({}));
+
+      if (!policyRes.ok || !policyJson?.valid) {
+        setPasswordChecks(policyJson?.checks || passwordStrength.checks);
+        setErrorMessage(
+          policyJson?.message ||
+            "La contraseña no cumple la política de seguridad."
+        );
+        return;
+      }
 
       const { error } = await supabase.auth.updateUser({
         password,
@@ -118,7 +142,7 @@ export default function ResetPasswordPage() {
                 setPassword(value);
                 setPasswordChecks(validatePasswordStrength(value).checks);
               }}
-              placeholder="Ej: NuevaClave9!"
+              placeholder="Ej: MiClave!2026"
               inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               required
               autoComplete="new-password"
@@ -158,7 +182,7 @@ export default function ResetPasswordPage() {
 
           <button
             type="submit"
-            disabled={updating}
+            disabled={!canSubmit}
             className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {updating ? "Actualizando..." : "Guardar nueva contraseña"}

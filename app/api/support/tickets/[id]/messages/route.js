@@ -1,13 +1,28 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { sanitizeUserText } from "@/lib/security/sanitize";
+import { rateLimitByRequest } from "@/lib/security/rateLimit";
 
 export async function POST(req, { params }) {
   const id = params?.id;
   if (!id) return NextResponse.json({ error: "Falta id" }, { status: 400 });
 
   const body = await req.json().catch(() => ({}));
-  const message = String(body.message ?? "").trim();
+  const message = sanitizeUserText(body.message, { maxLen: 3000 });
   if (!message) return NextResponse.json({ error: "Falta mensaje" }, { status: 400 });
+
+  const rate = rateLimitByRequest(req, {
+    bucket: `support-ticket-message:${id}`,
+    limit: 20,
+    windowMs: 60 * 1000,
+  });
+
+  if (!rate.ok) {
+    return NextResponse.json(
+      { error: "Demasiados mensajes. Espera un minuto antes de reintentar." },
+      { status: 429 }
+    );
+  }
 
   // Autenticación por token
   const authHeader = req.headers.get('authorization') || '';

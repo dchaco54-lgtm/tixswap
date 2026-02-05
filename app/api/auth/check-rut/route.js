@@ -1,8 +1,22 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { rateLimitByRequest } from "@/lib/security/rateLimit";
 
 export async function POST(request) {
   try {
+    const rate = rateLimitByRequest(request, {
+      bucket: "auth-check-rut",
+      limit: 20,
+      windowMs: 5 * 60 * 1000,
+    });
+
+    if (!rate.ok) {
+      return NextResponse.json(
+        { error: "Demasiadas solicitudes. Intenta nuevamente en unos minutos." },
+        { status: 429 }
+      );
+    }
+
     const { rut } = await request.json();
     const cleanRut = String(rut || "").trim();
     if (!cleanRut) {

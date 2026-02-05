@@ -55,10 +55,10 @@ export async function GET(req, { params }) {
     if (ticket.ticket_upload_id) {
       const { data: tu } = await supabase
         .from("ticket_uploads")
-        .select("is_nominada")
+        .select("is_nominated, is_nominada")
         .eq("id", ticket.ticket_upload_id)
         .maybeSingle();
-      isNominada = !!tu?.is_nominada;
+      isNominada = Boolean(tu?.is_nominated ?? tu?.is_nominada ?? false);
     }
 
     // 4) Si es nominada y comprador intenta descargar pero NO existe renominado => bloquear
