@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import OrderChat from "@/app/components/OrderChat";
 import RatingModal from "@/components/RatingModal";
 import StarRating from "@/components/StarRating";
+import { getRenominationStatus } from "@/lib/utils/renominationRules";
 
 function formatCLP(n) {
   const value = Number(n || 0);
@@ -98,10 +99,34 @@ export default function PurchaseDetailPage() {
       t?.is_nominada ||
       String(t?.sale_type || "").toLowerCase().includes("nomin")
   );
-  const hoursToEvent = e?.starts_at
-    ? (new Date(e.starts_at).getTime() - Date.now()) / (1000 * 60 * 60)
-    : null;
-  const isUrgent = isNominated && !order?.renominated_storage_path && hoursToEvent !== null && hoursToEvent <= 48 && hoursToEvent > 0;
+  const cutoffHours = Number(e?.renomination_cutoff_hours ?? 36);
+  const renoStatus = useMemo(
+    () =>
+      getRenominationStatus({
+        now: new Date(),
+        eventStartsAt: e?.starts_at,
+        nominationEnabledAt: e?.nomination_enabled_at,
+        cutoffHours,
+        orderPaidAt: order?.paid_at,
+        renominatedUploadedAt: order?.renominated_uploaded_at,
+      }),
+    [
+      e?.starts_at,
+      e?.nomination_enabled_at,
+      cutoffHours,
+      order?.paid_at,
+      order?.renominated_uploaded_at,
+    ]
+  );
+  const isUrgent =
+    isNominated &&
+    !order?.renominated_storage_path &&
+    renoStatus.urgencyLevel === "urgent";
+  const isWarning =
+    isNominated &&
+    !order?.renominated_storage_path &&
+    renoStatus.urgencyLevel === "warning";
+  const nominationOpensAt = renoStatus.nominationOpensAt;
 
   useEffect(() => {
     let cancelled = false;
@@ -253,7 +278,15 @@ export default function PurchaseDetailPage() {
                     <span className="text-base leading-none">⚠️</span>
                     <div>
                       <span className="font-semibold">Entrada nominada.</span>{" "}
-                      El vendedor tiene hasta 5 días para subir el PDF re-nominado.
+                      La nominación/renominación depende de la tiquetera y del evento. Hazla apenas se habilite.
+                      {nominationOpensAt && renoStatus.isNominationNotOpenYet ? (
+                        <span className="block mt-1">
+                          Se habilita el {formatDateLong(nominationOpensAt)}.
+                        </span>
+                      ) : null}
+                      <span className="block mt-1">
+                        En este evento, el plazo de renominación es hasta {cutoffHours} horas antes del show.
+                      </span>
                       <span className="block mt-1">
                         Puedes escribirle por el chat y descargar la nueva entrada cuando esté lista.
                       </span>
@@ -261,6 +294,10 @@ export default function PurchaseDetailPage() {
                         <span className="block mt-1">
                           Faltan menos de 48 horas para el evento. Si no recibes la re-nominación,
                           contacta a Soporte para evaluar la cancelación.
+                        </span>
+                      ) : isWarning ? (
+                        <span className="block mt-1">
+                          Quedan menos de 96 horas para el evento.
                         </span>
                       ) : null}
                     </div>

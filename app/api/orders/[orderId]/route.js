@@ -59,7 +59,10 @@ export async function GET(req, { params }) {
         currency,
         buy_order,
         session_id,
-        webpay_token
+        webpay_token,
+        renominated_storage_bucket,
+        renominated_storage_path,
+        renominated_uploaded_at
       `
       )
       .eq("id", orderId)
@@ -142,7 +145,7 @@ export async function GET(req, { params }) {
     if (eventId) {
       const { data: e, error: eErr } = await admin
         .from("events")
-        .select("*")
+        .select("id, title, starts_at, venue, city, image_url, nomination_enabled_at, renomination_cutoff_hours, renomination_max_changes")
         .eq("id", eventId)
         .maybeSingle();
 

@@ -8,6 +8,7 @@ Basado en usos de `.from(...)`, `.rpc(...)` y `storage.from(...)` y en `src/type
 - `app/api/support/sell-request/route.js` — API route `/api/support/sell-request` (insert/select).
 
 ### events
+- Campos nuevos: nomination_enabled_at, renomination_cutoff_hours, renomination_max_changes (renominacion).
 - `app/admin/events/page.jsx` — Page `/admin/events` (insert/select/update).
 - `app/admin/page.jsx` — Page `/admin` (delete/select).
 - `app/api/checkout/preview/route.js` — API route `/api/checkout/preview` (select).

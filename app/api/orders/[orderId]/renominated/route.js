@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { rateLimitByRequest } from "@/lib/security/rateLimit";
 import { logAuditEvent } from "@/lib/security/audit";
+import { getRenominationStatus } from "@/lib/utils/renominationRules";
 
 export const runtime = "nodejs";
 
@@ -34,12 +35,36 @@ async function getAuthContext(req, orderId) {
   const user = uData.user;
   const { data: order, error: oErr } = await supabase
     .from("orders")
-    .select("id, seller_id, buyer_id, ticket_id, status, payment_state")
+    .select("id, seller_id, buyer_id, ticket_id, event_id, status, payment_state, paid_at, renominated_uploaded_at")
     .eq("id", orderId)
     .single();
 
   if (oErr || !order) {
     return { error: NextResponse.json({ error: "ORDER_NOT_FOUND" }, { status: 404 }) };
+  }
+
+  let event = null;
+  let eventId = order.event_id || null;
+
+  if (!eventId && order.ticket_id) {
+    const { data: ticket } = await supabase
+      .from("tickets")
+      .select("id, event_id")
+      .eq("id", order.ticket_id)
+      .maybeSingle();
+    eventId = ticket?.event_id || null;
+  }
+
+  if (eventId) {
+    const { data: e, error: eErr } = await supabase
+      .from("events")
+      .select("id, starts_at, nomination_enabled_at, renomination_cutoff_hours, renomination_max_changes")
+      .eq("id", eventId)
+      .maybeSingle();
+    if (eErr) {
+      console.error("GET /api/orders/[orderId]/renominated eventErr", eErr);
+    }
+    event = e || null;
   }
 
   const { data: prof } = await supabase
@@ -56,7 +81,7 @@ async function getAuthContext(req, orderId) {
     return { error: NextResponse.json({ error: "FORBIDDEN" }, { status: 403 }) };
   }
 
-  return { supabase, user, order, isAdmin, isSeller, isBuyer };
+  return { supabase, user, order, event, isAdmin, isSeller, isBuyer };
 }
 
 async function persistRenominatedFile({ supabase, orderId, bucket, path }) {
@@ -93,7 +118,28 @@ export async function POST(req, { params }) {
     const ctx = await getAuthContext(req, orderId);
     if (ctx.error) return ctx.error;
 
-    const { supabase, user, order, isAdmin } = ctx;
+    const { supabase, user, order, event, isAdmin } = ctx;
+
+    const cutoffHours = event?.renomination_cutoff_hours ?? 36;
+    const renoStatus = getRenominationStatus({
+      now: new Date(),
+      eventStartsAt: event?.starts_at,
+      nominationEnabledAt: event?.nomination_enabled_at,
+      cutoffHours,
+      orderPaidAt: order?.paid_at,
+      renominatedUploadedAt: order?.renominated_uploaded_at,
+    });
+
+    if (renoStatus.isEventStarted) {
+      return NextResponse.json(
+        { error: "El evento ya comenzo; contacta soporte." },
+        { status: 400 }
+      );
+    }
+
+    const warning = renoStatus.isPastHardCutoff
+      ? `Estas intentando subir el PDF despues del cutoff recomendado (${cutoffHours}h antes del show).`
+      : null;
 
     const paidOk =
       String(order?.status || "").toLowerCase() === "paid" ||
@@ -158,7 +204,7 @@ export async function POST(req, { params }) {
       metadata: { bucket, path, method: "direct-upload" },
     });
 
-    return NextResponse.json({ ok: true, orderId, bucket, path });
+    return NextResponse.json({ ok: true, orderId, bucket, path, warning });
   } catch (e) {
     return NextResponse.json(
       { error: "Server error", details: e?.message || String(e) },
@@ -190,7 +236,28 @@ export async function PATCH(req, { params }) {
     const ctx = await getAuthContext(req, orderId);
     if (ctx.error) return ctx.error;
 
-    const { supabase, user, order, isAdmin } = ctx;
+    const { supabase, user, order, event, isAdmin } = ctx;
+
+    const cutoffHours = event?.renomination_cutoff_hours ?? 36;
+    const renoStatus = getRenominationStatus({
+      now: new Date(),
+      eventStartsAt: event?.starts_at,
+      nominationEnabledAt: event?.nomination_enabled_at,
+      cutoffHours,
+      orderPaidAt: order?.paid_at,
+      renominatedUploadedAt: order?.renominated_uploaded_at,
+    });
+
+    if (renoStatus.isEventStarted) {
+      return NextResponse.json(
+        { error: "El evento ya comenzo; contacta soporte." },
+        { status: 400 }
+      );
+    }
+
+    const warning = renoStatus.isPastHardCutoff
+      ? `Estas intentando subir el PDF despues del cutoff recomendado (${cutoffHours}h antes del show).`
+      : null;
 
     const paidOk =
       String(order?.status || "").toLowerCase() === "paid" ||
@@ -236,7 +303,7 @@ export async function PATCH(req, { params }) {
       metadata: { bucket, path, method: "signed-upload" },
     });
 
-    return NextResponse.json({ ok: true, orderId, bucket, path });
+    return NextResponse.json({ ok: true, orderId, bucket, path, warning });
   } catch (e) {
     return NextResponse.json(
       { error: "Server error", details: e?.message || String(e) },

@@ -7,6 +7,7 @@ import OrderChat from "@/app/components/OrderChat";
 import { createClient } from "@/lib/supabase/client";
 import RatingModal from "@/components/RatingModal";
 import StarRating from "@/components/StarRating";
+import { getRenominationStatus } from "@/lib/utils/renominationRules";
 
 function formatCLP(n) {
   const num = Number(n) || 0;
@@ -162,6 +163,32 @@ export default function PublicationDetailPage() {
   const canRate = isSold && !!order?.id;
   const hasRated = Boolean(myRating?.id);
   const hasRenominated = Boolean(order?.renominated_storage_path);
+  const event = ticket?.event || null;
+  const cutoffHours = Number(event?.renomination_cutoff_hours ?? 36);
+  const renoStatus = useMemo(
+    () =>
+      getRenominationStatus({
+        now: new Date(),
+        eventStartsAt: event?.starts_at,
+        nominationEnabledAt: event?.nomination_enabled_at,
+        cutoffHours,
+        orderPaidAt: order?.paid_at,
+        renominatedUploadedAt: order?.renominated_uploaded_at,
+      }),
+    [
+      event?.starts_at,
+      event?.nomination_enabled_at,
+      cutoffHours,
+      order?.paid_at,
+      order?.renominated_uploaded_at,
+    ]
+  );
+  const nominationOpensAt = renoStatus.nominationOpensAt;
+  const isEventStarted = renoStatus.isEventStarted;
+  const isUrgentRenomination =
+    nominated && !hasRenominated && renoStatus.urgencyLevel === "urgent";
+  const isWarningRenomination =
+    nominated && !hasRenominated && renoStatus.urgencyLevel === "warning";
 
   const pdfHref = ticket
     ? isSold && order?.id
@@ -169,7 +196,9 @@ export default function PublicationDetailPage() {
       : `/api/tickets/${ticket.id}/pdf`
     : "#";
 
-  const canUploadRenominated = Boolean(isSold && nominated && order?.id && !renominatedUploading);
+  const canUploadRenominated = Boolean(
+    isSold && nominated && order?.id && !renominatedUploading && !isEventStarted
+  );
 
   useEffect(() => {
     if (!renominatedMsg) return;
@@ -505,7 +534,32 @@ export default function PublicationDetailPage() {
                       <div className="flex items-start gap-2">
                         <span className="text-base leading-none">⚠️</span>
                         <div>
-                          Debes subir el PDF re-nominado dentro de 5 días.
+                          La nominación/renominación depende de la tiquetera y del evento.
+                          {nominationOpensAt && renoStatus.isNominationNotOpenYet ? (
+                            <span className="block mt-1">
+                              Aún no se habilita la nominación por la tiquetera. Se habilita el {
+                                formatDateLong(nominationOpensAt)
+                              }.
+                            </span>
+                          ) : null}
+                          <span className="block mt-1">
+                            Plazo recomendado: subir apenas renomines. Ojo: en este evento el cutoff
+                            es {cutoffHours}h antes del show.
+                          </span>
+                          {isEventStarted ? (
+                            <span className="block mt-1">
+                              El evento ya comenzó; contacta soporte.
+                            </span>
+                          ) : null}
+                          {isUrgentRenomination ? (
+                            <span className="block mt-1 font-semibold">
+                              URGENTE: queda poco para el show, contáctanos si tienes problemas.
+                            </span>
+                          ) : isWarningRenomination ? (
+                            <span className="block mt-1">
+                              Quedan menos de 96 horas para el evento.
+                            </span>
+                          ) : null}
                           {hasRenominated ? (
                             <span className="block mt-1">
                               Ya subiste uno. Si necesitas corregirlo, puedes cargar uno nuevo.
