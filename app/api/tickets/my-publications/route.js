@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { NextResponse } from "next/server";
-import { buildTicketSelect, detectTicketColumns, normalizeTicket } from "@/lib/db/ticketSchema";
+import { buildTicketSelect, detectEventColumns, detectTicketColumns, normalizeTicket } from "@/lib/db/ticketSchema";
 import { supabaseServiceOptional } from "@/lib/supabaseServiceOptional";
 
 function computeSummary(list) {
@@ -54,7 +54,8 @@ export async function GET(request) {
     const db = service || supabaseAuth;
 
     const columns = await detectTicketColumns(db);
-    const selectStr = buildTicketSelect(columns);
+    const eventColumns = await detectEventColumns(db);
+    const selectStr = buildTicketSelect(columns, eventColumns);
 
     const { data: ticketRows, error: ticketsErr } = await db
       .from("tickets")

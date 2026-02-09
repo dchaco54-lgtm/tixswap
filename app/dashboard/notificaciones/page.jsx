@@ -51,7 +51,7 @@ export default function NotificationsPage() {
       const list = json?.notifications || [];
       setItems((prev) => (append ? [...prev, ...list] : list));
     } catch {
-      setError("No se pudieron cargar tus notificaciones");
+      setError("No se pudieron actualizar");
       if (!append) setItems([]);
     } finally {
       if (!append) setLoading(false);
@@ -126,8 +126,14 @@ export default function NotificationsPage() {
       </div>
 
       {error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 p-4 mb-4">
-          {error}
+        <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 p-4 mb-4 flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <button
+            onClick={() => loadPage(0, false)}
+            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs text-red-700 hover:bg-red-50"
+          >
+            Reintentar
+          </button>
         </div>
       ) : null}
 

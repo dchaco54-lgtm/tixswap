@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   buildTicketSelect,
+  detectEventColumns,
   detectTicketColumns,
   normalizeTicket,
 } from "@/lib/db/ticketSchema";
@@ -52,7 +53,8 @@ export async function GET(request) {
     const userId = authData.user.id;
 
     const columns = await detectTicketColumns(supabaseAdmin);
-    const selectStr = buildTicketSelect(columns);
+    const eventColumns = await detectEventColumns(supabaseAdmin);
+    const selectStr = buildTicketSelect(columns, eventColumns);
 
     const { data: tickets, error: ticketsErr } = await supabaseAdmin
       .from("tickets")
@@ -84,4 +86,3 @@ export async function GET(request) {
     return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
   }
 }
-

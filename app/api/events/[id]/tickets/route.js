@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { buildTicketSelect, detectTicketColumns, normalizeTicket } from "@/lib/db/ticketSchema";
+import { buildTicketSelect, detectEventColumns, detectTicketColumns, normalizeTicket } from "@/lib/db/ticketSchema";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -65,7 +65,8 @@ export async function GET(req, { params }) {
     }
 
     const cols = await detectTicketColumns(admin);
-    const select = buildTicketSelect(cols);
+    const eventCols = await detectEventColumns(admin);
+    const select = buildTicketSelect(cols, eventCols);
 
     const { data: tickets, error: errTickets } = await admin
       .from("tickets")
@@ -85,4 +86,3 @@ export async function GET(req, { params }) {
     return NextResponse.json({ error: e?.message || "Error" }, { status: 500 });
   }
 }
-
