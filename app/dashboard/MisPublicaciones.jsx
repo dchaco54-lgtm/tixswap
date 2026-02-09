@@ -461,7 +461,7 @@ export default function MisPublicaciones() {
 
               const baseUrl = getShareBase();
               const shareUrl = baseUrl
-                ? `${baseUrl.replace(/\\/$/, "")}/tickets/${t.id}`
+                ? `${baseUrl.replace(/\/$/, "")}/tickets/${t.id}`
                 : "";
               const shareTitle = t.event?.title
                 ? `Entrada para ${t.event.title}`
