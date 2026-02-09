@@ -168,7 +168,7 @@ async function handlePreview(admin, ticketId) {
   const fees = calculateFees(ticketPrice);
 
   // 5) Ratings (si existe tabla)
-  let sellerStats = { avgRating: null, totalRatings: 0 };
+  let sellerStats = { avgRating: null, averageStars: null, totalRatings: 0 };
   let sellerRatings = [];
 
   try {
@@ -183,7 +183,12 @@ async function handlePreview(admin, ticketId) {
       if (!rErr && ratings?.length) {
         const avg =
           ratings.reduce((a, x) => a + (Number(x.rating) || 0), 0) / ratings.length;
-        sellerStats = { avgRating: Number(avg.toFixed(1)), totalRatings: ratings.length };
+        const avgRounded = Number(avg.toFixed(1));
+        sellerStats = {
+          avgRating: avgRounded,
+          averageStars: avgRounded,
+          totalRatings: ratings.length,
+        };
         sellerRatings = ratings;
       }
     }
@@ -226,4 +231,3 @@ export async function POST(req) {
     return NextResponse.json({ error: err?.message || "Error" }, { status: 500 });
   }
 }
-

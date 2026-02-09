@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
+import ShareButton from "@/components/ShareButton";
 
 /** =========================================================
  *  Auth token (mantengo tu lógica)
@@ -175,6 +176,12 @@ export default function MisPublicaciones() {
       else if (status === "sold") summary.sold += 1;
     }
     return summary;
+  };
+
+  const getShareBase = () => {
+    if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
+    if (typeof window !== "undefined") return window.location.origin || "";
+    return "";
   };
 
   /** =========================================================
@@ -452,6 +459,21 @@ export default function MisPublicaciones() {
                 .filter(Boolean)
                 .join(" \u2022 ");
 
+              const baseUrl = getShareBase();
+              const shareUrl = baseUrl
+                ? `${baseUrl.replace(/\\/$/, "")}/tickets/${t.id}`
+                : "";
+              const shareTitle = t.event?.title
+                ? `Entrada para ${t.event.title}`
+                : "Entrada en TixSwap";
+              const shareText = [shareTitle, seatLine].filter(Boolean).join(" · ");
+              const shareDisabled = blocked || !shareUrl;
+              const shareReason = blocked
+                ? t.status === "sold"
+                  ? "Ya está vendida"
+                  : blockedMsg || "Bloqueada"
+                : "Link no disponible";
+
               return (
                 <div key={t.id} className="rounded-2xl border bg-white p-5 shadow-sm">
                   <div className="flex gap-4">
@@ -513,6 +535,14 @@ export default function MisPublicaciones() {
                       </div>
 
                       <div className="mt-4 flex flex-col sm:flex-row gap-2 justify-end">
+                        <ShareButton
+                          url={shareUrl}
+                          title={shareTitle}
+                          text={shareText}
+                          disabled={shareDisabled}
+                          disabledReason={shareReason}
+                        />
+
                         <button
                           onClick={() => onOpenEdit(t)}
                           disabled={blocked}

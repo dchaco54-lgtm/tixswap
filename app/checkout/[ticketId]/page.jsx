@@ -49,6 +49,15 @@ export default function CheckoutPage() {
       setError(null);
 
       try {
+        const { data: sessionRes } = await supabase.auth.getSession();
+        const hasSession = !!sessionRes?.session?.user;
+        if (!hasSession) {
+          router.push(
+            `/login?redirectTo=${encodeURIComponent(`/checkout/${ticketId}`)}`
+          );
+          return;
+        }
+
         const res = await fetch('/api/checkout/preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -74,7 +83,7 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
     };
-  }, [ticketId]);
+  }, [ticketId, router]);
 
   async function startWebpayPayment() {
     setPaying(true);
@@ -218,11 +227,12 @@ export default function CheckoutPage() {
                 <div className="text-gray-600 mt-1">
                   {sellerStats?.totalRatings ? (
                     <>
-                      ⭐ {sellerStats.averageStars} · {sellerStats.totalRatings}{' '}
-                      {sellerStats.totalRatings === 1 ? 'comentario' : 'comentarios'}
+                      ⭐ {sellerStats.avgRating ?? sellerStats.averageStars} ·{" "}
+                      {sellerStats.totalRatings}{" "}
+                      {sellerStats.totalRatings === 1 ? "comentario" : "comentarios"}
                     </>
                   ) : (
-                    'Aún sin comentarios'
+                    "Aún sin comentarios"
                   )}
                 </div>
               </div>
@@ -313,7 +323,6 @@ export default function CheckoutPage() {
     </div>
   );
 }
-
 
 
 
