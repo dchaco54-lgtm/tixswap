@@ -203,13 +203,21 @@ export default function MyTicketsPage() {
         },
         body: JSON.stringify({
           ticket_id: selected.id,
-          body: "Ticket reabierto por el usuario",
+          text: "Ticket reabierto por el usuario",
           reopen: true,
         }),
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo reabrir el ticket");
+      if (!res.ok) {
+        const errText = json?.error
+          ? json?.details
+            ? `${json.error}: ${json.details}`
+            : json.error
+          : "No se pudo reabrir el ticket";
+        setErr(errText || "No se pudo reabrir el ticket");
+        return;
+      }
 
       await loadDetail(selected.id);
       await refreshList();
@@ -240,13 +248,21 @@ export default function MyTicketsPage() {
         },
         body: JSON.stringify({
           ticket_id: selected.id,
-          body: draft.trim(),
+          text: draft.trim(),
           attachment_ids: pendingUploads.map((a) => a.id),
         }),
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo enviar el mensaje");
+      if (!res.ok) {
+        const errText = json?.error
+          ? json?.details
+            ? `${json.error}: ${json.details}`
+            : json.error
+          : "No se pudo enviar, reintenta";
+        setErr(errText || "No se pudo enviar, reintenta");
+        return;
+      }
 
       setDraft("");
       setPendingUploads([]);
@@ -338,7 +354,7 @@ export default function MyTicketsPage() {
               {loadingList ? (
                 <p className="text-sm text-slate-500">Cargando…</p>
               ) : filtered.length === 0 ? (
-                <p className="text-sm text-slate-500">No hay tickets.</p>
+                <p className="text-sm text-slate-500">Aún no tienes tickets.</p>
               ) : (
                 filtered.map((t) => (
                   <button
@@ -458,7 +474,7 @@ export default function MyTicketsPage() {
                         <svg className="w-12 h-12 mx-auto text-slate-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                         </svg>
-                        <p className="text-sm text-slate-500">No hay mensajes aún</p>
+                        <p className="text-sm text-slate-500">Aún no hay mensajes</p>
                       </div>
                     ) : (
                       messages.map((m) => {
@@ -644,4 +660,3 @@ export default function MyTicketsPage() {
     </main>
   );
 }
-

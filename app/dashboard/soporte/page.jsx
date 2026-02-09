@@ -155,7 +155,8 @@ function SoporteContent() {
       }
 
       // Mostrar mensaje de éxito con código del ticket
-      const ticketCode = json.ticket?.code || `TS-${json.ticket?.ticket_number || "—"}`;
+      const ticketNumber = json.ticket_number || json.ticket?.ticket_number || "—";
+      const ticketCode = json.ticket?.code || `TS-${ticketNumber}`;
       setMsg(`Ticket ${ticketCode} creado exitosamente ✅`);
       
       // Limpiar formulario
@@ -166,10 +167,11 @@ function SoporteContent() {
       await loadTickets();
 
       // Redirigir automáticamente a la conversación del ticket creado
-      if (json.ticket?.id) {
+      const createdId = json.ticketId || json.ticket?.id;
+      if (createdId) {
         // Pequeño delay para que el usuario vea el mensaje de éxito
         setTimeout(() => {
-          router.push(`/dashboard/tickets?open=${encodeURIComponent(json.ticket.id)}`);
+          router.push(`/dashboard/tickets?open=${encodeURIComponent(createdId)}`);
         }, 800);
       }
     } catch (e) {

@@ -41,7 +41,7 @@ export async function POST(req) {
   try {
     const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
     const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) return json({ error: "Missing env" }, 500);
+    if (!supabaseUrl || !serviceKey) return json({ ok: false, error: "Missing env" }, 500);
 
     const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false },
@@ -50,20 +50,20 @@ export async function POST(req) {
     // auth user
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return json({ error: "UNAUTHORIZED" }, 401);
+    if (!token) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
 
     const { data: u, error: uErr } = await supabaseAdmin.auth.getUser(token);
-    if (uErr || !u?.user) return json({ error: "UNAUTHORIZED" }, 401);
+    if (uErr || !u?.user) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
     const user = u.user;
 
     const body = await req.json().catch(() => ({}));
     const ticket_id = body?.ticket_id;
-    const text = (body?.body || "").toString();
+    const messageText = String(body?.body ?? body?.text ?? "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
-    if (!ticket_id) return json({ error: "Missing ticket_id" }, 400);
-    if (!text.trim() && attachment_ids.length === 0) {
-      return json({ error: "Mensaje vacío" }, 400);
+    if (!ticket_id) return json({ ok: false, error: "Missing ticket_id" }, 400);
+    if (!messageText && attachment_ids.length === 0) {
+      return json({ ok: false, error: "Mensaje vacío" }, 400);
     }
 
     // es admin?
@@ -83,31 +83,32 @@ export async function POST(req) {
       .eq("id", ticket_id)
       .single();
 
-    if (tErr || !ticket) return json({ error: "Ticket no existe" }, 404);
+    if (tErr || !ticket) return json({ ok: false, error: "Ticket no existe" }, 404);
 
     // Si el ticket está cerrado, no aceptamos más mensajes (ni usuario ni admin)
     if (ticket.status === "resolved" || ticket.status === "rejected") {
-      return json({ error: "Este ticket está cerrado" }, 403);
+      return json({ ok: false, error: "Este ticket está cerrado" }, 403);
     }
 
     // permiso: si no es admin, solo su ticket
     if (!isAdmin && ticket.user_id !== user.id) {
-      return json({ error: "FORBIDDEN" }, 403);
+      return json({ ok: false, error: "FORBIDDEN" }, 403);
     }
 
     // insertar mensaje
+    const bodyValue = messageText || (attachment_ids.length ? "" : null);
     const { data: msg, error: mErr } = await supabaseAdmin
       .from("support_messages")
       .insert({
         ticket_id,
         sender_role,
         sender_user_id: user.id,
-        body: text.trim() || null,
+        body: bodyValue,
       })
       .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
       .single();
 
-    if (mErr) return json({ error: "DB insert failed", details: mErr.message }, 500);
+    if (mErr) return json({ ok: false, error: "DB insert failed", details: mErr.message }, 500);
 
     // asociar adjuntos (si vienen)
     if (attachment_ids.length) {
@@ -179,7 +180,7 @@ export async function POST(req) {
           <div style="font-family:Arial,sans-serif;line-height:1.5">
             <h2 style="margin:0 0 12px">Respuesta del usuario (TS-${ticket.ticket_number})</h2>
             <p><b>Asunto:</b> ${escapeHtml(ticket.subject || "")}</p>
-            <p>${escapeHtml(text || "").replace(/\n/g, "<br/>")}</p>
+            <p>${escapeHtml(messageText || "").replace(/\n/g, "<br/>")}</p>
           </div>
         `,
       });
@@ -195,7 +196,10 @@ export async function POST(req) {
 
     return json({ ok: true, message, status: nextStatus });
   } catch (e) {
-    return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);
+    return json(
+      { ok: false, error: "Unexpected error", details: e?.message || String(e) },
+      500
+    );
   }
 }
 
