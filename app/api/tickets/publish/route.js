@@ -6,6 +6,7 @@ import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
 import { detectTicketColumns } from '@/lib/db/ticketSchema';
 import { sendEmail } from '@/lib/email/resend';
 import { templateTicketPublished } from '@/lib/email/templates';
+import { createNotification } from '@/lib/notifications';
 
 export async function POST(request) {
   try {
@@ -187,6 +188,15 @@ export async function POST(request) {
     } catch (mailErr) {
       console.warn('[Publish] Error enviando mail:', mailErr);
     }
+
+    await createNotification({
+      userId: sellerId,
+      type: 'system',
+      title: 'Publicación creada',
+      body: 'Tu entrada quedó publicada.',
+      link: `/dashboard/publications/${created.id}`,
+      metadata: { ticketId: created.id, eventId },
+    });
 
     return NextResponse.json({ ok: true, ticket: created });
   } catch (e) {

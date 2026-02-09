@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import MobileNavMenu from "./MobileNavMenu";
+import NotificationBell from "@/components/NotificationBell";
 
 export default function Header() {
   const router = useRouter();
@@ -115,6 +116,8 @@ export default function Header() {
                   <span className="hidden sm:inline text-sm text-slate-600">
                     Hola, {displayName}
                   </span>
+
+                  <NotificationBell userId={user?.id} />
 
                   <Link href="/dashboard" className="tix-btn-secondary">
                     Ver mi cuenta

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { env, escapeHtml, sendEmail } from "@/lib/email/resend";
 import { templateSellRequestReceived } from "@/lib/email/templates";
+import { createNotification } from "@/lib/notifications";
 
 /**
  * POST /api/support/sell-request
@@ -125,6 +126,17 @@ export async function POST(req) {
       }
     }
 
+    if (insertObj.user_id) {
+      await createNotification({
+        userId: insertObj.user_id,
+        type: "system",
+        title: "Solicitud recibida",
+        body: `Recibimos tu solicitud para ${requestedName}.`,
+        link: "/dashboard",
+        metadata: { requestId: reqRow.id },
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       requestId: reqRow.id,
@@ -137,4 +149,3 @@ export async function POST(req) {
     return NextResponse.json({ error: e?.message || "Error inesperado" }, { status: 500 });
   }
 }
-

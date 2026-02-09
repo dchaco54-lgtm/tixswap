@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendEmail } from "@/lib/email/resend";
 import { templateOrderPaidBuyer, templateOrderPaidSeller } from "@/lib/email/templates";
+import { createNotification } from "@/lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -97,6 +98,32 @@ async function loadOrderEmailData(admin, order) {
 async function sendPaidEmails(admin, order, baseUrl) {
   try {
     const { buyer, seller, eventName } = await loadOrderEmailData(admin, order);
+
+    if (order?.buyer_id) {
+      await createNotification({
+        userId: order.buyer_id,
+        type: "buy",
+        title: "Compra confirmada",
+        body: eventName
+          ? `Tu compra para ${eventName} fue confirmada.`
+          : "Tu compra fue confirmada.",
+        link: `/dashboard/purchases/${order.id}`,
+        metadata: { orderId: order.id, ticketId: order.ticket_id || null },
+      });
+    }
+
+    if (order?.seller_id) {
+      await createNotification({
+        userId: order.seller_id,
+        type: "sale",
+        title: "Venta confirmada",
+        body: eventName
+          ? `Vendiste una entrada para ${eventName}.`
+          : "Vendiste una entrada.",
+        link: order.ticket_id ? `/dashboard/publications/${order.ticket_id}` : "/dashboard/publicaciones",
+        metadata: { orderId: order.id, ticketId: order.ticket_id || null },
+      });
+    }
 
     if (buyer?.email) {
       const { subject, html } = templateOrderPaidBuyer({
@@ -232,4 +259,3 @@ export async function POST(req) {
     );
   }
 }
-

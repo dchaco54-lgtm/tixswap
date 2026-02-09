@@ -4,6 +4,7 @@ import { sendEmail } from '@/lib/email/resend';
 import { templateOrderChatMessage } from '@/lib/email/templates';
 import { sanitizeUserText } from '@/lib/security/sanitize';
 import { rateLimitByRequest } from '@/lib/security/rateLimit';
+import { createNotification } from '@/lib/notifications';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -226,18 +227,29 @@ export async function POST(req, { params }) {
         const recipient = byId[recipientId] || null;
         const sender = byId[user.id] || null;
 
+        const rawSnippet = newMessage.message || '';
+        const snippet = rawSnippet.length > 140 ? `${rawSnippet.slice(0, 140)}...` : rawSnippet;
+        const link = `/dashboard/chat/${orderId}`;
+
+        await createNotification({
+          userId: recipientId,
+          type: 'message',
+          title: 'Nuevo mensaje',
+          body: snippet || null,
+          link,
+          metadata: { orderId },
+        });
+
         if (recipient?.email) {
-          const rawSnippet = newMessage.message || '';
-          const snippet = rawSnippet.length > 140 ? `${rawSnippet.slice(0, 140)}...` : rawSnippet;
           const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin).replace(/\/+$/, '');
-          const link = `${baseUrl}/dashboard/chat/${orderId}`;
+          const fullLink = `${baseUrl}/dashboard/chat/${orderId}`;
 
           const { subject, html } = templateOrderChatMessage({
             recipientName: recipient?.full_name || null,
             senderName: sender?.full_name || null,
             orderId,
             messageSnippet: snippet,
-            link,
+            link: fullLink,
           });
 
           const mailRes = await sendEmail({ to: recipient.email, subject, html });

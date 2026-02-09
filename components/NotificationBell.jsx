@@ -1,0 +1,277 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+function formatRelative(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+
+  const diff = Date.now() - d.getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "Hace un momento";
+
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `Hace ${min} min`;
+
+  const hrs = Math.floor(min / 60);
+  if (hrs < 24) return `Hace ${hrs} h`;
+
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `Hace ${days} d`;
+
+  return new Intl.DateTimeFormat("es-CL", {
+    day: "2-digit",
+    month: "short",
+  }).format(d);
+}
+
+export default function NotificationBell({ userId }) {
+  const router = useRouter();
+  const [count, setCount] = useState(0);
+  const [items, setItems] = useState([]);
+  const [loadingList, setLoadingList] = useState(false);
+  const [error, setError] = useState("");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  const hasUnread = count > 0;
+  const badgeText = count > 9 ? "9+" : String(count || "");
+
+  const loadCount = useCallback(async () => {
+    if (!userId) {
+      setCount(0);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/notifications/unread-count", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "No se pudo cargar");
+      setCount(Number(json?.count || 0));
+    } catch {
+      setCount(0);
+    }
+  }, [userId]);
+
+  const loadList = useCallback(async () => {
+    if (!userId) {
+      setItems([]);
+      return;
+    }
+
+    setLoadingList(true);
+    setError("");
+    try {
+      const res = await fetch("/api/notifications?limit=8", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "No se pudieron cargar");
+      setItems(json?.notifications || []);
+    } catch (e) {
+      setItems([]);
+      setError("No se pudieron cargar tus notificaciones");
+    } finally {
+      setLoadingList(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    loadCount();
+
+    const t = window.setInterval(() => {
+      loadCount();
+    }, 60000);
+
+    return () => window.clearInterval(t);
+  }, [userId, loadCount]);
+
+  useEffect(() => {
+    if (!open) return;
+    loadList();
+  }, [open, loadList]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => {
+      if (!rootRef.current?.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const markAllRead = async () => {
+    try {
+      const res = await fetch("/api/notifications/mark-all-read", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error();
+      setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setCount(0);
+    } catch {
+      setError("No se pudieron actualizar");
+    }
+  };
+
+  const markOneRead = async (id) => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/notifications/${id}`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error();
+      setItems((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+      );
+      setCount((c) => Math.max(0, c - 1));
+    } catch {
+      // no-op
+    }
+  };
+
+  const handleItemClick = async (n) => {
+    if (!n?.is_read) {
+      await markOneRead(n.id);
+    }
+    if (n?.link) {
+      router.push(n.link);
+      setOpen(false);
+    }
+  };
+
+  const listEmpty = useMemo(
+    () => !loadingList && !error && items.length === 0,
+    [loadingList, error, items]
+  );
+
+  if (!userId) return null;
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`relative inline-flex items-center justify-center rounded-full p-2 border transition ${
+          hasUnread
+            ? "text-slate-700 border-slate-200 hover:bg-slate-50"
+            : "text-slate-400 border-slate-200 hover:bg-slate-50"
+        }`}
+        aria-label="Notificaciones"
+      >
+        <BellIcon active={hasUnread} />
+        {hasUnread ? (
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center">
+            {badgeText}
+          </span>
+        ) : null}
+      </button>
+
+      {open ? (
+        <div className="absolute right-0 mt-2 w-80 rounded-2xl border bg-white shadow-lg z-50 overflow-hidden">
+          <div className="px-4 py-3 border-b flex items-center justify-between">
+            <div className="text-sm font-semibold text-slate-900">Notificaciones</div>
+            <button
+              type="button"
+              onClick={markAllRead}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Marcar todas como leídas
+            </button>
+          </div>
+
+          <div className="max-h-96 overflow-auto">
+            {loadingList ? (
+              <div className="p-4 text-sm text-slate-500">Cargando...</div>
+            ) : null}
+
+            {error ? (
+              <div className="p-4 text-sm text-slate-500">{error}</div>
+            ) : null}
+
+            {listEmpty ? (
+              <div className="p-4 text-sm text-slate-500">No tienes notificaciones.</div>
+            ) : null}
+
+            {items.map((n) => {
+              const unread = !n.is_read;
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => handleItemClick(n)}
+                  className={`w-full text-left px-4 py-3 border-b last:border-b-0 transition ${
+                    unread ? "bg-slate-50" : "bg-white"
+                  } hover:bg-slate-100`}
+                >
+                  <div className="flex items-start gap-2">
+                    {unread ? (
+                      <span className="mt-1 h-2 w-2 rounded-full bg-blue-500" />
+                    ) : (
+                      <span className="mt-1 h-2 w-2 rounded-full bg-transparent" />
+                    )}
+                    <div className="flex-1">
+                      <div className={`text-sm ${unread ? "font-semibold" : "font-medium"} text-slate-900`}>
+                        {n.title}
+                      </div>
+                      {n.body ? (
+                        <div className="text-xs text-slate-600 mt-0.5 line-clamp-2">
+                          {n.body}
+                        </div>
+                      ) : null}
+                      <div className="text-xs text-slate-400 mt-1">
+                        {formatRelative(n.created_at)}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="px-4 py-3 border-t bg-slate-50">
+            <Link href="/dashboard/notificaciones" className="text-sm text-blue-600 hover:underline">
+              Ver todas
+            </Link>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function BellIcon({ active }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={active ? "text-slate-700" : "text-slate-400"}
+      aria-hidden
+    >
+      <path d="M18 8a6 6 0 10-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
+      <path d="M13.73 21a2 2 0 01-3.46 0" />
+    </svg>
+  );
+}

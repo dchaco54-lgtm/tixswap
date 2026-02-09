@@ -1,5 +1,6 @@
 // app/support/message/route.js
 import { createClient } from "@supabase/supabase-js";
+import { createNotification } from "@/lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -154,6 +155,17 @@ export async function POST(req) {
             <p style="color:#666;font-size:12px;margin-top:16px">Este correo es automático.</p>
           </div>
         `,
+      });
+    }
+
+    if (isAdmin && ticket.user_id) {
+      await createNotification({
+        userId: ticket.user_id,
+        type: "support",
+        title: "Soporte respondió tu ticket",
+        body: ticket.subject ? `Asunto: ${ticket.subject}` : null,
+        link: `/dashboard/soporte/${ticket.id}`,
+        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticket_number || null },
       });
     }
 
