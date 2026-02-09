@@ -6,21 +6,25 @@ import { getSellerTrustSignals } from "@/lib/trustSignals";
 import TrustBadges from "@/components/TrustBadges";
 import StarRating from "@/components/StarRating";
 import TicketPublicClient from "./TicketPublicClient";
+import type { Database } from "@/src/types/database.types";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
+type EventRow = Database["public"]["Tables"]["events"]["Row"];
+type TicketRow = Database["public"]["Tables"]["tickets"]["Row"];
+type RatingRow = Database["public"]["Tables"]["ratings"]["Row"];
+type RatingSummary = Pick<RatingRow, "id" | "stars" | "comment" | "created_at">;
+type TrustSignals = Awaited<ReturnType<typeof getSellerTrustSignals>>;
+
+type TicketWithEvent = TicketRow & { event?: EventRow | null };
+
 type PublicTicketData = {
-  ticket: any;
-  event: any;
-  trustSignals: any;
-  recentRatings: Array<{
-    id: string;
-    stars: number;
-    comment: string | null;
-    created_at: string | null;
-  }>;
+  ticket: TicketWithEvent;
+  event: EventRow | null;
+  trustSignals: TrustSignals | null;
+  recentRatings: RatingSummary[];
   notFound?: boolean;
 };
 
@@ -148,9 +152,9 @@ export async function generateMetadata({ params }: { params: { ticketId: string 
 
   const { ticket, event, trustSignals } = data;
   const eventTitle = event?.title || "Evento";
-  const sectionRaw = ticket.section_label ?? ticket.sector ?? ticket.section ?? null;
-  const rowRaw = ticket.row_label ?? ticket.row ?? null;
-  const seatRaw = ticket.seat_label ?? ticket.seat ?? null;
+  const sectionRaw = ticket.section_label ?? ticket.sector ?? null;
+  const rowRaw = ticket.row_label ?? null;
+  const seatRaw = ticket.seat_label ?? null;
   const section = sectionRaw != null ? String(sectionRaw) : null;
   const row = rowRaw != null ? String(rowRaw) : null;
   const seat = seatRaw != null ? String(seatRaw) : null;
@@ -160,7 +164,7 @@ export async function generateMetadata({ params }: { params: { ticketId: string 
     ? `Entrada para ${eventTitle} | ${seatLabel}`
     : `Entrada para ${eventTitle}`;
 
-  const priceNumber = Number(ticket.price ?? ticket.price_clp ?? 0);
+  const priceNumber = Number(ticket.price ?? 0);
   const priceLabel = priceNumber.toLocaleString("es-CL");
   const ratingCount = Number(trustSignals?.ratingCount ?? 0);
   const ratingValue = formatRating(trustSignals?.avgRating);
@@ -208,14 +212,13 @@ export default async function TicketPublicPage({
   const eventDate = formatDateTimeCL(event?.starts_at || null);
   const eventPlace = [event?.venue, event?.city].filter(Boolean).join(", ");
 
-  const sectionRaw = ticket.section_label ?? ticket.sector ?? ticket.section ?? null;
-  const rowRaw = ticket.row_label ?? ticket.row ?? null;
-  const seatRaw = ticket.seat_label ?? ticket.seat ?? null;
+  const sectionRaw = ticket.section_label ?? ticket.sector ?? null;
+  const rowRaw = ticket.row_label ?? null;
+  const seatRaw = ticket.seat_label ?? null;
   const section = sectionRaw != null ? String(sectionRaw) : null;
   const row = rowRaw != null ? String(rowRaw) : null;
   const seat = seatRaw != null ? String(seatRaw) : null;
   const seatLabel = buildSeatLabel(section, row, seat);
-  const transferType = ticket.transfer_type || ticket.transferType || null;
   const saleType = ticket.sale_type || null;
 
   const ratingCount = Number(trustSignals?.ratingCount ?? 0);
@@ -259,11 +262,6 @@ export default async function TicketPublicPage({
               {saleType ? (
                 <div className="text-sm text-slate-600">Tipo de venta: {saleType}</div>
               ) : null}
-              {transferType ? (
-                <div className="text-sm text-slate-600">
-                  Tipo transferencia: {transferType}
-                </div>
-              ) : null}
             </div>
 
             {ticket.description ? (
@@ -276,7 +274,7 @@ export default async function TicketPublicPage({
           <div className="text-right">
             <div className="text-sm text-slate-500">Precio</div>
             <div className="text-3xl font-bold text-slate-900">
-              {formatCLP(ticket.price ?? ticket.price_clp ?? 0)}
+              {formatCLP(ticket.price ?? 0)}
             </div>
             <div className="mt-4">
               <TicketPublicClient ticketId={ticket.id} />
