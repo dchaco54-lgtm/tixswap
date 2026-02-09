@@ -75,7 +75,7 @@ export default function NotificationBell({ userId }) {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error || "No se pudieron cargar");
       setItems(json?.notifications || []);
-    } catch (e) {
+    } catch {
       setItems([]);
       setError("No se pudieron cargar tus notificaciones");
     } finally {

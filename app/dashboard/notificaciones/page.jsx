@@ -50,7 +50,7 @@ export default function NotificationsPage() {
 
       const list = json?.notifications || [];
       setItems((prev) => (append ? [...prev, ...list] : list));
-    } catch (e) {
+    } catch {
       setError("No se pudieron cargar tus notificaciones");
       if (!append) setItems([]);
     } finally {
