@@ -37,12 +37,14 @@ export default function ShareButton({
   }, [open]);
 
   const safeUrl = typeof url === "string" ? url : "";
-  const shareText = text ? `${text} ${safeUrl}`.trim() : safeUrl;
+  const shareTitle = title || text || "Entrada en TixSwap";
 
-  const copyLink = async () => {
+  const copyLink = async (opts = {}) => {
+    const successMessage = opts.successMessage || "Link copiado";
+    const errorMessage = opts.errorMessage || "No se pudo copiar";
     if (!safeUrl) {
       showToast("err", "Link no disponible");
-      return;
+      return false;
     }
 
     try {
@@ -59,54 +61,84 @@ export default function ShareButton({
         document.execCommand("copy");
         document.body.removeChild(textarea);
       }
-      showToast("ok", "Link copiado");
+      showToast("ok", successMessage);
+      return true;
     } catch {
-      showToast("err", "No se pudo copiar");
+      showToast("err", errorMessage);
+      return false;
     }
-  };
-
-  const shareNative = async () => {
-    if (!safeUrl) {
-      showToast("err", "Link no disponible");
-      return;
-    }
-
-    if (navigator.share) {
-      try {
-        await navigator.share({ title, text, url: safeUrl });
-        showToast("ok", "Compartido");
-      } catch (e) {
-        if (e?.name !== "AbortError") {
-          showToast("err", "No se pudo compartir");
-        }
-      }
-      return;
-    }
-
-    await copyLink();
   };
 
   const openExternal = (shareUrl) => {
     if (!shareUrl) return;
-    window.open(shareUrl, "_blank", "noopener,noreferrer");
+    const win = window.open(shareUrl, "_blank", "noopener,noreferrer");
+    return !!win;
+  };
+
+  const isMobile = () => {
+    if (typeof navigator === "undefined") return false;
+    if (navigator.userAgentData?.mobile) return true;
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  };
+
+  const openInstagram = () => {
+    if (isMobile()) {
+      window.location.href = "instagram://story-camera";
+      window.setTimeout(() => {
+        if (document.visibilityState === "visible") {
+          window.location.href = "https://www.instagram.com/";
+        }
+      }, 800);
+      return;
+    }
+
+    openExternal("https://www.instagram.com/");
   };
 
   const onWhatsApp = () => {
-    openExternal(`https://wa.me/?text=${encodeURIComponent(shareText)}`);
+    const shareText = `${shareTitle}\n${safeUrl}`.trim();
+    const ok = openExternal(
+      `https://wa.me/?text=${encodeURIComponent(shareText)}`
+    );
+    if (!ok) {
+      copyLink();
+    }
   };
 
   const onFacebook = () => {
-    openExternal(
-      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(safeUrl)}`
+    const ok = openExternal(
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(
+        safeUrl
+      )}`
     );
+    if (!ok) {
+      copyLink();
+    }
   };
 
   const onInstagram = async () => {
-    if (navigator.share) {
-      await shareNative();
-      return;
+    await copyLink({
+      successMessage:
+        "Link copiado ✅ Abre Instagram → Historia → Sticker Enlace → Pegar",
+      errorMessage: "No se pudo copiar el link",
+    });
+    try {
+      openInstagram();
+    } catch {
+      // no-op: no mostrar error solo por no poder abrir Instagram
     }
-    await copyLink();
+  };
+
+  const onShareMore = async () => {
+    if (!safeUrl || !navigator.share) return;
+    try {
+      await navigator.share({ title: shareTitle, text, url: safeUrl });
+      showToast("ok", "Compartido");
+    } catch (e) {
+      if (e?.name !== "AbortError") {
+        showToast("err", "No se pudo compartir");
+      }
+    }
   };
 
   const buttonClass = `px-3 py-2 rounded-xl text-sm border transition ${
@@ -141,14 +173,6 @@ export default function ShareButton({
             Copiar link
           </MenuItem>
           <MenuItem
-            onClick={async () => {
-              await shareNative();
-              setOpen(false);
-            }}
-          >
-            Compartir...
-          </MenuItem>
-          <MenuItem
             onClick={() => {
               onWhatsApp();
               setOpen(false);
@@ -170,8 +194,18 @@ export default function ShareButton({
               setOpen(false);
             }}
           >
-            Instagram
+            Instagram (Historia)
           </MenuItem>
+          {typeof navigator !== "undefined" && navigator.share ? (
+            <MenuItem
+              onClick={async () => {
+                await onShareMore();
+                setOpen(false);
+              }}
+            >
+              Más apps...
+            </MenuItem>
+          ) : null}
         </div>
       ) : null}
 
