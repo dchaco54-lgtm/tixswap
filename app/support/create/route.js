@@ -96,20 +96,16 @@ export async function POST(req) {
 
     // Insert mensaje inicial
     const { error: mErr } = await supabaseAdmin
-      .from("support_ticket_messages")
+      .from("support_messages")
       .insert({
         ticket_id: ticket.id,
-        sender_type: "user",
-        sender_id: user.id,
+        sender_role: "user",
+        sender_user_id: user.id,
         body: text,
       });
 
     if (mErr) {
-      // Si falló el mensaje, igual devolvemos ticket, pero informamos
-      return json(
-        { ok: true, ticket, warning: "Ticket creado pero falló mensaje inicial" },
-        200
-      );
+      return json({ error: "DB insert failed", details: mErr?.message }, 500);
     }
 
     return json({ ok: true, ticket }, 200);

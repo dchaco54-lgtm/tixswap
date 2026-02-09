@@ -74,7 +74,7 @@ export async function POST(req) {
       .maybeSingle();
 
     const isAdmin = prof?.role === "admin";
-    const sender_type = isAdmin ? "admin" : "user";
+    const sender_role = isAdmin ? "admin" : "user";
 
     // cargar ticket
     const { data: ticket, error: tErr } = await supabaseAdmin
@@ -97,14 +97,14 @@ export async function POST(req) {
 
     // insertar mensaje
     const { data: msg, error: mErr } = await supabaseAdmin
-      .from("support_ticket_messages")
+      .from("support_messages")
       .insert({
         ticket_id,
-        sender_type,
-        sender_id: user.id,
+        sender_role,
+        sender_user_id: user.id,
         body: text.trim() || null,
       })
-      .select("id, ticket_id, sender_type, sender_id, body, created_at")
+      .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
       .single();
 
     if (mErr) return json({ error: "DB insert failed", details: mErr.message }, 500);
@@ -112,7 +112,7 @@ export async function POST(req) {
     // asociar adjuntos (si vienen)
     if (attachment_ids.length) {
       const { error: aErr } = await supabaseAdmin
-        .from("support_ticket_attachments")
+        .from("support_attachments")
         .update({ message_id: msg.id, ticket_id })
         .in("id", attachment_ids)
         .eq("ticket_id", ticket_id);
@@ -185,7 +185,15 @@ export async function POST(req) {
       });
     }
 
-    return json({ ok: true, message: msg, status: nextStatus });
+    const message = msg
+      ? {
+          ...msg,
+          sender_type: msg.sender_role,
+          sender_id: msg.sender_user_id,
+        }
+      : msg;
+
+    return json({ ok: true, message, status: nextStatus });
   } catch (e) {
     return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);
   }

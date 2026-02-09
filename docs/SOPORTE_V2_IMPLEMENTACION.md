@@ -382,7 +382,7 @@ WHERE app_role = 'admin' OR user_type = 'admin';
 -- CUIDADO: Esto borra TODOS los tickets de soporte
 -- Solo para desarrollo/testing
 DELETE FROM support_messages WHERE ticket_id IN (SELECT id FROM support_tickets);
-DELETE FROM support_ticket_attachments WHERE ticket_id IN (SELECT id FROM support_tickets);
+DELETE FROM support_attachments WHERE ticket_id IN (SELECT id FROM support_tickets);
 DELETE FROM support_tickets;
 ```
 

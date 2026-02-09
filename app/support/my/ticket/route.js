@@ -49,30 +49,51 @@ export async function GET(req) {
     if (ticket.user_id !== u.user.id) return json({ error: "FORBIDDEN" }, 403);
 
     const { data: msgs } = await supabaseAdmin
-      .from("support_ticket_messages")
-      .select("*")
+      .from("support_messages")
+      .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
       .eq("ticket_id", id)
       .order("created_at", { ascending: true });
 
     const { data: atts } = await supabaseAdmin
-      .from("support_ticket_attachments")
-      .select("*")
+      .from("support_attachments")
+      .select("id, ticket_id, message_id, storage_path, filename, mime_type, size_bytes, created_at")
       .eq("ticket_id", id)
       .order("created_at", { ascending: true });
 
     const attachments = [];
     for (const a of atts || []) {
+      if (!a.storage_path) {
+        attachments.push({
+          ...a,
+          signed_url: null,
+          file_name: a.filename,
+          file_size: a.size_bytes,
+        });
+        continue;
+      }
+
       const { data: signed } = await supabaseAdmin.storage
-        .from(a.bucket)
-        .createSignedUrl(a.path, 60 * 30);
+        .from("support-attachments")
+        .createSignedUrl(a.storage_path, 60 * 30);
 
       attachments.push({
         ...a,
         signed_url: signed?.signedUrl || null,
+        file_name: a.filename,
+        file_size: a.size_bytes,
       });
     }
 
-    return json({ ok: true, ticket, messages: msgs || [], attachments });
+    return json({
+      ok: true,
+      ticket,
+      messages: (msgs || []).map((m) => ({
+        ...m,
+        sender_type: m.sender_role,
+        sender_id: m.sender_user_id,
+      })),
+      attachments,
+    });
   } catch (e) {
     return json(
       { error: "Unexpected error", details: e?.message || String(e) },

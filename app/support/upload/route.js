@@ -104,16 +104,15 @@ export async function POST(req) {
     if (upErr) return json({ error: "Storage upload failed", details: upErr.message }, 500);
 
     const { data: row, error: insErr } = await supabaseAdmin
-      .from("support_ticket_attachments")
+      .from("support_attachments")
       .insert({
         ticket_id: ticketId,
-        bucket,
-        path,
-        file_name: file.name,
+        storage_path: path,
+        filename: file.name,
         mime_type: file.type,
-        file_size: file.size,
+        size_bytes: file.size,
       })
-      .select("id, ticket_id, message_id, bucket, path, file_name, mime_type, file_size, created_at")
+      .select("id, ticket_id, message_id, storage_path, filename, mime_type, size_bytes, created_at")
       .single();
 
     if (insErr) {
@@ -127,10 +126,14 @@ export async function POST(req) {
 
     return json({
       ok: true,
-      attachment: {
-        ...row,
-        signed_url: signed?.signedUrl || null,
-      },
+      attachment: row
+        ? {
+            ...row,
+            signed_url: signed?.signedUrl || null,
+            file_name: row.filename,
+            file_size: row.size_bytes,
+          }
+        : null,
     });
   } catch (e) {
     return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);

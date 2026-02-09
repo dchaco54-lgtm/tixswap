@@ -145,7 +145,14 @@ function SoporteContent() {
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo crear el ticket");
+      if (!res.ok) {
+        const errText = json?.error
+          ? json?.details
+            ? `${json.error}: ${json.details}`
+            : json.error
+          : "No se pudo crear el ticket";
+        throw new Error(errText);
+      }
 
       // Mostrar mensaje de éxito con código del ticket
       const ticketCode = json.ticket?.code || `TS-${json.ticket?.ticket_number || "—"}`;
