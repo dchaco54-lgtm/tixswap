@@ -14,6 +14,7 @@ export default function Header() {
 
   const [user, setUser] = useState(null);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [profileName, setProfileName] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -26,20 +27,60 @@ export default function Header() {
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null);
+      setProfileName(null);
       setLoadingUser(false);
     });
 
     return () => sub?.subscription?.unsubscribe?.();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    if (!user?.id) {
+      setProfileName(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    const loadProfile = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!active) return;
+
+      if (error) {
+        console.error("[Header] Error cargando perfil:", error);
+        setProfileName(null);
+        return;
+      }
+
+      setProfileName(data?.full_name ?? null);
+    };
+
+    loadProfile();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
   const displayName = useMemo(() => {
     const name =
+      profileName ||
       user?.user_metadata?.full_name ||
       user?.user_metadata?.name ||
       user?.email ||
       "Usuario";
-    return String(name).split("@")[0];
-  }, [user]);
+
+    const str = String(name || "");
+    if (name === user?.email && str.includes("@")) return str.split("@")[0];
+    return str || "Usuario";
+  }, [profileName, user]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
