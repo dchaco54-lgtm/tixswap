@@ -140,7 +140,7 @@ function SoporteContent() {
         body: JSON.stringify({
           category,
           subject: s,
-          body: m,
+          message: m,
         }),
       });
 

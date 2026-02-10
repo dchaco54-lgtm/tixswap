@@ -50,7 +50,7 @@ export async function POST(req) {
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
     if (!subject) return json({ error: "Falta asunto" }, 400);
-    if (!messageText) return json({ error: "Falta mensaje" }, 400);
+    if (!messageText) return json({ error: "Mensaje requerido" }, 400);
 
     const now = new Date().toISOString();
 
