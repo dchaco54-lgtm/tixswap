@@ -415,7 +415,7 @@ export default function MyTicketsPage() {
                       </p>
                     </div>
                     <button
-                      onClick={() => router.push("/dashboard/soporte")}
+                      onClick={() => router.push("/dashboard/tickets")}
                       className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
                     >
                       ← Volver
@@ -483,6 +483,7 @@ export default function MyTicketsPage() {
                     ) : (
                       safeMessages.map((m) => {
                         const mine = m.sender_type === "user" || m.sender_role === "user";
+                        const content = m.body ?? m.message ?? "";
                         const related = safeAttachments.filter((a) => a.message_id === m.id);
                         return (
                           <div
@@ -514,9 +515,9 @@ export default function MyTicketsPage() {
                                 </div>
                               </div>
 
-                              {m.body ? (
+                              {content ? (
                                 <p className="text-sm text-slate-800 whitespace-pre-line">
-                                  {m.body}
+                                  {content}
                                 </p>
                               ) : null}
 

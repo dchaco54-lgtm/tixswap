@@ -38,5 +38,10 @@ export async function GET(_req, { params }) {
 
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
 
-  return NextResponse.json({ ticket, messages: messages ?? [] });
+  const normalized = (messages || []).map((m) => ({
+    ...m,
+    body: m.body ?? m.message,
+  }));
+
+  return NextResponse.json({ ticket, messages: normalized });
 }

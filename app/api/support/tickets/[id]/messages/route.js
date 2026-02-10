@@ -7,9 +7,20 @@ export async function POST(req, { params }) {
   const id = params?.id;
   if (!id) return NextResponse.json({ error: "Falta id" }, { status: 400 });
 
-  const body = await req.json().catch(() => ({}));
-  const message = sanitizeUserText(body.message, { maxLen: 3000 });
-  if (!message) return NextResponse.json({ error: "Falta mensaje" }, { status: 400 });
+  let payload = {};
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    const form = await req.formData();
+    payload = {
+      body: form.get("body"),
+      message: form.get("message"),
+    };
+  } else {
+    payload = await req.json().catch(() => ({}));
+  }
+
+  const content = sanitizeUserText(payload.body ?? payload.message, { maxLen: 3000 });
+  if (!content) return NextResponse.json({ error: "Falta mensaje" }, { status: 400 });
 
   const rate = rateLimitByRequest(req, {
     bucket: `support-ticket-message:${id}`,
@@ -58,7 +69,7 @@ export async function POST(req, { params }) {
       ticket_id: id,
       sender_role: "user",
       sender_user_id: user.id,
-      body: message,
+      body: content,
     })
     .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
     .single();
@@ -67,7 +78,7 @@ export async function POST(req, { params }) {
 
   await admin
     .from("support_tickets")
-    .update({ last_message_at: new Date().toISOString() })
+    .update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("id", id);
 
   return NextResponse.json({ message: msg });

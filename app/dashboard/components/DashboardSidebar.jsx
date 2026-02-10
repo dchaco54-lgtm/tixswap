@@ -35,7 +35,7 @@ export default function DashboardSidebar() {
       { label: 'Mis calificaciones', href: '/dashboard/calificaciones', icon: '⭐' },
       { label: 'Wallet', href: '/dashboard/wallet', icon: '💳' },
       { label: 'Vender', href: '/sell', icon: '📤' },
-      { label: 'Soporte', href: '/dashboard/soporte', icon: '🆘' },
+      { label: 'Soporte', href: '/dashboard/tickets', icon: '🆘' },
     ];
 
     // ✅ En vez de mandarte directo a /admin/soporte (solo tickets),

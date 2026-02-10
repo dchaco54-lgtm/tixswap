@@ -77,7 +77,7 @@ export default function TicketDetail({ params }) {
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
           <div className="text-sm text-gray-500">
-            <Link href="/dashboard/soporte" className="underline">← Volver</Link>
+            <Link href="/dashboard/tickets" className="underline">← Volver</Link>
           </div>
           <h1 className="text-2xl font-semibold mt-2">
             {ticket.subject}
@@ -93,7 +93,8 @@ export default function TicketDetail({ params }) {
 
       <div className="rounded-2xl border bg-white p-4">
         <div className="space-y-3">
-          {messages.map(m => {
+          {(messages || []).map(m => {
+            const content = m?.body ?? m?.message ?? "";
             const isUser = m.sender_role === "user";
             const atts = attachmentsByMessage.get(m.id) ?? [];
             return (
@@ -104,7 +105,7 @@ export default function TicketDetail({ params }) {
                     <span>{new Date(m.created_at).toLocaleString("es-CL")}</span>
                   </div>
 
-                  {m.body ? <div className="text-sm whitespace-pre-wrap">{m.body}</div> : null}
+                  {content ? <div className="text-sm whitespace-pre-wrap">{content}</div> : null}
 
                   {atts.length > 0 ? (
                     <div className="mt-2 space-y-1">

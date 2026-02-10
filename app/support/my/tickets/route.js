@@ -56,8 +56,8 @@ export async function GET(req) {
 
     if (ids.length) {
       const { data: msgs } = await supabaseAdmin
-        .from("support_ticket_messages")
-        .select("ticket_id, message, created_at")
+        .from("support_messages")
+        .select("ticket_id, body, created_at")
         .in("ticket_id", ids)
         .order("created_at", { ascending: false });
 
@@ -69,7 +69,7 @@ export async function GET(req) {
     const normalized = list.map((t) => {
       const last = lastByTicket[t.id];
       const lastAt = t.last_message_at || last?.created_at || t.created_at || null;
-      const preview = t.last_message_preview || last?.message || "";
+      const preview = t.last_message_preview || last?.body || last?.message || "";
       return {
         ...t,
         last_message_at: lastAt,
@@ -91,4 +91,3 @@ export async function GET(req) {
     );
   }
 }
-

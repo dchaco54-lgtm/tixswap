@@ -36,54 +36,67 @@ export default function NotificationBell({ userId }) {
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  const loadPreview = useCallback(
-    async ({ silent = false } = {}) => {
-      if (!userId) {
-        setItems([]);
-        setUnreadCount(0);
-        return;
-      }
+  const loadCount = useCallback(async () => {
+    if (!userId) {
+      setUnreadCount(0);
+      return;
+    }
 
-      if (!silent) setLoading(true);
-      if (!silent) setError("");
+    try {
+      const res = await fetch("/api/notifications/unread-count", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "No se pudo contar");
+      setUnreadCount(Number(json?.count || 0));
+    } catch (err) {
+      console.error("[NotificationBell] unread-count error:", err);
+      setUnreadCount((prev) => prev || 0);
+    }
+  }, [userId]);
 
-      try {
-        const res = await fetch("/api/notifications/preview", {
-          cache: "no-store",
-          credentials: "include",
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json?.error || "No se pudieron cargar");
-        setItems(Array.isArray(json?.items) ? json.items : []);
-        setUnreadCount(Number(json?.unreadCount || 0));
-      } catch {
-        if (!silent) {
-          setError("No se pudieron cargar");
-          setItems([]);
-        }
-        setUnreadCount((prev) => prev || 0);
-      } finally {
-        if (!silent) setLoading(false);
-      }
-    },
-    [userId]
-  );
+  const loadList = useCallback(async () => {
+    if (!userId) {
+      setItems([]);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/notifications?limit=5", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || "No se pudieron cargar");
+      setItems(Array.isArray(json?.notifications) ? json.notifications : []);
+    } catch (err) {
+      console.error("[NotificationBell] list error:", err);
+      setError("No se pudieron cargar");
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
-    loadPreview({ silent: true });
+    loadCount();
 
     const t = window.setInterval(() => {
-      loadPreview({ silent: true });
+      loadCount();
     }, 60000);
 
     return () => window.clearInterval(t);
-  }, [userId, loadPreview]);
+  }, [userId, loadCount]);
 
   useEffect(() => {
     if (!open) return;
-    loadPreview();
-  }, [open, loadPreview]);
+    loadList();
+  }, [open, loadList]);
 
   useEffect(() => {
     if (!open) return;

@@ -64,7 +64,7 @@ export async function POST(req) {
 
   const body = await req.json().catch(() => ({}));
   const subject = sanitizeUserText(body.subject, { maxLen: 180 });
-  const message = sanitizeUserText(body.message, { maxLen: 3000 });
+  const message = sanitizeUserText(body.body ?? body.message, { maxLen: 3000 });
   const kind = body.kind === "dispute" ? "dispute" : "support";
 
   if (!subject) return NextResponse.json({ error: "Falta asunto" }, { status: 400 });

@@ -49,6 +49,7 @@ export async function POST(req) {
     const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
+    if (!category) return json({ error: "Falta categoría" }, 400);
     if (!subject) return json({ error: "Falta asunto" }, 400);
     if (!messageText) return json({ error: "Mensaje requerido" }, 400);
 
@@ -59,15 +60,17 @@ export async function POST(req) {
       status: "open",
       category,
       subject,
-      message: messageText,
       created_at: now,
+      updated_at: now,
       last_message_at: now,
       last_message_preview: messageText,
     };
+    // Compatibilidad: si existe columna message en support_tickets
+    insertPayload.message = messageText;
 
     let ticket = null;
     let tErr = null;
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       const res = await supabaseAdmin
         .from("support_tickets")
         .insert(insertPayload)
@@ -92,12 +95,12 @@ export async function POST(req) {
 
     // Insert mensaje inicial
     const { data: msg, error: mErr } = await supabaseAdmin
-      .from("support_ticket_messages")
+      .from("support_messages")
       .insert({
         ticket_id: ticket.id,
-        sender_id: user.id,
         sender_role: "user",
-        message: messageText,
+        sender_user_id: user.id,
+        body: messageText,
         created_at: now,
       })
       .select("id")
@@ -116,7 +119,7 @@ export async function POST(req) {
 
     if (attachment_ids.length) {
       const { error: aErr } = await supabaseAdmin
-        .from("support_ticket_attachments")
+        .from("support_attachments")
         .update({ message_id: msg?.id || null, ticket_id: ticket.id })
         .in("id", attachment_ids)
         .eq("ticket_id", ticket.id);
@@ -127,7 +130,7 @@ export async function POST(req) {
     }
 
     let updatePayload = { last_message_at: now, last_message_preview: messageText };
-    for (let i = 0; i < 3; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       const { error: lmErr } = await supabaseAdmin
         .from("support_tickets")
         .update(updatePayload)

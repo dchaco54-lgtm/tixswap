@@ -107,15 +107,15 @@ export async function POST(req) {
     // insertar mensaje
     const bodyValue = messageText || (attachment_ids.length ? "" : null);
     const { data: msg, error: mErr } = await supabaseAdmin
-      .from("support_ticket_messages")
+      .from("support_messages")
       .insert({
         ticket_id,
-        sender_id: user.id,
         sender_role,
-        message: bodyValue,
+        sender_user_id: user.id,
+        body: bodyValue,
         created_at: new Date().toISOString(),
       })
-      .select("id, ticket_id, sender_id, sender_role, message, created_at")
+      .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
       .single();
 
     if (mErr) return json({ ok: false, error: "DB insert failed", details: mErr.message }, 500);
@@ -124,7 +124,7 @@ export async function POST(req) {
     let updatedAttachments = [];
     if (attachment_ids.length) {
       const { error: aErr } = await supabaseAdmin
-        .from("support_ticket_attachments")
+        .from("support_attachments")
         .update({ message_id: msg.id, ticket_id })
         .in("id", attachment_ids)
         .eq("ticket_id", ticket_id);
@@ -137,21 +137,25 @@ export async function POST(req) {
       }
 
       const { data: atts } = await supabaseAdmin
-        .from("support_ticket_attachments")
-        .select("id, ticket_id, message_id, bucket, path, file_name, mime_type, file_size, created_at")
+        .from("support_attachments")
+        .select("id, ticket_id, message_id, storage_path, filename, mime_type, size_bytes, created_at")
         .in("id", attachment_ids)
         .eq("ticket_id", ticket_id);
 
       updatedAttachments = atts || [];
       for (const a of updatedAttachments) {
-        if (!a?.bucket || !a?.path) {
+        if (!a?.storage_path) {
           a.signed_url = null;
+          a.file_name = a.filename;
+          a.file_size = a.size_bytes;
           continue;
         }
         const { data: signed } = await supabaseAdmin.storage
-          .from(a.bucket)
-          .createSignedUrl(a.path, 60 * 60);
+          .from("support-attachments")
+          .createSignedUrl(a.storage_path, 60 * 60);
         a.signed_url = signed?.signedUrl || null;
+        a.file_name = a.filename;
+        a.file_size = a.size_bytes;
       }
     }
 
