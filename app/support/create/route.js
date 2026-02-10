@@ -15,12 +15,6 @@ function env(name) {
   return v && String(v).trim().length ? String(v).trim() : null;
 }
 
-function addHours(date, h) {
-  const d = new Date(date);
-  d.setHours(d.getHours() + h);
-  return d.toISOString();
-}
-
 function getMissingColumn(err) {
   if (!err) return null;
   const msg = `${err.message || ""} ${err.details || ""}`.trim();
@@ -52,48 +46,38 @@ export async function POST(req) {
     const body = await req.json().catch(() => ({}));
     const category = String(body?.category || "soporte").trim();
     const subject = String(body?.subject || "").trim();
-    const text = String(body?.body ?? body?.text ?? "").trim();
+    const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
+    const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
     if (!subject) return json({ error: "Missing subject" }, 400);
-    if (!text) return json({ error: "Missing body" }, 400);
+    if (!messageText) return json({ error: "Missing message" }, 400);
 
-    // Perfil (para requester_name / rut)
-    const { data: prof } = await supabaseAdmin
-      .from("profiles")
-      .select("full_name, rut, email")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    // ticket_number “next”
-    const { data: maxRow } = await supabaseAdmin
-      .from("support_tickets")
-      .select("ticket_number")
-      .order("ticket_number", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    const nextNumber = Number(maxRow?.ticket_number || 1000) + 1;
+    let nextNumber = null;
+    try {
+      const { data: maxRow, error: numErr } = await supabaseAdmin
+        .from("support_tickets")
+        .select("ticket_number")
+        .order("ticket_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!numErr) nextNumber = Number(maxRow?.ticket_number || 1000) + 1;
+    } catch {
+      nextNumber = null;
+    }
 
     const now = new Date().toISOString();
-    const due_at =
-      category === "disputa_compra" || category === "disputa_venta"
-        ? addHours(now, 48)
-        : addHours(now, 72);
 
     let insertPayload = {
       user_id: user.id,
-      ticket_number: nextNumber,
-      status: "submitted",
+      status: "open",
       category,
       subject,
-      message: text,
-      requester_email: prof?.email || user.email || null,
-      requester_name: prof?.full_name || null,
-      requester_rut: prof?.rut || null,
-      due_at,
+      message: messageText,
+      created_at: now,
       last_message_at: now,
-      updated_at: now,
+      last_message_preview: messageText,
     };
+    if (nextNumber) insertPayload.ticket_number = nextNumber;
 
     let ticket = null;
     let tErr = null;
@@ -121,32 +105,50 @@ export async function POST(req) {
     }
 
     // Insert mensaje inicial
-    const { error: mErr } = await supabaseAdmin
-      .from("support_messages")
+    const { data: msg, error: mErr } = await supabaseAdmin
+      .from("support_ticket_messages")
       .insert({
         ticket_id: ticket.id,
+        sender_id: user.id,
         sender_role: "user",
-        sender_user_id: user.id,
-        body: text,
-      });
+        message: messageText,
+        created_at: now,
+      })
+      .select("id")
+      .single();
 
     if (mErr) {
       return json({ error: "DB insert failed", details: mErr?.message }, 500);
     }
 
-    const { error: lmErr } = await supabaseAdmin
-      .from("support_tickets")
-      .update({ last_message_at: now })
-      .eq("id", ticket.id);
+    if (attachment_ids.length) {
+      const { error: aErr } = await supabaseAdmin
+        .from("support_ticket_attachments")
+        .update({ message_id: msg?.id || null, ticket_id: ticket.id })
+        .in("id", attachment_ids)
+        .eq("ticket_id", ticket.id);
 
-    if (lmErr && !getMissingColumn(lmErr)) {
-      console.warn("[support/create] last_message_at update failed:", lmErr);
+      if (aErr) {
+        return json({ error: "Attachment update failed", details: aErr.message }, 500);
+      }
     }
 
-    return json(
-      { ok: true, ticketId: ticket.id, ticket_number: ticket.ticket_number || nextNumber },
-      200
-    );
+    let updatePayload = { last_message_at: now, last_message_preview: messageText };
+    for (let i = 0; i < 3; i += 1) {
+      const { error: lmErr } = await supabaseAdmin
+        .from("support_tickets")
+        .update(updatePayload)
+        .eq("id", ticket.id);
+
+      if (!lmErr) break;
+      const missing = getMissingColumn(lmErr);
+      if (!missing || !(missing in updatePayload)) break;
+      const nextPayload = { ...updatePayload };
+      delete nextPayload[missing];
+      updatePayload = nextPayload;
+    }
+
+    return json({ ticket_id: ticket.id, message_id: msg?.id || null }, 200);
   } catch (e) {
     return json(
       { error: "Unexpected error", details: e?.message || String(e) },

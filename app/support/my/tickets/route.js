@@ -50,7 +50,40 @@ export async function GET(req) {
     const { data: tickets, error } = await query;
     if (error) return json({ error: error.message }, 500);
 
-    return json({ ok: true, tickets: tickets || [] });
+    const list = Array.isArray(tickets) ? tickets : [];
+    const ids = list.map((t) => t.id).filter(Boolean);
+    let lastByTicket = {};
+
+    if (ids.length) {
+      const { data: msgs } = await supabaseAdmin
+        .from("support_ticket_messages")
+        .select("ticket_id, message, created_at")
+        .in("ticket_id", ids)
+        .order("created_at", { ascending: false });
+
+      for (const m of msgs || []) {
+        if (!lastByTicket[m.ticket_id]) lastByTicket[m.ticket_id] = m;
+      }
+    }
+
+    const normalized = list.map((t) => {
+      const last = lastByTicket[t.id];
+      const lastAt = t.last_message_at || last?.created_at || t.created_at || null;
+      const preview = t.last_message_preview || last?.message || "";
+      return {
+        ...t,
+        last_message_at: lastAt,
+        last_message_preview: preview,
+      };
+    });
+
+    normalized.sort((a, b) => {
+      const da = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const db = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return db - da;
+    });
+
+    return json({ ok: true, tickets: normalized });
   } catch (e) {
     return json(
       { error: "Unexpected error", details: e?.message || String(e) },
@@ -58,5 +91,4 @@ export async function GET(req) {
     );
   }
 }
-
 

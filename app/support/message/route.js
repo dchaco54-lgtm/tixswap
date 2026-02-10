@@ -16,6 +16,15 @@ function env(name) {
   return v && String(v).trim().length ? String(v).trim() : null;
 }
 
+function getMissingColumn(err) {
+  if (!err) return null;
+  const msg = `${err.message || ""} ${err.details || ""}`.trim();
+  const match = msg.match(/column \"([^\"]+)\"/i);
+  if (!match) return null;
+  if (err.code === "42703" || msg.includes("does not exist")) return match[1];
+  return null;
+}
+
 async function sendResendEmail({ to, subject, html }) {
   const key = env("RESEND_API_KEY");
   const from = env("SUPPORT_FROM_EMAIL") || "soporte@tixswap.cl";
@@ -58,7 +67,7 @@ export async function POST(req) {
 
     const body = await req.json().catch(() => ({}));
     const ticket_id = body?.ticket_id;
-    const messageText = String(body?.body ?? body?.text ?? "").trim();
+    const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
     if (!ticket_id) return json({ ok: false, error: "Missing ticket_id" }, 400);
@@ -98,27 +107,47 @@ export async function POST(req) {
     // insertar mensaje
     const bodyValue = messageText || (attachment_ids.length ? "" : null);
     const { data: msg, error: mErr } = await supabaseAdmin
-      .from("support_messages")
+      .from("support_ticket_messages")
       .insert({
         ticket_id,
+        sender_id: user.id,
         sender_role,
-        sender_user_id: user.id,
-        body: bodyValue,
+        message: bodyValue,
+        created_at: new Date().toISOString(),
       })
-      .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
+      .select("id, ticket_id, sender_id, sender_role, message, created_at")
       .single();
 
     if (mErr) return json({ ok: false, error: "DB insert failed", details: mErr.message }, 500);
 
     // asociar adjuntos (si vienen)
+    let updatedAttachments = [];
     if (attachment_ids.length) {
       const { error: aErr } = await supabaseAdmin
-        .from("support_attachments")
+        .from("support_ticket_attachments")
         .update({ message_id: msg.id, ticket_id })
         .in("id", attachment_ids)
         .eq("ticket_id", ticket_id);
 
-      if (aErr) console.warn("attach update error", aErr);
+      if (aErr) return json({ ok: false, error: "Attachment update failed", details: aErr.message }, 500);
+
+      const { data: atts } = await supabaseAdmin
+        .from("support_ticket_attachments")
+        .select("id, ticket_id, message_id, bucket, path, file_name, mime_type, file_size, created_at")
+        .in("id", attachment_ids)
+        .eq("ticket_id", ticket_id);
+
+      updatedAttachments = atts || [];
+      for (const a of updatedAttachments) {
+        if (!a?.bucket || !a?.path) {
+          a.signed_url = null;
+          continue;
+        }
+        const { data: signed } = await supabaseAdmin.storage
+          .from(a.bucket)
+          .createSignedUrl(a.path, 60 * 60);
+        a.signed_url = signed?.signedUrl || null;
+      }
     }
 
     // auto-transición de estado
@@ -129,14 +158,27 @@ export async function POST(req) {
       if (ticket.status === "waiting_user") nextStatus = "in_review";
     }
 
-    await supabaseAdmin
-      .from("support_tickets")
-      .update({
-        status: nextStatus,
-        last_message_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", ticket_id);
+    const now = new Date().toISOString();
+    let updatePayload = {
+      status: nextStatus,
+      last_message_at: now,
+      last_message_preview: messageText || "",
+      updated_at: now,
+    };
+
+    for (let i = 0; i < 4; i += 1) {
+      const { error: upErr } = await supabaseAdmin
+        .from("support_tickets")
+        .update(updatePayload)
+        .eq("id", ticket_id);
+
+      if (!upErr) break;
+      const missing = getMissingColumn(upErr);
+      if (!missing || !(missing in updatePayload)) break;
+      const nextPayload = { ...updatePayload };
+      delete nextPayload[missing];
+      updatePayload = nextPayload;
+    }
 
     // email: si admin responde => usuario
     if (isAdmin && ticket.requester_email) {
@@ -186,15 +228,12 @@ export async function POST(req) {
       });
     }
 
-    const message = msg
-      ? {
-          ...msg,
-          sender_type: msg.sender_role,
-          sender_id: msg.sender_user_id,
-        }
-      : msg;
-
-    return json({ ok: true, message, status: nextStatus });
+    return json({
+      ok: true,
+      message: msg,
+      attachments: updatedAttachments,
+      status: nextStatus,
+    });
   } catch (e) {
     return json(
       { ok: false, error: "Unexpected error", details: e?.message || String(e) },

@@ -70,39 +70,35 @@ export async function GET(req) {
 
     // Mensajes
     const { data: msgs } = await supabaseAdmin
-      .from("support_messages")
-      .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
+      .from("support_ticket_messages")
+      .select("id, ticket_id, sender_id, sender_role, message, created_at")
       .eq("ticket_id", id)
       .order("created_at", { ascending: true });
 
     // Adjuntos
     const { data: atts } = await supabaseAdmin
-      .from("support_attachments")
-      .select("id, ticket_id, message_id, storage_path, filename, mime_type, size_bytes, created_at")
+      .from("support_ticket_attachments")
+      .select("id, ticket_id, message_id, bucket, path, file_name, mime_type, file_size, created_at")
       .eq("ticket_id", id)
       .order("created_at", { ascending: true });
 
     const attachments = [];
     for (const a of atts || []) {
-      if (!a.storage_path) {
+      if (!a.path || !a.bucket) {
         attachments.push({
           ...a,
           signed_url: null,
-          file_name: a.filename,
-          file_size: a.size_bytes,
         });
         continue;
       }
 
       const { data: signed } = await supabaseAdmin.storage
-        .from("support-attachments")
-        .createSignedUrl(a.storage_path, 60 * 30);
+        .from(a.bucket)
+        .createSignedUrl(a.path, 60 * 30);
 
       attachments.push({
         ...a,
         signed_url: signed?.signedUrl || null,
-        file_name: a.filename,
-        file_size: a.size_bytes,
       });
     }
 
@@ -111,8 +107,8 @@ export async function GET(req) {
       ticket,
       messages: (msgs || []).map((m) => ({
         ...m,
+        body: m.message,
         sender_type: m.sender_role,
-        sender_id: m.sender_user_id,
       })),
       attachments,
     });

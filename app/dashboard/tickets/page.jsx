@@ -147,6 +147,10 @@ export default function MyTicketsPage() {
     });
   }, [q, tickets]);
 
+  const safeFiltered = Array.isArray(filtered) ? filtered : [];
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  const safeAttachments = Array.isArray(attachments) ? attachments : [];
+
   const onPickFiles = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length || !selected?.id) return;
@@ -203,7 +207,7 @@ export default function MyTicketsPage() {
         },
         body: JSON.stringify({
           ticket_id: selected.id,
-          text: "Ticket reabierto por el usuario",
+          message: "Ticket reabierto por el usuario",
           reopen: true,
         }),
       });
@@ -248,7 +252,7 @@ export default function MyTicketsPage() {
         },
         body: JSON.stringify({
           ticket_id: selected.id,
-          text: draft.trim(),
+          message: draft.trim(),
           attachment_ids: pendingUploads.map((a) => a.id),
         }),
       });
@@ -353,10 +357,10 @@ export default function MyTicketsPage() {
             <div className="mt-4 space-y-2 max-h-[70vh] overflow-auto pr-1">
               {loadingList ? (
                 <p className="text-sm text-slate-500">Cargando…</p>
-              ) : filtered.length === 0 ? (
+              ) : safeFiltered.length === 0 ? (
                 <p className="text-sm text-slate-500">Aún no tienes tickets.</p>
               ) : (
-                filtered.map((t) => (
+                safeFiltered.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => setSelectedId(t.id)}
@@ -469,7 +473,7 @@ export default function MyTicketsPage() {
                   </h3>
 
                   <div className="space-y-3 max-h-[46vh] overflow-auto pr-1">
-                    {messages.length === 0 ? (
+                    {safeMessages.length === 0 ? (
                       <div className="text-center py-8">
                         <svg className="w-12 h-12 mx-auto text-slate-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -477,9 +481,9 @@ export default function MyTicketsPage() {
                         <p className="text-sm text-slate-500">Aún no hay mensajes</p>
                       </div>
                     ) : (
-                      messages.map((m) => {
+                      safeMessages.map((m) => {
                         const mine = m.sender_type === "user" || m.sender_role === "user";
-                        const related = attachments.filter((a) => a.message_id === m.id);
+                        const related = safeAttachments.filter((a) => a.message_id === m.id);
                         return (
                           <div
                             key={m.id}
