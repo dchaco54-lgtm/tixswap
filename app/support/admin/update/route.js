@@ -58,15 +58,27 @@ export async function POST(req) {
     const ticket_id = body?.ticket_id;
     const status = body?.status;
 
-    if (!ticket_id) return json({ error: "Missing ticket_id" }, 400);
-    if (!status) return json({ error: "Missing status" }, 400);
+    if (!ticket_id) return json({ error: "Falta ticket_id" }, 400);
+    if (!status) return json({ error: "Falta status" }, 400);
+
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from("support_tickets")
+      .select("id, status")
+      .eq("id", ticket_id)
+      .single();
+
+    if (exErr || !existing) return json({ error: "Ticket no existe" }, 404);
 
     const payload = {
       status,
       updated_at: new Date().toISOString(),
     };
 
-    if (status === "resolved" || status === "rejected") {
+    const isClosing = (status === "resolved" || status === "rejected") &&
+      existing.status !== "resolved" &&
+      existing.status !== "rejected";
+
+    if (isClosing) {
       payload.closed_at = new Date().toISOString();
       payload.closed_by = u.user.id;
     }

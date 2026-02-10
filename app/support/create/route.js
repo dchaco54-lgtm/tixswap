@@ -49,21 +49,8 @@ export async function POST(req) {
     const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
-    if (!subject) return json({ error: "Missing subject" }, 400);
-    if (!messageText) return json({ error: "Missing message" }, 400);
-
-    let nextNumber = null;
-    try {
-      const { data: maxRow, error: numErr } = await supabaseAdmin
-        .from("support_tickets")
-        .select("ticket_number")
-        .order("ticket_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (!numErr) nextNumber = Number(maxRow?.ticket_number || 1000) + 1;
-    } catch {
-      nextNumber = null;
-    }
+    if (!subject) return json({ error: "Falta asunto" }, 400);
+    if (!messageText) return json({ error: "Falta mensaje" }, 400);
 
     const now = new Date().toISOString();
 
@@ -77,7 +64,6 @@ export async function POST(req) {
       last_message_at: now,
       last_message_preview: messageText,
     };
-    if (nextNumber) insertPayload.ticket_number = nextNumber;
 
     let ticket = null;
     let tErr = null;
@@ -118,6 +104,13 @@ export async function POST(req) {
       .single();
 
     if (mErr) {
+      const { error: delErr } = await supabaseAdmin
+        .from("support_tickets")
+        .delete()
+        .eq("id", ticket.id);
+      if (delErr) {
+        console.error("[support/create] delete ticket failed:", delErr);
+      }
       return json({ error: "DB insert failed", details: mErr?.message }, 500);
     }
 
@@ -129,7 +122,7 @@ export async function POST(req) {
         .eq("ticket_id", ticket.id);
 
       if (aErr) {
-        return json({ error: "Attachment update failed", details: aErr.message }, 500);
+        return json({ error: "No se pudieron asociar adjuntos", details: aErr.message }, 500);
       }
     }
 
@@ -148,7 +141,10 @@ export async function POST(req) {
       updatePayload = nextPayload;
     }
 
-    return json({ ticket_id: ticket.id, message_id: msg?.id || null }, 200);
+    return json(
+      { ticket_id: ticket.id, message_id: msg?.id || null, ticket_number: ticket.ticket_number || null },
+      200
+    );
   } catch (e) {
     return json(
       { error: "Unexpected error", details: e?.message || String(e) },

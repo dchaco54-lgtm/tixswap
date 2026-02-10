@@ -70,7 +70,7 @@ export async function POST(req) {
     const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
-    if (!ticket_id) return json({ ok: false, error: "Missing ticket_id" }, 400);
+    if (!ticket_id) return json({ ok: false, error: "Falta ticket_id" }, 400);
     if (!messageText && attachment_ids.length === 0) {
       return json({ ok: false, error: "Mensaje vacío" }, 400);
     }
@@ -129,7 +129,12 @@ export async function POST(req) {
         .in("id", attachment_ids)
         .eq("ticket_id", ticket_id);
 
-      if (aErr) return json({ ok: false, error: "Attachment update failed", details: aErr.message }, 500);
+      if (aErr) {
+        return json(
+          { ok: false, error: "No se pudieron asociar adjuntos", details: aErr.message },
+          500
+        );
+      }
 
       const { data: atts } = await supabaseAdmin
         .from("support_ticket_attachments")
@@ -151,12 +156,7 @@ export async function POST(req) {
     }
 
     // auto-transición de estado
-    let nextStatus = ticket.status;
-    if (isAdmin) {
-      if (ticket.status === "submitted" || ticket.status === "waiting_user") nextStatus = "in_review";
-    } else {
-      if (ticket.status === "waiting_user") nextStatus = "in_review";
-    }
+    const nextStatus = isAdmin ? "waiting_user" : "waiting_support";
 
     const now = new Date().toISOString();
     let updatePayload = {
