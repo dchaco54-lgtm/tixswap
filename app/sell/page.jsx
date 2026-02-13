@@ -52,7 +52,6 @@ export default function SellPage() {
   const [requestEvent, setRequestEvent] = useState(false);
   const [requestedEventName, setRequestedEventName] = useState("");
   const [requestedEventExtra, setRequestedEventExtra] = useState("");
-  const [requestSending, setRequestSending] = useState(false);
 
   const [description, setDescription] = useState("");
   const [sector, setSector] = useState("");
@@ -178,79 +177,6 @@ export default function SellPage() {
     setSelectedEvent(ev);
     setEventQuery(ev.title ?? "");
     setEventOpen(false);
-  }
-
-  async function handleRequestSupport() {
-    if (requestSending) return;
-
-    const name = requestedEventName.trim();
-    if (!name || name.length < 3) {
-      alert("Pon el nombre del evento para solicitarlo a soporte 🙏");
-      return;
-    }
-
-    if (description.trim().length < 6) {
-      alert("Completa la descripción (mínimo 6 caracteres) 🙏");
-      return;
-    }
-
-    setRequestSending(true);
-    try {
-      let userId = null;
-      let userEmail = null;
-
-      try {
-        const { data } = await supabase.auth.getUser();
-        userId = data?.user?.id ?? null;
-        userEmail = data?.user?.email ?? null;
-      } catch {}
-
-      const payload = {
-        requestEvent: true,
-        requestedEventName: name,
-        requestedEventExtra: requestedEventExtra.trim() || null,
-        userId,
-        userEmail,
-
-        // Paso 1 completo
-        description: description.trim(),
-        sector: sector.trim() || null,
-        fila: fila.trim() || null,
-        asiento: asiento.trim() || null,
-        saleType: saleType || "fixed",
-        price: price ? Number(price) : null,
-        originalPrice: originalPrice ? Number(originalPrice) : null,
-
-        // placeholder para cuando amarramos paso 2/3 real
-        step2: null,
-        step3: null,
-      };
-
-      const res = await fetch("/api/support/sell-request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data?.error || "No se pudo enviar la solicitud 😭");
-        return;
-      }
-
-      if (data?.emailSent === false && data?.emailError) {
-        alert("Solicitud guardada ✅ (ojo: el correo a soporte falló). Revisa RESEND_API_KEY/RESEND_FROM.");
-      } else {
-        alert("Listo ✅ Enviamos tu solicitud a soporte. Te avisaremos cuando esté creado el evento.");
-      }
-
-      // limpieza suave
-      setRequestEvent(false);
-      setRequestedEventName("");
-      setRequestedEventExtra("");
-    } finally {
-      setRequestSending(false);
-    }
   }
 
   const canContinueNormal = !!selectedEvent && description.trim().length >= 6;
@@ -426,7 +352,7 @@ export default function SellPage() {
                     Evento no creado — solicitar a soporte
                   </label>
                   <p className="mt-1 text-sm text-slate-600">
-                    No se publicará automáticamente. Soporte creará el evento y dejará tu publicación lista con los mismos datos.
+                    Esto puede demorar 24 a 48 horas. Te avisaremos por correo. No tienes que volver a publicar: cuando creemos el evento, tu entrada queda publicada automáticamente.
                   </p>
                 </div>
               </div>
@@ -627,19 +553,18 @@ export default function SellPage() {
             <button
               type="button"
               className="tix-btn-primary"
-              disabled={requestSending || (!requestEvent ? !canContinueNormal : !canContinueRequest)}
+              disabled={!requestEvent ? !canContinueNormal : !canContinueRequest}
               title={requestEvent ? "Completa nombre del evento y descripción" : "Completa evento y descripción"}
               onClick={() => {
-                if (requestEvent) {
-                  handleRequestSupport();
-                  return;
-                }
-
                 // ✅ PASO 5: guardar draft + ir a Paso 2 (Archivo)
                 const draft = {
                   step: 1,
-                  event_id: selectedEvent?.id,
-                  event_title: selectedEvent?.title || null,
+                  requestEvent: !!requestEvent,
+                  requestedEventName: requestEvent ? requestedEventName.trim() : null,
+                  requestedEventExtra: requestEvent ? (requestedEventExtra.trim() || null) : null,
+
+                  event_id: requestEvent ? null : selectedEvent?.id,
+                  event_title: requestEvent ? null : (selectedEvent?.title || null),
 
                   description: description.trim(),
                   sector: sector.trim() || null,
@@ -655,7 +580,7 @@ export default function SellPage() {
                 router.push("/sell/file");
               }}
             >
-              {requestSending ? "Enviando..." : "Continuar"}
+              Continuar
             </button>
           </div>
         </div>

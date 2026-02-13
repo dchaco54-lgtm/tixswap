@@ -131,7 +131,7 @@ export async function POST(req) {
         userId: insertObj.user_id,
         type: "system",
         title: "Solicitud recibida",
-        body: `Recibimos tu solicitud para ${requestedName}.`,
+        body: `Recibimos tu solicitud para ${requestedName}. Esto puede demorar 24 a 48 horas.`,
         link: "/dashboard",
         metadata: { requestId: reqRow.id },
       });

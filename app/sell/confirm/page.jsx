@@ -48,6 +48,8 @@ export default function SellConfirmPage() {
 
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState("");
+  const [requestSuccess, setRequestSuccess] = useState(false);
+  const [requestId, setRequestId] = useState(null);
   const [userRole, setUserRole] = useState("basic"); // Rol del usuario
 
   // cerrar dropdown al click afuera
@@ -73,7 +75,13 @@ export default function SellConfirmPage() {
         }
         const parsed = JSON.parse(raw);
 
-        if (!parsed?.event_id) {
+        const isRequest = parsed?.requestEvent === true;
+
+        if (!isRequest && !parsed?.event_id) {
+          router.replace("/sell");
+          return;
+        }
+        if (isRequest && !String(parsed?.requestedEventName || "").trim()) {
           router.replace("/sell");
           return;
         }
@@ -87,10 +95,12 @@ export default function SellConfirmPage() {
         setDraft(parsed);
         setPrice(String(parsed?.price ?? ""));
         setOriginalPrice(parsed?.originalPrice ? String(parsed.originalPrice) : "");
-        setEventQuery(parsed?.event_title || "");
+        if (!isRequest) {
+          setEventQuery(parsed?.event_title || "");
+        }
 
         // Establecer evento seleccionado desde el draft
-        if (parsed?.event_id) {
+        if (!isRequest && parsed?.event_id) {
           setSelectedEvent({
             id: parsed.event_id,
             title: parsed.event_title || "Evento",
@@ -137,6 +147,11 @@ export default function SellConfirmPage() {
     let alive = true;
 
     async function loadEvents() {
+      if (draft?.requestEvent) {
+        setEvents([]);
+        setEventsLoading(false);
+        return;
+      }
       setEventsLoading(true);
       const { data, error } = await supabase.from("events").select("*").limit(300);
 
@@ -173,7 +188,7 @@ export default function SellConfirmPage() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft?.event_id]);
+  }, [draft?.event_id, draft?.requestEvent]);
 
   const filteredEvents = useMemo(() => {
     const q = (eventQuery || "").trim().toLowerCase();
@@ -202,14 +217,104 @@ export default function SellConfirmPage() {
     });
   }
 
+  const isRequest = draft?.requestEvent === true;
+
   const canPublish = useMemo(() => {
     const p = Number(String(price).replace(/[^\d]/g, ""));
     return !!selectedEvent?.id && Number.isFinite(p) && p > 0 && !publishing;
   }, [selectedEvent?.id, price, publishing]);
 
+  const canRequest = useMemo(() => {
+    const p = Number(String(price).replace(/[^\d]/g, ""));
+    const hasName = String(draft?.requestedEventName || "").trim().length >= 3;
+    const hasUpload = !!draft?.ticketUpload?.uploaded;
+    return hasName && hasUpload && Number.isFinite(p) && p > 0 && !publishing;
+  }, [draft?.requestedEventName, draft?.ticketUpload?.uploaded, price, publishing]);
+
   async function handlePublish() {
     setError("");
     if (!draft) return;
+    if (isRequest) {
+      if (!canRequest) return;
+
+      setPublishing(true);
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        const user = userData?.user || null;
+
+        if (!user) {
+          setError("No hay sesión activa. Por favor inicia sesión de nuevo.");
+          router.push(`/login?redirectTo=${encodeURIComponent("/sell/confirm")}`);
+          return;
+        }
+
+        let profile = null;
+        try {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("full_name, email")
+            .eq("id", user.id)
+            .maybeSingle();
+          profile = prof || null;
+        } catch {}
+
+        const requestedName = String(draft?.requestedEventName || "").trim();
+        const priceValue = Number(String(price).replace(/[^\d]/g, ""));
+        const originalValue = Number(String(originalPrice).replace(/[^\d]/g, ""));
+
+        const payload = {
+          requestEvent: true,
+          requestedEventName: requestedName,
+          requestedEventExtra: String(draft?.requestedEventExtra || "").trim() || null,
+          userId: user.id,
+          userEmail: profile?.email || user.email || null,
+          userName: profile?.full_name || null,
+          step1: {
+            description: draft?.description || null,
+            sector: draft?.sector || null,
+            fila: draft?.fila || null,
+            asiento: draft?.asiento || null,
+            saleType: draft?.saleType || "fixed",
+            price: Number.isFinite(priceValue) ? priceValue : null,
+            originalPrice: Number.isFinite(originalValue) && originalValue > 0 ? originalValue : null,
+          },
+          step2: {
+            ticketUploadId: draft?.ticketUpload?.ticketUploadId ?? null,
+            sha256: draft?.ticketUpload?.sha256 ?? null,
+            viewUrl: draft?.ticketUpload?.viewUrl ?? null,
+            filePath: draft?.ticketUpload?.filePath ?? null,
+            isNominada: !!draft?.ticketUpload?.isNominada,
+            summary: draft?.ticketUpload?.summary ?? null,
+          },
+          step3: {
+            confirmedAt: new Date().toISOString(),
+            finalPrice: Number.isFinite(priceValue) ? priceValue : null,
+          },
+        };
+
+        const res = await fetch("/api/support/sell-request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setError(data?.error || "No se pudo enviar la solicitud.");
+          return;
+        }
+
+        localStorage.removeItem(DRAFT_KEY);
+        setRequestId(data?.requestId || null);
+        setRequestSuccess(true);
+      } catch (e) {
+        setError(e?.message || "No se pudo enviar la solicitud.");
+      } finally {
+        setPublishing(false);
+      }
+      return;
+    }
+
     if (!canPublish) return;
 
     setPublishing(true);
@@ -292,6 +397,31 @@ export default function SellConfirmPage() {
     router.push("/sell/file");
   }
 
+  if (requestSuccess) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <div className="mx-auto max-w-3xl px-4 py-12">
+          <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+            <h1 className="text-2xl font-bold text-slate-900">Solicitud enviada</h1>
+            <p className="mt-2 text-slate-600">
+              Listo ✅ Enviamos tu solicitud{requestId ? ` (#${requestId})` : ""}. Esto puede demorar 24 a 48 horas.
+              Te avisaremos por correo y cuando el evento esté creado, publicaremos tu entrada automáticamente.
+            </p>
+            <div className="mt-6">
+              <button
+                type="button"
+                className="tix-btn-primary"
+                onClick={() => router.push("/dashboard?tab=soporte")}
+              >
+                Ir a mi cuenta
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 py-10">
@@ -320,60 +450,83 @@ export default function SellConfirmPage() {
 
           <div className="mt-8">
             <h1 className="text-3xl font-bold text-slate-900">Confirmar publicación</h1>
-            <p className="mt-2 text-slate-600">Revisa el evento, ajusta el precio y publica tu entrada.</p>
+            <p className="mt-2 text-slate-600">
+              {isRequest
+                ? "Confirma los datos y envía tu solicitud a soporte."
+                : "Revisa el evento, ajusta el precio y publica tu entrada."}
+            </p>
 
-            {/* Evento (editable) */}
-            <div className="mt-8">
-              <label className="text-sm font-medium text-slate-700">Evento asociado</label>
+            {/* Evento */}
+            {isRequest ? (
+              <div className="mt-8 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+                <div className="text-sm font-semibold text-amber-900">Solicitud de evento</div>
+                <div className="mt-2 text-sm text-amber-900">
+                  <div>
+                    <span className="font-semibold">Evento solicitado:</span>{" "}
+                    {draft?.requestedEventName || "—"}
+                  </div>
+                  <div className="mt-1">
+                    <span className="font-semibold">Recinto/fecha opcional:</span>{" "}
+                    {draft?.requestedEventExtra || "—"}
+                  </div>
+                </div>
+                <div className="mt-3 text-xs text-amber-800">
+                  Esto puede demorar 24 a 48 horas. Te avisaremos por correo y publicaremos tu entrada automáticamente.
+                </div>
+              </div>
+            ) : (
+              <div className="mt-8">
+                <label className="text-sm font-medium text-slate-700">Evento asociado</label>
 
-              <div className="relative mt-2" ref={dropdownRef}>
-                <input
-                  className="tix-input w-full"
-                  value={eventQuery}
-                  onChange={(e) => {
-                    setEventQuery(e.target.value);
-                    setEventOpen(true);
-                  }}
-                  onFocus={() => setEventOpen(true)}
-                  placeholder={eventsLoading ? "Cargando eventos..." : "Busca y selecciona un evento"}
-                  disabled={eventsLoading}
-                />
+                <div className="relative mt-2" ref={dropdownRef}>
+                  <input
+                    className="tix-input w-full"
+                    value={eventQuery}
+                    onChange={(e) => {
+                      setEventQuery(e.target.value);
+                      setEventOpen(true);
+                    }}
+                    onFocus={() => setEventOpen(true)}
+                    placeholder={eventsLoading ? "Cargando eventos..." : "Busca y selecciona un evento"}
+                    disabled={eventsLoading}
+                  />
 
-                {eventOpen && !eventsLoading ? (
-                  <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
-                    <div className="max-h-72 overflow-auto">
-                      {filteredEvents.length === 0 ? (
-                        <div className="px-4 py-3 text-sm text-slate-600">No hay resultados.</div>
-                      ) : (
-                        filteredEvents.slice(0, 80).map((ev) => (
-                          <button
-                            key={String(ev.id)}
-                            type="button"
-                            className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50"
-                            onClick={() => selectEvent(ev)}
-                          >
-                            <div className="min-w-0">
-                              <div className="truncate font-semibold text-slate-900">{ev.title}</div>
-                              <div className="mt-0.5 text-xs text-slate-500">
-                                {formatEventDate(ev.starts_at)}
-                                {ev.venue ? ` • ${ev.venue}` : ""}
-                                {ev.city ? ` • ${ev.city}` : ""}
+                  {eventOpen && !eventsLoading ? (
+                    <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+                      <div className="max-h-72 overflow-auto">
+                        {filteredEvents.length === 0 ? (
+                          <div className="px-4 py-3 text-sm text-slate-600">No hay resultados.</div>
+                        ) : (
+                          filteredEvents.slice(0, 80).map((ev) => (
+                            <button
+                              key={String(ev.id)}
+                              type="button"
+                              className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                              onClick={() => selectEvent(ev)}
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate font-semibold text-slate-900">{ev.title}</div>
+                                <div className="mt-0.5 text-xs text-slate-500">
+                                  {formatEventDate(ev.starts_at)}
+                                  {ev.venue ? ` • ${ev.venue}` : ""}
+                                  {ev.city ? ` • ${ev.city}` : ""}
+                                </div>
                               </div>
-                            </div>
-                          </button>
-                        ))
-                      )}
+                            </button>
+                          ))
+                        )}
+                      </div>
                     </div>
+                  ) : null}
+                </div>
+
+                {selectedEvent?.id ? (
+                  <div className="mt-2 text-xs text-slate-500">
+                    Seleccionado: <span className="font-semibold text-slate-700">{selectedEvent.title}</span>
                   </div>
                 ) : null}
               </div>
-
-              {selectedEvent?.id ? (
-                <div className="mt-2 text-xs text-slate-500">
-                  Seleccionado: <span className="font-semibold text-slate-700">{selectedEvent.title}</span>
-                </div>
-              ) : null}
-            </div>
+            )}
 
             {/* Precio */}
             <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -556,10 +709,10 @@ export default function SellConfirmPage() {
                 type="button"
                 className="tix-btn-primary"
                 onClick={handlePublish}
-                disabled={!canPublish}
-                title={!canPublish ? "Revisa evento + precio" : ""}
+                disabled={isRequest ? !canRequest : !canPublish}
+                title={isRequest ? (!canRequest ? "Completa nombre del evento, precio y PDF" : "") : (!canPublish ? "Revisa evento + precio" : "")}
               >
-                {publishing ? "Publicando..." : "Publicar"}
+                {publishing ? (isRequest ? "Enviando..." : "Publicando...") : (isRequest ? "Enviar a soporte" : "Publicar")}
               </button>
             </div>
 

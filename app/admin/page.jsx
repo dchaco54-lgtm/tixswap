@@ -261,6 +261,18 @@ export default function AdminPage() {
             </button>
           </div>
 
+          {/* CARD SOLICITUDES EVENTO */}
+          <div
+            onClick={() => router.push("/admin/event-requests")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Solicitudes de evento</h3>
+            <p className="text-sm text-gray-500 mt-1">Aprobar y publicar automáticamente</p>
+            <button className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Ir a Solicitudes →
+            </button>
+          </div>
+
           {/* CARD SOPORTE */}
           <div
             onClick={() => router.push("/admin/support")}
@@ -396,4 +408,3 @@ function TicketCard({ ticket, formatDate }) {
     </div>
   );
 }
-

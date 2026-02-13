@@ -122,6 +122,17 @@ function isWarningsColumnMissingError(error) {
   );
 }
 
+function isStatusColumnMissingError(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    code === "PGRST204" ||
+    (message.includes("schema cache") && message.includes("status")) ||
+    message.includes("could not find the 'status' column")
+  );
+}
+
 function isRowLevelSecurityError(error) {
   const message = String(error?.message || "").toLowerCase();
   return (
@@ -144,6 +155,7 @@ export default function AdminEventsPage() {
   const [events, setEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [hasWarningsColumn, setHasWarningsColumn] = useState(null);
+  const [hasStatusColumn, setHasStatusColumn] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
   const [editForm, setEditForm] = useState({ warnings: "" });
 
@@ -233,6 +245,25 @@ export default function AdminEventsPage() {
         console.warn("[AdminEvents] warnings check exception:", warningsCheckErr);
       }
 
+      try {
+        const { error: statusError } = await supabase
+          .from("events")
+          .select("status")
+          .limit(1);
+
+        if (statusError && isStatusColumnMissingError(statusError)) {
+          setHasStatusColumn(false);
+        } else if (!statusError) {
+          setHasStatusColumn(true);
+        } else {
+          setHasStatusColumn(true);
+          console.warn("[AdminEvents] status check error:", statusError);
+        }
+      } catch (statusCheckErr) {
+        setHasStatusColumn(true);
+        console.warn("[AdminEvents] status check exception:", statusCheckErr);
+      }
+
       await loadEvents();
     };
 
@@ -304,6 +335,9 @@ export default function AdminEventsPage() {
       };
       if (hasWarningsColumn === true) {
         payload.warnings = null; // Se edita después en el modal
+      }
+      if (hasStatusColumn === true) {
+        payload.status = "published";
       }
 
       const { error } = await supabase.from("events").insert(payload);
@@ -399,7 +433,10 @@ export default function AdminEventsPage() {
 
       for (let i = 0; i < bulkRows.length; i += CHUNK) {
         const chunk = bulkRows.slice(i, i + CHUNK);
-        const { error } = await supabase.from("events").insert(chunk);
+        const payload = hasStatusColumn === true
+          ? chunk.map((row) => ({ ...row, status: "published" }))
+          : chunk;
+        const { error } = await supabase.from("events").insert(payload);
         if (error) throw error;
 
         done += chunk.length;
