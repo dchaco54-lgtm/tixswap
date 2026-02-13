@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 function getSupabaseAdmin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -51,7 +53,15 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json({ events: data ?? [] });
+    return NextResponse.json(
+      { events: data ?? [] },
+      {
+        headers: {
+          "Cache-Control": "no-store, must-revalidate, max-age=0",
+          "CDN-Cache-Control": "no-store",
+        },
+      }
+    );
   } catch (e) {
     return NextResponse.json(
       { error: "Server error", details: e?.message ?? String(e) },
