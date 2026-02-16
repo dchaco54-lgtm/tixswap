@@ -1,6 +1,9 @@
 // app/support/message/route.js
-import { createClient } from "@supabase/supabase-js";
 import { createNotification } from "@/lib/notifications";
+import { env, sendEmail } from "@/lib/email/resend";
+import { templateSupportNewMessageToInbox, templateSupportNewMessageToUser } from "@/lib/email/templates";
+import { getSupabaseAdmin, getUserFromBearer, isAdminUser } from "@/lib/support/auth";
+import { isTerminalStatus, normalizeStatus, TICKET_STATUS } from "@/lib/support/status";
 
 export const runtime = "nodejs";
 
@@ -11,64 +14,18 @@ function json(data, status = 200) {
   });
 }
 
-function env(name) {
-  const v = process.env[name];
-  return v && String(v).trim().length ? String(v).trim() : null;
-}
-
-function getMissingColumn(err) {
-  if (!err) return null;
-  const msg = `${err.message || ""} ${err.details || ""}`.trim();
-  const match = msg.match(/column \"([^\"]+)\"/i);
-  if (!match) return null;
-  if (err.code === "42703" || msg.includes("does not exist")) return match[1];
-  return null;
-}
-
-async function sendResendEmail({ to, subject, html }) {
-  const key = env("RESEND_API_KEY");
-  const from = env("SUPPORT_FROM_EMAIL") || "soporte@tixswap.cl";
-  if (!key) return { ok: false, skipped: true };
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ from, to, subject, html }),
-  });
-
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
-    return { ok: false, error: t || "Resend error" };
-  }
-  return { ok: true };
-}
-
 export async function POST(req) {
   try {
-    const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
-    const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) return json({ ok: false, error: "Missing env" }, 500);
+    const supabaseAdmin = getSupabaseAdmin();
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    });
-
-    // auth user
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
-
-    const { data: u, error: uErr } = await supabaseAdmin.auth.getUser(token);
-    if (uErr || !u?.user) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
-    const user = u.user;
+    const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
+    if (authErr || !user) return json({ ok: false, error: "UNAUTHORIZED" }, 401);
 
     const body = await req.json().catch(() => ({}));
     const ticket_id = body?.ticket_id;
     const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
+    const reopen = body?.reopen === true;
 
     if (!ticket_id) return json({ ok: false, error: "Falta ticket_id" }, 400);
     if (!messageText && attachment_ids.length === 0) {
@@ -76,26 +33,22 @@ export async function POST(req) {
     }
 
     // es admin?
-    const { data: prof } = await supabaseAdmin
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const isAdmin = prof?.role === "admin";
+    const { ok: isAdmin, profile } = await isAdminUser(supabaseAdmin, user);
     const sender_role = isAdmin ? "admin" : "user";
 
     // cargar ticket
     const { data: ticket, error: tErr } = await supabaseAdmin
       .from("support_tickets")
-      .select("id, user_id, status, ticket_number, subject, requester_email")
+      .select("id, user_id, status, ticket_number, subject, requester_email, category")
       .eq("id", ticket_id)
       .single();
 
     if (tErr || !ticket) return json({ ok: false, error: "Ticket no existe" }, 404);
 
     // Si el ticket está cerrado, no aceptamos más mensajes (ni usuario ni admin)
-    if (ticket.status === "resolved" || ticket.status === "rejected") {
+    const normalizedStatus = normalizeStatus(ticket.status);
+    const isTerminal = isTerminalStatus(normalizedStatus);
+    if (isTerminal && !reopen) {
       return json({ ok: false, error: "Este ticket está cerrado" }, 403);
     }
 
@@ -160,49 +113,45 @@ export async function POST(req) {
     }
 
     // auto-transición de estado
-    const nextStatus = isAdmin ? "waiting_user" : "waiting_support";
+    let nextStatus = normalizedStatus || TICKET_STATUS.OPEN;
+    if (reopen && isTerminal && !isAdmin) {
+      nextStatus = TICKET_STATUS.OPEN;
+    } else if (isAdmin) {
+      nextStatus = TICKET_STATUS.WAITING_USER;
+    } else if (normalizedStatus === TICKET_STATUS.WAITING_USER) {
+      nextStatus = TICKET_STATUS.IN_PROGRESS;
+    } else if (normalizedStatus === TICKET_STATUS.IN_PROGRESS) {
+      nextStatus = TICKET_STATUS.IN_PROGRESS;
+    } else if (normalizedStatus === TICKET_STATUS.OPEN) {
+      nextStatus = TICKET_STATUS.OPEN;
+    }
 
     const now = new Date().toISOString();
-    let updatePayload = {
+    const updatePayload = {
       status: nextStatus,
       last_message_at: now,
-      last_message_preview: messageText || "",
       updated_at: now,
     };
 
-    for (let i = 0; i < 4; i += 1) {
-      const { error: upErr } = await supabaseAdmin
-        .from("support_tickets")
-        .update(updatePayload)
-        .eq("id", ticket_id);
-
-      if (!upErr) break;
-      const missing = getMissingColumn(upErr);
-      if (!missing || !(missing in updatePayload)) break;
-      const nextPayload = { ...updatePayload };
-      delete nextPayload[missing];
-      updatePayload = nextPayload;
+    if (reopen && isTerminal && !isAdmin) {
+      updatePayload.closed_at = null;
+      updatePayload.closed_by = null;
     }
+
+    await supabaseAdmin.from("support_tickets").update(updatePayload).eq("id", ticket_id);
 
     // email: si admin responde => usuario
     if (isAdmin && ticket.requester_email) {
-      const link = env("NEXT_PUBLIC_SITE_URL")
-        ? `${env("NEXT_PUBLIC_SITE_URL")}/dashboard/tickets`
-        : null;
-
-      await sendResendEmail({
-        to: ticket.requester_email,
-        subject: `TixSwap · Respondimos tu ticket TS-${ticket.ticket_number}`,
-        html: `
-          <div style="font-family:Arial,sans-serif;line-height:1.5">
-            <h2 style="margin:0 0 12px">Respondimos tu ticket TS-${ticket.ticket_number}</h2>
-            <p><b>Asunto:</b> ${escapeHtml(ticket.subject || "")}</p>
-            <p>Tienes una nueva respuesta de soporte.</p>
-            ${link ? `<p><a href="${link}">Ver ticket en TixSwap</a></p>` : ""}
-            <p style="color:#666;font-size:12px;margin-top:16px">Este correo es automático.</p>
-          </div>
-        `,
+      const baseUrl = (env("NEXT_PUBLIC_SITE_URL") || "https://tixswap.cl").replace(/\/+$/, "");
+      const link = `${baseUrl}/dashboard/tickets?ticketId=${ticket.id}`;
+      const { subject, html } = templateSupportNewMessageToUser({
+        ticketNumber: ticket.ticket_number,
+        subject: ticket.subject,
+        link,
+        message: messageText,
       });
+
+      await sendEmail({ to: ticket.requester_email, subject, html });
     }
 
     if (isAdmin && ticket.user_id) {
@@ -211,7 +160,7 @@ export async function POST(req) {
         type: "support",
         title: "Soporte respondió tu ticket",
         body: ticket.subject ? `Asunto: ${ticket.subject}` : null,
-        link: `/dashboard/soporte/${ticket.id}`,
+        link: `/dashboard/tickets?ticketId=${ticket.id}`,
         metadata: { ticketId: ticket.id, ticketNumber: ticket.ticket_number || null },
       });
     }
@@ -219,17 +168,19 @@ export async function POST(req) {
     // email opcional: si usuario responde => bandeja soporte
     const inbox = env("SUPPORT_INBOX_EMAIL");
     if (!isAdmin && inbox) {
-      await sendResendEmail({
-        to: inbox,
-        subject: `TixSwap · Usuario respondió TS-${ticket.ticket_number}`,
-        html: `
-          <div style="font-family:Arial,sans-serif;line-height:1.5">
-            <h2 style="margin:0 0 12px">Respuesta del usuario (TS-${ticket.ticket_number})</h2>
-            <p><b>Asunto:</b> ${escapeHtml(ticket.subject || "")}</p>
-            <p>${escapeHtml(messageText || "").replace(/\n/g, "<br/>")}</p>
-          </div>
-        `,
+      const baseUrl = (env("NEXT_PUBLIC_SITE_URL") || "https://tixswap.cl").replace(/\/+$/, "");
+      const link = `${baseUrl}/admin/soporte`;
+      const { subject, html } = templateSupportNewMessageToInbox({
+        ticketNumber: ticket.ticket_number,
+        subject: ticket.subject,
+        message: messageText,
+        requesterEmail: ticket.requester_email || null,
+        requesterName: profile?.full_name || user.email || null,
+        category: ticket.category || null,
+        link,
       });
+
+      await sendEmail({ to: inbox, subject, html });
     }
 
     return json({
@@ -244,13 +195,4 @@ export async function POST(req) {
       500
     );
   }
-}
-
-function escapeHtml(str) {
-  return String(str || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }

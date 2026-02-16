@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { statusLabel, statusBadgeClass, canChat, TICKET_STATUS, isTerminalStatus } from "@/lib/support/status";
 
@@ -17,6 +17,20 @@ const CATEGORY_LABEL = (c) => {
   return c || "—";
 };
 
+const STATUS_OPTIONS = Object.values(TICKET_STATUS).map((s) => ({
+  v: s,
+  l: statusLabel(s),
+}));
+
+const CATEGORY_OPTIONS = [
+  { v: "soporte", l: "Soporte general" },
+  { v: "disputa_venta", l: "Disputa en venta" },
+  { v: "disputa_compra", l: "Disputa en compra" },
+  { v: "reclamo", l: "Reclamo" },
+  { v: "sugerencia", l: "Sugerencia" },
+  { v: "otro", l: "Otro" },
+];
+
 function fmtCL(dt) {
   if (!dt) return "—";
   return new Date(dt).toLocaleString("es-CL", {
@@ -27,6 +41,7 @@ function fmtCL(dt) {
 
 export default function MyTicketsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [boot, setBoot] = useState(true);
   const [tickets, setTickets] = useState([]);
@@ -46,6 +61,16 @@ export default function MyTicketsPage() {
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
 
+  const [showNewTicket, setShowNewTicket] = useState(false);
+  const [newTicket, setNewTicket] = useState({
+    category: "soporte",
+    subject: "",
+    message: "",
+    orderId: "",
+  });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
   const [err, setErr] = useState("");
 
   const getAccessToken = async () => {
@@ -53,7 +78,7 @@ export default function MyTicketsPage() {
     return data?.session?.access_token || null;
   };
 
-  const refreshList = async () => {
+  const refreshList = async (preferId = null) => {
     setLoadingList(true);
     setErr("");
 
@@ -70,7 +95,11 @@ export default function MyTicketsPage() {
       if (!res.ok) throw new Error(json?.error || "No pudimos cargar tickets");
 
       setTickets(json.tickets || []);
-      if (!selectedId && (json.tickets || []).length) setSelectedId(json.tickets[0].id);
+      if (preferId) {
+        setSelectedId(preferId);
+      } else if (!selectedId && (json.tickets || []).length) {
+        setSelectedId(json.tickets[0].id);
+      }
     } catch (e) {
       setErr(e.message || "Error cargando tickets");
       setTickets([]);
@@ -118,12 +147,34 @@ export default function MyTicketsPage() {
         router.push("/login");
         return;
       }
+
+      const ticketIdFromQuery = searchParams?.get("ticketId");
+      const shouldOpenNew = searchParams?.get("new") === "1";
+      const preCategory = searchParams?.get("category");
+      const preSubject = searchParams?.get("subject");
+      const preMessage = searchParams?.get("message");
+
+      if (shouldOpenNew) {
+        const normalizedCategory = CATEGORY_OPTIONS.some((c) => c.v === preCategory)
+          ? preCategory
+          : "soporte";
+
+        setNewTicket({
+          category: normalizedCategory,
+          subject: preSubject ? String(preSubject) : "",
+          message: preMessage ? String(preMessage) : "",
+          orderId: "",
+        });
+        setCreateError("");
+        setShowNewTicket(true);
+      }
+
       setBoot(false);
-      await refreshList();
+      await refreshList(ticketIdFromQuery || null);
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router, searchParams]);
 
   useEffect(() => {
     if (boot) return;
@@ -279,6 +330,79 @@ export default function MyTicketsPage() {
     }
   };
 
+  const isDisputeCategory =
+    newTicket.category === "disputa_compra" || newTicket.category === "disputa_venta";
+
+  const slaCopy = useMemo(() => {
+    if (isDisputeCategory) {
+      return "Puede demorar más por revisión, pero buscamos darte un primer contacto rápido.";
+    }
+    return "Respuesta estimada: 24–48 horas.";
+  }, [isDisputeCategory]);
+
+  const handleCreateTicket = async () => {
+    if (creating) return;
+    setCreateError("");
+
+    const subject = newTicket.subject.trim();
+    const message = newTicket.message.trim();
+
+    if (!subject) {
+      setCreateError("El asunto es obligatorio.");
+      return;
+    }
+    if (!message) {
+      setCreateError("El mensaje es obligatorio.");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        setCreateError("Sesión expirada. Vuelve a iniciar sesión.");
+        setCreating(false);
+        return;
+      }
+
+      const payload = {
+        category: newTicket.category,
+        subject,
+        message,
+      };
+
+      if (isDisputeCategory && newTicket.orderId.trim()) {
+        payload.order_id = newTicket.orderId.trim();
+      }
+
+      const res = await fetch("/support/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCreateError(json?.error || "No se pudo crear el ticket.");
+        return;
+      }
+
+      setShowNewTicket(false);
+      setNewTicket({ category: "soporte", subject: "", message: "", orderId: "" });
+      setCreateError("");
+
+      await refreshList();
+      if (json?.ticket_id) setSelectedId(json.ticket_id);
+    } catch (e) {
+      setCreateError(e?.message || "No se pudo crear el ticket.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   if (boot) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -300,12 +424,23 @@ export default function MyTicketsPage() {
             </p>
           </div>
 
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="text-sm px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
-          >
-            Volver al panel
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setShowNewTicket(true);
+                setCreateError("");
+              }}
+              className="text-sm px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700"
+            >
+              Nuevo ticket
+            </button>
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="text-sm px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
+            >
+              Volver al panel
+            </button>
+          </div>
         </div>
 
         {err ? (
@@ -346,7 +481,7 @@ export default function MyTicketsPage() {
                 className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm bg-white"
               >
                 <option value="all">Todos</option>
-                {STATUS.map((s) => (
+                {STATUS_OPTIONS.map((s) => (
                   <option key={s.v} value={s.v}>
                     {s.l}
                   </option>
@@ -441,7 +576,7 @@ export default function MyTicketsPage() {
                             disabled={sending}
                             className="mt-3 text-xs px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50"
                           >
-                            {sending ? "Reabriendo..." : "🔓 Reabrir ticket"}
+                            {sending ? "Reabriendo..." : "Reabrir ticket"}
                           </button>
                         </div>
                       </div>
@@ -603,7 +738,7 @@ export default function MyTicketsPage() {
                         {pendingUploads.length > 0 && (
                           <div className="mb-3 p-3 bg-blue-50 border border-blue-100 rounded-lg">
                             <div className="text-xs font-semibold text-blue-900 mb-2">
-                              📎 {pendingUploads.length} archivo{pendingUploads.length > 1 ? 's' : ''} adjunto{pendingUploads.length > 1 ? 's' : ''}:
+                              Adjuntos: {pendingUploads.length} archivo{pendingUploads.length > 1 ? 's' : ''} adjunto{pendingUploads.length > 1 ? 's' : ''}:
                             </div>
                             <div className="space-y-1">
                               {pendingUploads.map((a) => (
@@ -613,7 +748,7 @@ export default function MyTicketsPage() {
                                     onClick={() => setPendingUploads(prev => prev.filter(x => x.id !== a.id))}
                                     className="text-blue-600 hover:text-blue-800"
                                   >
-                                    ✕
+                                    x
                                   </button>
                                 </div>
                               ))}
@@ -662,6 +797,110 @@ export default function MyTicketsPage() {
           </div>
         </div>
       </div>
+
+      {showNewTicket ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Nuevo ticket</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Cuéntanos el problema y te responderemos lo antes posible.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowNewTicket(false)}
+                className="text-sm text-slate-500 hover:text-slate-700"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 gap-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700">Tipo</label>
+                <select
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"
+                  value={newTicket.category}
+                  onChange={(e) =>
+                    setNewTicket((prev) => ({ ...prev, category: e.target.value }))
+                  }
+                >
+                  {CATEGORY_OPTIONS.map((opt) => (
+                    <option key={opt.v} value={opt.v}>
+                      {opt.l}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 text-xs text-slate-500">{slaCopy}</div>
+              </div>
+
+              {isDisputeCategory ? (
+                <div>
+                  <label className="text-sm font-medium text-slate-700">Orden relacionada (opcional)</label>
+                  <input
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    placeholder="Pega el Order ID si lo tienes"
+                    value={newTicket.orderId}
+                    onChange={(e) =>
+                      setNewTicket((prev) => ({ ...prev, orderId: e.target.value }))
+                    }
+                  />
+                </div>
+              ) : null}
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Asunto</label>
+                <input
+                  className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  placeholder="Ej: Problema con mi compra"
+                  value={newTicket.subject}
+                  onChange={(e) =>
+                    setNewTicket((prev) => ({ ...prev, subject: e.target.value }))
+                  }
+                />
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-slate-700">Mensaje</label>
+                <textarea
+                  className="mt-2 w-full min-h-[120px] rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  placeholder="Describe el problema con el mayor detalle posible"
+                  value={newTicket.message}
+                  onChange={(e) =>
+                    setNewTicket((prev) => ({ ...prev, message: e.target.value }))
+                  }
+                />
+              </div>
+
+              {createError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {createError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowNewTicket(false)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-sm"
+                disabled={creating}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateTicket}
+                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                disabled={creating}
+              >
+                {creating ? "Creando..." : "Crear ticket"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

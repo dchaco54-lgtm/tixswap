@@ -1,5 +1,6 @@
 // app/support/admin/update/route.js
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin, getUserFromBearer, isAdminUser } from "@/lib/support/auth";
+import { isTerminalStatus, normalizeStatus } from "@/lib/support/status";
 
 export const runtime = "nodejs";
 
@@ -10,56 +11,24 @@ function json(data, status = 200) {
   });
 }
 
-function env(name) {
-  const v = process.env[name];
-  return v && String(v).trim().length ? String(v).trim() : null;
-}
-
 export async function POST(req) {
   try {
-    const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
-    const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) return json({ error: "Missing env" }, 500);
+    const supabaseAdmin = getSupabaseAdmin();
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    });
+    const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
+    if (authErr || !user) return json({ error: "UNAUTHORIZED" }, 401);
 
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return json({ error: "UNAUTHORIZED" }, 401);
-
-    const { data: u } = await supabaseAdmin.auth.getUser(token);
-    if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
-
-    // Validar admin usando app_role (con fallback a user_type)
-    const { data: prof, error: profErr } = await supabaseAdmin
-      .from("profiles")
-      .select("app_role, user_type, email")
-      .eq("id", u.user.id)
-      .maybeSingle();
-
-    if (profErr) {
-      console.error("Error loading profile:", profErr);
-      return json({ error: "FORBIDDEN" }, 403);
-    }
-
-    // Verificar permisos: app_role='admin' OR user_type='admin' OR email específico
-    const isAdmin = 
-      prof?.app_role === 'admin' || 
-      prof?.user_type === 'admin' ||
-      prof?.email?.toLowerCase() === 'davidchacon_17@hotmail.com';
-
-    if (!isAdmin) {
-      return json({ error: "FORBIDDEN - Not admin" }, 403);
-    }
+    const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
+    if (!isAdmin) return json({ error: "FORBIDDEN - Not admin" }, 403);
 
     const body = await req.json().catch(() => ({}));
     const ticket_id = body?.ticket_id;
-    const status = body?.status;
+    const rawStatus = body?.status;
 
     if (!ticket_id) return json({ error: "Falta ticket_id" }, 400);
-    if (!status) return json({ error: "Falta status" }, 400);
+    if (!rawStatus) return json({ error: "Falta status" }, 400);
+
+    const status = normalizeStatus(rawStatus);
 
     const { data: existing, error: exErr } = await supabaseAdmin
       .from("support_tickets")
@@ -74,13 +43,18 @@ export async function POST(req) {
       updated_at: new Date().toISOString(),
     };
 
-    const isClosing = (status === "resolved" || status === "rejected") &&
-      existing.status !== "resolved" &&
-      existing.status !== "rejected";
+    const wasTerminal = isTerminalStatus(normalizeStatus(existing.status));
+    const isClosing = isTerminalStatus(status) && !wasTerminal;
+    const isReopening = !isTerminalStatus(status) && wasTerminal;
 
     if (isClosing) {
       payload.closed_at = new Date().toISOString();
-      payload.closed_by = u.user.id;
+      payload.closed_by = user.id;
+    }
+
+    if (isReopening) {
+      payload.closed_at = null;
+      payload.closed_by = null;
     }
 
     const { error } = await supabaseAdmin

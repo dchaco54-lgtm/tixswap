@@ -1,47 +1,35 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
-export async function GET(_req, { params }) {
+export const runtime = "nodejs";
+
+function mapTicketCode(ticket) {
+  if (!ticket || typeof ticket !== "object") return ticket;
+  const next = { ...ticket };
+  if (!next.code && next.ticket_number) {
+    next.code = `TS-${next.ticket_number}`;
+  }
+  if (!next.kind) {
+    const category = String(next.category || "").toLowerCase().trim();
+    next.kind = category.startsWith("disputa") ? "dispute" : "support";
+  }
+  return next;
+}
+
+export async function GET(req, { params }) {
   const id = params?.id;
   if (!id) return NextResponse.json({ error: "Falta id" }, { status: 400 });
 
-  const supabase = createRouteHandlerClient({ cookies });
+  const url = new URL(req.url);
+  const target = new URL("/support/my/ticket", url.origin);
+  target.searchParams.set("id", id);
 
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
+  const res = await fetch(target.toString(), { headers: req.headers });
+  const json = await res.json().catch(() => ({}));
 
-  if (userErr || !user) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  if (!res.ok) {
+    return NextResponse.json({ error: json?.error || "No autorizado" }, { status: res.status });
   }
 
-  const { data: ticket, error: tErr } = await supabase
-    .from("support_tickets")
-    .select("id, code, subject, status, kind, created_at, last_message_at, user_id")
-    .eq("id", id)
-    .single();
-
-  if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
-  if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
-
-  if (ticket.user_id !== user.id) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
-  }
-
-  const { data: messages, error: mErr } = await supabase
-    .from("support_messages")
-    .select("id, ticket_id, sender_role, sender_user_id, body, created_at")
-    .eq("ticket_id", id)
-    .order("created_at", { ascending: true });
-
-  if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
-
-  const normalized = (messages || []).map((m) => ({
-    ...m,
-    body: m.body ?? m.message,
-  }));
-
-  return NextResponse.json({ ticket, messages: normalized });
+  const ticket = mapTicketCode(json?.ticket || null);
+  return NextResponse.json({ ticket, messages: json?.messages || [], attachments: json?.attachments || [] });
 }

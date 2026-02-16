@@ -1,6 +1,7 @@
 // app/support/upload/route.js
-import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import { getSupabaseAdmin, getUserFromBearer, isAdminUser } from "@/lib/support/auth";
+import { isTerminalStatus, normalizeStatus } from "@/lib/support/status";
 
 export const runtime = "nodejs";
 
@@ -9,11 +10,6 @@ function json(data, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
-}
-
-function env(name) {
-  const v = process.env[name];
-  return v && String(v).trim().length ? String(v).trim() : null;
 }
 
 function extFromName(name = "") {
@@ -32,22 +28,10 @@ function allowMime(mime) {
 
 export async function POST(req) {
   try {
-    const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
-    const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) return json({ error: "Missing env" }, 500);
+    const supabaseAdmin = getSupabaseAdmin();
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    });
-
-    // auth user
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return json({ error: "UNAUTHORIZED" }, 401);
-
-    const { data: u, error: uErr } = await supabaseAdmin.auth.getUser(token);
-    if (uErr || !u?.user) return json({ error: "UNAUTHORIZED" }, 401);
-    const user = u.user;
+    const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
+    if (authErr || !user) return json({ error: "UNAUTHORIZED" }, 401);
 
     const form = await req.formData();
     const ticketId = String(form.get("ticketId") || "").trim();
@@ -57,13 +41,7 @@ export async function POST(req) {
     if (!file || !(file instanceof File)) return json({ error: "Missing file" }, 400);
 
     // es admin?
-    const { data: prof } = await supabaseAdmin
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const isAdmin = prof?.role === "admin";
+    const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
 
     // validar ticket & permisos
     const { data: ticket, error: tErr } = await supabaseAdmin
@@ -76,7 +54,7 @@ export async function POST(req) {
     if (!isAdmin && ticket.user_id !== user.id) return json({ error: "FORBIDDEN" }, 403);
 
     // no permitir adjuntar si está cerrado
-    if (ticket.status === "resolved" || ticket.status === "rejected") {
+    if (isTerminalStatus(normalizeStatus(ticket.status))) {
       return json({ error: "Este ticket está cerrado" }, 403);
     }
 

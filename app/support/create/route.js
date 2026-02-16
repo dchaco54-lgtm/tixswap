@@ -1,5 +1,8 @@
 // app/support/create/route.js
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin, getUserFromBearer, getProfileForUser } from "@/lib/support/auth";
+import { createNotification } from "@/lib/notifications";
+import { env, sendEmail } from "@/lib/email/resend";
+import { templateSupportNewTicketToInbox, templateSupportTicketCreated } from "@/lib/email/templates";
 
 export const runtime = "nodejs";
 
@@ -10,84 +13,61 @@ function json(data, status = 200) {
   });
 }
 
-function env(name) {
-  const v = process.env[name];
-  return v && String(v).trim().length ? String(v).trim() : null;
-}
-
-function getMissingColumn(err) {
-  if (!err) return null;
-  const msg = `${err.message || ""} ${err.details || ""}`.trim();
-  const match = msg.match(/column \"([^\"]+)\"/i);
-  if (!match) return null;
-  if (err.code === "42703" || msg.includes("does not exist")) return match[1];
-  return null;
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || "").trim()
+  );
 }
 
 export async function POST(req) {
   try {
-    const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
-    const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) return json({ error: "Missing env" }, 500);
+    const supabaseAdmin = getSupabaseAdmin();
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    });
-
-    // Bearer token
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return json({ error: "UNAUTHORIZED" }, 401);
-
-    const { data: u } = await supabaseAdmin.auth.getUser(token);
-    if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
-    const user = u.user;
+    const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
+    if (authErr || !user) return json({ error: "UNAUTHORIZED" }, 401);
 
     const body = await req.json().catch(() => ({}));
     const category = String(body?.category || "soporte").trim();
     const subject = String(body?.subject || "").trim();
     const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
+    const orderIdRaw = String(body?.order_id || body?.orderId || "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
     if (!category) return json({ error: "Falta categoría" }, 400);
     if (!subject) return json({ error: "Falta asunto" }, 400);
     if (!messageText) return json({ error: "Mensaje requerido" }, 400);
 
+    if (orderIdRaw && !isUuid(orderIdRaw)) {
+      return json({ error: "Order ID inválido" }, 400);
+    }
+
     const now = new Date().toISOString();
 
-    let insertPayload = {
+    const profile = await getProfileForUser(supabaseAdmin, user.id);
+    const requesterEmail = profile?.email || user.email || null;
+    const requesterName = profile?.full_name || null;
+    const requesterRut = profile?.rut || null;
+
+    const insertPayload = {
       user_id: user.id,
       status: "open",
-      category,
+      category: category || null,
       subject,
       created_at: now,
       updated_at: now,
       last_message_at: now,
-      last_message_preview: messageText,
+      message: messageText,
+      order_id: orderIdRaw || null,
+      requester_email: requesterEmail,
+      requester_name: requesterName,
+      requester_rut: requesterRut,
     };
-    // Compatibilidad: si existe columna message en support_tickets
-    insertPayload.message = messageText;
 
-    let ticket = null;
-    let tErr = null;
-    for (let i = 0; i < 6; i += 1) {
-      const res = await supabaseAdmin
-        .from("support_tickets")
-        .insert(insertPayload)
-        .select("*")
-        .single();
-
-      ticket = res.data;
-      tErr = res.error;
-
-      if (!tErr) break;
-
-      const missing = getMissingColumn(tErr);
-      if (!missing || !(missing in insertPayload)) break;
-      const nextPayload = { ...insertPayload };
-      delete nextPayload[missing];
-      insertPayload = nextPayload;
-    }
+    const { data: ticket, error: tErr } = await supabaseAdmin
+      .from("support_tickets")
+      .insert(insertPayload)
+      .select("id, ticket_number, subject, status, category, created_at")
+      .single();
 
     if (tErr || !ticket) {
       return json({ error: "DB insert failed", details: tErr?.message }, 500);
@@ -129,19 +109,58 @@ export async function POST(req) {
       }
     }
 
-    let updatePayload = { last_message_at: now, last_message_preview: messageText };
-    for (let i = 0; i < 6; i += 1) {
-      const { error: lmErr } = await supabaseAdmin
-        .from("support_tickets")
-        .update(updatePayload)
-        .eq("id", ticket.id);
+    await supabaseAdmin
+      .from("support_tickets")
+      .update({ last_message_at: now, updated_at: now })
+      .eq("id", ticket.id);
 
-      if (!lmErr) break;
-      const missing = getMissingColumn(lmErr);
-      if (!missing || !(missing in updatePayload)) break;
-      const nextPayload = { ...updatePayload };
-      delete nextPayload[missing];
-      updatePayload = nextPayload;
+    if (user.id) {
+      await createNotification({
+        userId: user.id,
+        type: "support",
+        title: `Ticket creado TS-${ticket.ticket_number}`,
+        body: subject,
+        link: `/dashboard/tickets?ticketId=${ticket.id}`,
+        metadata: { ticketId: ticket.id, ticketNumber: ticket.ticket_number },
+      });
+    }
+
+    if (requesterEmail) {
+      try {
+        const baseUrl = (env("NEXT_PUBLIC_SITE_URL") || "https://tixswap.cl").replace(/\/+$/, "");
+        const link = `${baseUrl}/dashboard/tickets?ticketId=${ticket.id}`;
+        const { subject: mailSubject, html } = templateSupportTicketCreated({
+          requesterName,
+          ticketNumber: ticket.ticket_number,
+          ticketId: ticket.id,
+          category,
+          subject,
+          link,
+        });
+        await sendEmail({ to: requesterEmail, subject: mailSubject, html });
+      } catch (mailErr) {
+        console.warn("[support/create] email user error:", mailErr);
+      }
+    }
+
+    const inbox = env("SUPPORT_INBOX_EMAIL");
+    if (inbox) {
+      try {
+        const baseUrl = (env("NEXT_PUBLIC_SITE_URL") || "https://tixswap.cl").replace(/\/+$/, "");
+        const link = `${baseUrl}/admin/soporte`;
+        const { subject: mailSubject, html } = templateSupportNewTicketToInbox({
+          ticketNumber: ticket.ticket_number,
+          subject,
+          message: messageText,
+          requesterEmail,
+          requesterName,
+          category,
+          link,
+        });
+        await sendEmail({ to: inbox, subject: mailSubject, html });
+      } catch (mailErr) {
+        console.warn("[support/create] email inbox error:", mailErr);
+      }
     }
 
     return json(

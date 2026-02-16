@@ -1,5 +1,5 @@
 // app/support/admin/ticket/route.js
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin, getUserFromBearer, isAdminUser } from "@/lib/support/auth";
 
 export const runtime = "nodejs";
 
@@ -10,50 +10,15 @@ function json(data, status = 200) {
   });
 }
 
-function env(name) {
-  const v = process.env[name];
-  return v && String(v).trim().length ? String(v).trim() : null;
-}
-
 export async function GET(req) {
   try {
-    const supabaseUrl = env("NEXT_PUBLIC_SUPABASE_URL");
-    const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
-    if (!supabaseUrl || !serviceKey) return json({ error: "Missing env" }, 500);
+    const supabaseAdmin = getSupabaseAdmin();
 
-    const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
-      auth: { persistSession: false },
-    });
+    const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
+    if (authErr || !user) return json({ error: "UNAUTHORIZED" }, 401);
 
-    // Bearer token
-    const authHeader = req.headers.get("authorization") || "";
-    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-    if (!token) return json({ error: "UNAUTHORIZED" }, 401);
-
-    const { data: u } = await supabaseAdmin.auth.getUser(token);
-    if (!u?.user) return json({ error: "UNAUTHORIZED" }, 401);
-
-    // Validar admin usando app_role (con fallback a user_type)
-    const { data: prof, error: profErr } = await supabaseAdmin
-      .from("profiles")
-      .select("app_role, user_type, email")
-      .eq("id", u.user.id)
-      .maybeSingle();
-
-    if (profErr) {
-      console.error("Error loading profile:", profErr);
-      return json({ error: "FORBIDDEN" }, 403);
-    }
-
-    // Verificar permisos: app_role='admin' OR user_type='admin' OR email específico
-    const isAdmin = 
-      prof?.app_role === 'admin' || 
-      prof?.user_type === 'admin' ||
-      prof?.email?.toLowerCase() === 'davidchacon_17@hotmail.com';
-
-    if (!isAdmin) {
-      return json({ error: "FORBIDDEN - Not admin" }, 403);
-    }
+    const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
+    if (!isAdmin) return json({ error: "FORBIDDEN - Not admin" }, 403);
 
     const url = new URL(req.url);
     const id = url.searchParams.get("id");

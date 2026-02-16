@@ -1,116 +1,85 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sanitizeUserText } from "@/lib/security/sanitize";
-import { rateLimitByRequest } from "@/lib/security/rateLimit";
 
-function makeCode(n) {
-  return `TS-${String(n).padStart(4, "0")}`;
+export const runtime = "nodejs";
+
+function mapTicketCode(ticket) {
+  if (!ticket || typeof ticket !== "object") return ticket;
+  const next = { ...ticket };
+  if (!next.code && next.ticket_number) {
+    next.code = `TS-${next.ticket_number}`;
+  }
+  if (!next.kind) {
+    const category = String(next.category || "").toLowerCase().trim();
+    next.kind = category.startsWith("disputa") ? "dispute" : "support";
+  }
+  return next;
+}
+
+async function forwardJson(req, targetUrl, method, body) {
+  const headers = new Headers(req.headers);
+  headers.set("Content-Type", "application/json");
+  const res = await fetch(targetUrl, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  return { res, json };
 }
 
 export async function GET(req) {
-  // Autenticación por token (más confiable que cookies)
-  const authHeader = req.headers.get('authorization') || '';
-  const token = authHeader.replace('Bearer ', '').trim();
+  const url = new URL(req.url);
+  const target = new URL("/support/my/tickets", url.origin);
+  target.search = url.search;
 
-  if (!token) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  const res = await fetch(target.toString(), {
+    headers: req.headers,
+  });
+
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return NextResponse.json({ error: json?.error || "No autorizado" }, { status: res.status });
   }
 
-  const admin = supabaseAdmin();
-  const { data: { user }, error: userErr } = await admin.auth.getUser(token);
+  const list = Array.isArray(json.tickets) ? json.tickets : [];
+  const mapped = list.map(mapTicketCode);
 
-  if (userErr || !user) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  }
-
-  const { data, error } = await admin
-    .from("support_tickets")
-    .select("id, code, subject, status, kind, created_at, last_message_at")
-    .eq("user_id", user.id)
-    .order("last_message_at", { ascending: false });
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ tickets: data ?? [] });
+  return NextResponse.json({ tickets: mapped });
 }
 
 export async function POST(req) {
-  // Autenticación por token
-  const authHeader = req.headers.get('authorization') || '';
-  const token = authHeader.replace('Bearer ', '').trim();
-
-  if (!token) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  }
-
-  const admin = supabaseAdmin();
-  const { data: { user }, error: userErr } = await admin.auth.getUser(token);
-
-  if (userErr || !user) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  }
-
-  const rate = rateLimitByRequest(req, {
-    bucket: "support-ticket-create",
-    limit: 10,
-    windowMs: 10 * 60 * 1000,
-  });
-
-  if (!rate.ok) {
-    return NextResponse.json(
-      { error: "Demasiados tickets en poco tiempo. Intenta nuevamente en unos minutos." },
-      { status: 429 }
-    );
-  }
-
+  const url = new URL(req.url);
   const body = await req.json().catch(() => ({}));
-  const subject = sanitizeUserText(body.subject, { maxLen: 180 });
-  const message = sanitizeUserText(body.body ?? body.message, { maxLen: 3000 });
-  const kind = body.kind === "dispute" ? "dispute" : "support";
 
-  if (!subject) return NextResponse.json({ error: "Falta asunto" }, { status: 400 });
-  if (!message) return NextResponse.json({ error: "Falta mensaje" }, { status: 400 });
+  const payload = {
+    category: body?.category || (body?.kind === "dispute" ? "disputa_compra" : "soporte"),
+    subject: body?.subject,
+    message: body?.message ?? body?.body ?? body?.text,
+    order_id: body?.order_id || body?.orderId || null,
+  };
 
-  const { count } = await admin
-    .from("support_tickets")
-    .select("id", { count: "exact", head: true });
+  const createTarget = new URL("/support/create", url.origin);
+  const { res: createRes, json: createJson } = await forwardJson(req, createTarget.toString(), "POST", payload);
 
-  const code = makeCode((count ?? 0) + 1000);
+  if (!createRes.ok) {
+    return NextResponse.json({ error: createJson?.error || "No se pudo crear" }, { status: createRes.status });
+  }
 
-  const { data: ticket, error: tErr } = await admin
-    .from("support_tickets")
-    .insert({
-      code,
-      user_id: user.id,
-      kind,
-      subject,
-      status: "in_review",
-    })
-    .select("id, code, subject, status, kind, created_at")
-    .single();
+  const ticketId = createJson?.ticket_id;
+  if (!ticketId) {
+    return NextResponse.json({ ticket: null });
+  }
 
-  if (tErr) return NextResponse.json({ error: tErr.message }, { status: 500 });
+  const detailTarget = new URL("/support/my/ticket", url.origin);
+  detailTarget.searchParams.set("id", ticketId);
 
-  const { error: mErr } = await admin.from("support_messages").insert({
-    ticket_id: ticket.id,
-    sender_role: "user",
-    sender_user_id: user.id,
-    body: message,
-  });
+  const detailRes = await fetch(detailTarget.toString(), { headers: req.headers });
+  const detailJson = await detailRes.json().catch(() => ({}));
 
-  if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
+  if (!detailRes.ok) {
+    return NextResponse.json({ ticket: { id: ticketId } });
+  }
 
-  // Notificación por correo (opcional)
-  try {
-    await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/support/notify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: ticket.code,
-        subject: ticket.subject,
-        kind: ticket.kind,
-      }),
-    });
-  } catch {}
-
+  const ticket = mapTicketCode(detailJson?.ticket || null);
   return NextResponse.json({ ticket });
 }
