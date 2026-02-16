@@ -1,12 +1,15 @@
 // app/support/create/route.js
 import { cookies } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
-import { getSupabaseAdmin, getUserFromBearer, getProfileForUser, isAdminUser } from "@/lib/support/auth";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { createClient as createServerClient } from "@/lib/supabase/server";
+import { getSupabaseAdmin, getProfileForUser } from "@/lib/support/auth";
 import { createNotification } from "@/lib/notifications";
 import { env, sendEmail } from "@/lib/email/resend";
 import { templateSupportNewTicketToInbox, templateSupportTicketCreated } from "@/lib/email/templates";
 
 export const runtime = "nodejs";
+
+const IS_DEV = process.env.NODE_ENV !== "production";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -15,26 +18,41 @@ function json(data, status = 200) {
   });
 }
 
-function errorJson(error, status, extra = {}) {
-  return json(
-    {
-      error,
-      code: extra.code ?? null,
-      message: extra.message ?? null,
-      details: extra.details ?? null,
-      hint: extra.hint ?? null,
-      null_column: extra.null_column ?? null,
-      is_admin: extra.is_admin ?? false,
-      request_id: extra.request_id ?? null,
-    },
-    status
-  );
+function errorJson(error, status, opts = {}) {
+  const payload = {
+    error,
+    ref: opts.requestId || null,
+  };
+  if (IS_DEV && opts.debug) {
+    payload.debug = opts.debug;
+  }
+  return json(payload, status);
 }
 
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     String(value || "").trim()
   );
+}
+
+function getBearerToken(req) {
+  const authHeader = req.headers.get("authorization") || "";
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : authHeader.trim();
+  return token || null;
+}
+
+function createBearerClient(token) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error("Missing env: NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
+  return createSupabaseClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${token}` } },
+  });
 }
 
 function extractSupabaseError(err) {
@@ -53,26 +71,23 @@ function extractNullColumn(err) {
   return match ? match[1] : null;
 }
 
-function buildErrorPayload({ fallback, err, isAdmin, requestId }) {
+function buildDebug(err) {
   const info = extractSupabaseError(err);
   const nullColumn = extractNullColumn(err);
   return {
-    error: fallback,
     message: info.message || null,
     details: info.details || null,
     hint: info.hint || null,
     code: info.code || null,
     null_column: nullColumn,
-    is_admin: Boolean(isAdmin),
-    request_id: requestId || null,
   };
 }
 
-function logSupabaseError(label, err, requestId) {
+function logSupabaseError(label, err, ctx = {}) {
   const info = extractSupabaseError(err);
   const nullColumn = extractNullColumn(err);
   console.error(label, {
-    request_id: requestId || null,
+    ...ctx,
     code: info.code,
     message: info.message,
     details: info.details,
@@ -91,21 +106,28 @@ export async function POST(req) {
     requestId =
       globalThis.crypto?.randomUUID?.() ||
       `req_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    const endpoint = "/support/create";
 
     const cookieStore = cookies();
-    const supabaseAuth = createClient(cookieStore);
-    const { data: cookieData } = await supabaseAuth.auth.getUser();
+    const supabaseCookie = createServerClient(cookieStore);
+    const { data: cookieData } = await supabaseCookie.auth.getUser();
     let user = cookieData?.user || null;
+    let supabaseAuth = supabaseCookie;
 
     if (!user) {
-      const { user: bearerUser, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
-      if (authErr || !bearerUser) {
-        return errorJson("UNAUTHORIZED", 401, { request_id: requestId });
+      const token = getBearerToken(req);
+      if (token) {
+        const { data: bearerData, error: bearerErr } = await supabaseAdmin.auth.getUser(token);
+        if (!bearerErr && bearerData?.user) {
+          user = bearerData.user;
+          supabaseAuth = createBearerClient(token);
+        }
       }
-      user = bearerUser;
     }
 
-    const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
+    if (!user) {
+      return errorJson("UNAUTHORIZED", 401, { requestId });
+    }
 
     const body = await req.json().catch(() => ({}));
     const rawKind = String(body?.kind || "").toLowerCase().trim();
@@ -118,12 +140,27 @@ export async function POST(req) {
     const orderIdRaw = String(body?.order_id || body?.orderId || "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
-    if (!category) return errorJson("Falta categoría", 400, { request_id: requestId });
-    if (!subject) return errorJson("Falta asunto", 400, { request_id: requestId });
-    if (!messageText) return errorJson("Falta mensaje", 400, { request_id: requestId });
+    const safePayload = {
+      category,
+      subject_len: subject.length,
+      message_len: messageText.length,
+      has_order_id: Boolean(orderIdRaw),
+      attachments: attachment_ids.length,
+    };
+
+    console.info("[support/create] request", {
+      request_id: requestId,
+      endpoint,
+      user_id: user?.id || null,
+      payload: safePayload,
+    });
+
+    if (!category) return errorJson("Falta categoría", 400, { requestId });
+    if (!subject) return errorJson("Falta asunto", 400, { requestId });
+    if (!messageText) return errorJson("Falta mensaje", 400, { requestId });
 
     if (orderIdRaw && !isUuid(orderIdRaw)) {
-      return errorJson("Order ID inválido", 400, { request_id: requestId });
+      return errorJson("Order ID inválido", 400, { requestId });
     }
 
     const now = new Date().toISOString();
@@ -149,7 +186,7 @@ export async function POST(req) {
     };
 
     const insertTicket = async (payload) => {
-      return supabaseAdmin
+      return supabaseAuth
         .from("support_tickets")
         .insert(payload)
         .select("id, ticket_number, subject, status, category, created_at")
@@ -159,20 +196,19 @@ export async function POST(req) {
     let { data: ticket, error: tErr } = await insertTicket(insertPayload);
 
     if (tErr || !ticket) {
-      logSupabaseError("create_ticket_error", tErr, requestId);
-      return json(
-        buildErrorPayload({
-          fallback: "No se pudo crear el ticket.",
-          err: tErr,
-          isAdmin,
-          requestId,
-        }),
-        500
-      );
+      logSupabaseError("create_ticket_error", tErr, {
+        request_id: requestId,
+        endpoint,
+        user_id: user?.id || null,
+      });
+      return errorJson("No se pudo crear el ticket.", 500, {
+        requestId,
+        debug: buildDebug(tErr),
+      });
     }
 
     // Insert mensaje inicial
-    const { data: msg, error: mErr } = await supabaseAdmin
+    const { data: msg, error: mErr } = await supabaseAuth
       .from("support_messages")
       .insert({
         ticket_id: ticket.id,
@@ -185,7 +221,12 @@ export async function POST(req) {
       .single();
 
     if (mErr) {
-      logSupabaseError("[support/create] message insert failed:", mErr, requestId);
+      logSupabaseError("[support/create] message insert failed:", mErr, {
+        request_id: requestId,
+        endpoint,
+        user_id: user?.id || null,
+        ticket_id: ticket.id,
+      });
       const { error: delErr } = await supabaseAdmin
         .from("support_tickets")
         .delete()
@@ -193,15 +234,10 @@ export async function POST(req) {
       if (delErr) {
         console.error("[support/create] delete ticket failed:", delErr);
       }
-      return json(
-        buildErrorPayload({
-          fallback: "No se pudo crear el ticket.",
-          err: mErr,
-          isAdmin,
-          requestId,
-        }),
-        500
-      );
+      return errorJson("No se pudo crear el ticket.", 500, {
+        requestId,
+        debug: buildDebug(mErr),
+      });
     }
 
     if (attachment_ids.length) {
@@ -212,16 +248,16 @@ export async function POST(req) {
         .eq("ticket_id", ticket.id);
 
       if (aErr) {
-        logSupabaseError("[support/create] attachment update failed:", aErr, requestId);
-        return json(
-          buildErrorPayload({
-            fallback: "No se pudieron asociar adjuntos",
-            err: aErr,
-            isAdmin,
-            requestId,
-          }),
-          500
-        );
+        logSupabaseError("[support/create] attachment update failed:", aErr, {
+          request_id: requestId,
+          endpoint,
+          user_id: user?.id || null,
+          ticket_id: ticket.id,
+        });
+        return errorJson("No se pudieron asociar adjuntos", 500, {
+          requestId,
+          debug: buildDebug(aErr),
+        });
       }
     }
 
@@ -246,7 +282,12 @@ export async function POST(req) {
           .update(updatePayload)
           .eq("id", ticket.id);
       } else {
-        logSupabaseError("[support/create] ticket update failed:", uErr, requestId);
+        logSupabaseError("[support/create] ticket update failed:", uErr, {
+          request_id: requestId,
+          endpoint,
+          user_id: user?.id || null,
+          ticket_id: ticket.id,
+        });
       }
     }
 
@@ -305,8 +346,8 @@ export async function POST(req) {
     );
   } catch (e) {
     return errorJson("Unexpected error", 500, {
-      message: e?.message || String(e),
-      request_id: requestId,
+      requestId,
+      debug: buildDebug(e),
     });
   }
 }

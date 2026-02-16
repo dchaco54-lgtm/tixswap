@@ -23,18 +23,18 @@ BEGIN
     AND table_name = 'support_tickets'
     AND column_name = 'ticket_number';
 
-  IF default_expr IS NULL THEN
+  IF default_expr IS NULL OR position('support_ticket_number_seq' in default_expr) = 0 THEN
     ALTER TABLE public.support_tickets
       ALTER COLUMN ticket_number SET DEFAULT nextval('public.support_ticket_number_seq'::regclass);
   ELSE
-    IF position('support_ticket_number_seq' in default_expr) = 0 THEN
-      RAISE NOTICE 'ticket_number default ya existe (%). No se cambia.', default_expr;
-    END IF;
+    RAISE NOTICE 'ticket_number default ya existe (%). No se cambia.', default_expr;
   END IF;
 END $$;
 
 ALTER SEQUENCE public.support_ticket_number_seq
   OWNED BY public.support_tickets.ticket_number;
+
+GRANT USAGE, SELECT ON SEQUENCE public.support_ticket_number_seq TO authenticated;
 
 SELECT setval(
   'public.support_ticket_number_seq',

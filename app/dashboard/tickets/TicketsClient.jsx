@@ -389,11 +389,11 @@ export default function MyTicketsPage() {
       if (!res.ok) {
         const baseMsg = json?.error || "No se pudo crear el ticket.";
         const isDev = process.env.NODE_ENV !== "production";
-        const showDebug = isDev || json?.is_admin === true;
+        const showDebug = isDev;
         if (showDebug) {
           console.error("[support/create]", json);
         }
-        const ref = json?.request_id ? ` (ref: ${json.request_id})` : "";
+        const ref = json?.ref ? ` (ref: ${json.ref})` : "";
         setCreateError(`${baseMsg}${ref}`);
         return;
       }
