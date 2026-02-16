@@ -13,6 +13,21 @@ function json(data, status = 200) {
   });
 }
 
+function errorJson(error, status, extra = {}) {
+  return json(
+    {
+      error,
+      code: extra.code ?? null,
+      message: extra.message ?? null,
+      details: extra.details ?? null,
+      hint: extra.hint ?? null,
+      null_column: extra.null_column ?? null,
+      is_admin: extra.is_admin ?? false,
+    },
+    status
+  );
+}
+
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     String(value || "").trim()
@@ -59,6 +74,9 @@ function logSupabaseError(label, err) {
     hint: info.hint,
     null_column: nullColumn,
   });
+  if (info.code === "23502" && nullColumn) {
+    console.error("NOT_NULL column failed:", nullColumn);
+  }
 }
 
 export async function POST(req) {
@@ -66,7 +84,7 @@ export async function POST(req) {
     const supabaseAdmin = getSupabaseAdmin();
 
     const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
-    if (authErr || !user) return json({ error: "UNAUTHORIZED" }, 401);
+    if (authErr || !user) return errorJson("UNAUTHORIZED", 401);
     const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
 
     const body = await req.json().catch(() => ({}));
@@ -75,17 +93,17 @@ export async function POST(req) {
       || (rawKind === "dispute" ? "disputa_compra" : rawKind === "support" ? "soporte" : "")
       || "soporte";
     const category = String(rawCategory).trim();
-    const subject = String(body?.subject || "").trim();
+    const subject = String(body?.subject ?? body?.asunto ?? "").trim();
     const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
     const orderIdRaw = String(body?.order_id || body?.orderId || "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
-    if (!category) return json({ error: "Falta categoría" }, 400);
-    if (!subject) return json({ error: "Falta asunto" }, 400);
-    if (!messageText) return json({ error: "Mensaje requerido" }, 400);
+    if (!category) return errorJson("Falta categoría", 400);
+    if (!subject) return errorJson("Falta asunto", 400);
+    if (!messageText) return errorJson("Falta mensaje", 400);
 
     if (orderIdRaw && !isUuid(orderIdRaw)) {
-      return json({ error: "Order ID inválido" }, 400);
+      return errorJson("Order ID inválido", 400);
     }
 
     const now = new Date().toISOString();
@@ -121,7 +139,7 @@ export async function POST(req) {
     let { data: ticket, error: tErr } = await insertTicket(insertPayload);
 
     if (tErr || !ticket) {
-      logSupabaseError("[support/create] ticket insert failed:", tErr);
+      logSupabaseError("create_ticket_error", tErr);
       return json(
         buildErrorPayload({
           fallback: "No se pudo crear el ticket.",
@@ -260,14 +278,8 @@ export async function POST(req) {
       200
     );
   } catch (e) {
-    return json(
-      {
-        error: "Unexpected error",
-        details: e?.message || String(e),
-        hint: null,
-        code: null,
-      },
-      500
-    );
+    return errorJson("Unexpected error", 500, {
+      message: e?.message || String(e),
+    });
   }
 }
