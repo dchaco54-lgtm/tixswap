@@ -5,6 +5,10 @@ import { NextResponse } from "next/server";
 import { buildTicketSelect, detectEventColumns, detectTicketColumns, normalizeTicket } from "@/lib/db/ticketSchema";
 import { supabaseServiceOptional } from "@/lib/supabaseServiceOptional";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 function computeSummary(list) {
   const summary = { total: list.length, active: 0, paused: 0, sold: 0 };
   for (const t of list) {

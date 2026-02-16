@@ -1,4 +1,4 @@
-// app/dashboard/tickets/page.jsx
+// app/dashboard/tickets/TicketsClient.jsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";

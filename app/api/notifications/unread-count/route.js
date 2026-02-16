@@ -3,6 +3,10 @@ import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 async function getAuthContext(req) {
   const authHeader = req.headers.get("authorization") || "";
   if (authHeader.startsWith("Bearer ")) {
