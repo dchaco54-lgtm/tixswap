@@ -69,6 +69,7 @@ export async function POST(req) {
         details: createJson?.details || null,
         hint: createJson?.hint || null,
         code: createJson?.code || null,
+        null_column: createJson?.null_column || null,
         is_admin: createJson?.is_admin || false,
       },
       { status: createRes.status }

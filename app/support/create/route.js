@@ -29,21 +29,36 @@ function extractSupabaseError(err) {
   };
 }
 
+function extractNullColumn(err) {
+  const src = String(err?.details || err?.message || "");
+  const match = src.match(/null value in column \"([^\"]+)\"/i);
+  return match ? match[1] : null;
+}
+
 function buildErrorPayload({ fallback, err, exposeDetails, isAdmin }) {
   const info = extractSupabaseError(err);
+  const nullColumn = extractNullColumn(err);
   const errorMessage = exposeDetails ? info.message || fallback : fallback;
   return {
     error: errorMessage,
     details: exposeDetails ? info.details : null,
     hint: exposeDetails ? info.hint : null,
     code: info.code || null,
+    null_column: nullColumn,
     is_admin: Boolean(isAdmin),
   };
 }
 
 function logSupabaseError(label, err) {
   const info = extractSupabaseError(err);
-  console.error(label, info);
+  const nullColumn = extractNullColumn(err);
+  console.error(label, {
+    code: info.code,
+    message: info.message,
+    details: info.details,
+    hint: info.hint,
+    null_column: nullColumn,
+  });
 }
 
 export async function POST(req) {
@@ -105,8 +120,12 @@ export async function POST(req) {
     };
 
     let { data: ticket, error: tErr } = await insertTicket(insertPayload);
+    const nullColumn = extractNullColumn(tErr);
 
-    if (tErr && String(tErr.message || "").toLowerCase().includes("ticket_number")) {
+    if (
+      tErr &&
+      (String(tErr.message || "").toLowerCase().includes("ticket_number") || nullColumn === "ticket_number")
+    ) {
       const { data: last } = await supabaseAdmin
         .from("support_tickets")
         .select("ticket_number")

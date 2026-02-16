@@ -375,7 +375,7 @@ export default function MyTicketsPage() {
         payload.order_id = newTicket.orderId.trim();
       }
 
-      // Endpoint real: /support/create (App Router). Fallaba cuando support_tickets.ticket_number no tenía default y devolvía "DB insert failed" sin detalle.
+      // Endpoint real: /support/create (App Router). Fallaba por NOT NULL (code 23502) sin detalle visible.
       const res = await fetch("/support/create", {
         method: "POST",
         headers: {
@@ -392,6 +392,7 @@ export default function MyTicketsPage() {
         const showDebug = isDev || json?.is_admin === true;
         const debugParts = [];
         if (showDebug) {
+          if (json?.null_column) debugParts.push(`Column ${json.null_column} is null`);
           if (json?.details) debugParts.push(json.details);
           if (json?.hint) debugParts.push(json.hint);
         }
