@@ -63,11 +63,34 @@ export async function POST(req) {
       requester_rut: requesterRut,
     };
 
-    const { data: ticket, error: tErr } = await supabaseAdmin
-      .from("support_tickets")
-      .insert(insertPayload)
-      .select("id, ticket_number, subject, status, category, created_at")
-      .single();
+    const insertTicket = async (payload) => {
+      return supabaseAdmin
+        .from("support_tickets")
+        .insert(payload)
+        .select("id, ticket_number, subject, status, category, created_at")
+        .single();
+    };
+
+    let { data: ticket, error: tErr } = await insertTicket(insertPayload);
+
+    if (tErr && String(tErr.message || "").toLowerCase().includes("ticket_number")) {
+      const { data: last } = await supabaseAdmin
+        .from("support_tickets")
+        .select("ticket_number")
+        .order("ticket_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const lastNum = Number(last?.ticket_number || 1000);
+      const nextNum = Number.isFinite(lastNum) ? lastNum + 1 : 1001;
+      const code = `TS-${String(nextNum).padStart(4, "0")}`;
+
+      ({ data: ticket, error: tErr } = await insertTicket({
+        ...insertPayload,
+        ticket_number: nextNum,
+        code,
+      }));
+    }
 
     if (tErr || !ticket) {
       return json({ error: "DB insert failed", details: tErr?.message }, 500);
