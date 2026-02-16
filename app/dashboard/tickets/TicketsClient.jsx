@@ -387,18 +387,22 @@ export default function MyTicketsPage() {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const baseMsg = json?.error || "No se pudo crear el ticket.";
+        const baseMsg =
+          res.status === 400 || res.status === 401
+            ? json?.error || "No se pudo crear el ticket."
+            : "No se pudo crear el ticket.";
         const isDev = process.env.NODE_ENV !== "production";
         const showDebug = isDev || json?.is_admin === true;
-        const debugParts = [];
         if (showDebug) {
-          if (json?.null_column) debugParts.push(`Column ${json.null_column} is null`);
-          if (json?.details) debugParts.push(json.details);
-          if (json?.hint) debugParts.push(json.hint);
+          console.error("[support/create]", {
+            message: json?.message,
+            code: json?.code,
+            details: json?.details,
+            hint: json?.hint,
+            null_column: json?.null_column,
+          });
         }
-        if (json?.code) debugParts.push(`code ${json.code}`);
-        const suffix = debugParts.length ? ` (${debugParts.join(" | ")})` : "";
-        setCreateError(`${baseMsg}${suffix}`);
+        setCreateError(baseMsg);
         return;
       }
 

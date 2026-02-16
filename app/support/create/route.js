@@ -35,14 +35,14 @@ function extractNullColumn(err) {
   return match ? match[1] : null;
 }
 
-function buildErrorPayload({ fallback, err, exposeDetails, isAdmin }) {
+function buildErrorPayload({ fallback, err, isAdmin }) {
   const info = extractSupabaseError(err);
   const nullColumn = extractNullColumn(err);
-  const errorMessage = exposeDetails ? info.message || fallback : fallback;
   return {
-    error: errorMessage,
-    details: exposeDetails ? info.details : null,
-    hint: exposeDetails ? info.hint : null,
+    error: fallback,
+    message: info.message || null,
+    details: info.details || null,
+    hint: info.hint || null,
     code: info.code || null,
     null_column: nullColumn,
     is_admin: Boolean(isAdmin),
@@ -68,7 +68,6 @@ export async function POST(req) {
     const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
     if (authErr || !user) return json({ error: "UNAUTHORIZED" }, 401);
     const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
-    const exposeDetails = process.env.NODE_ENV !== "production" || isAdmin;
 
     const body = await req.json().catch(() => ({}));
     const rawKind = String(body?.kind || "").toLowerCase().trim();
@@ -120,37 +119,13 @@ export async function POST(req) {
     };
 
     let { data: ticket, error: tErr } = await insertTicket(insertPayload);
-    const nullColumn = extractNullColumn(tErr);
-
-    if (
-      tErr &&
-      (String(tErr.message || "").toLowerCase().includes("ticket_number") || nullColumn === "ticket_number")
-    ) {
-      const { data: last } = await supabaseAdmin
-        .from("support_tickets")
-        .select("ticket_number")
-        .order("ticket_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const lastNum = Number(last?.ticket_number || 1000);
-      const nextNum = Number.isFinite(lastNum) ? lastNum + 1 : 1001;
-      const code = `TS-${String(nextNum).padStart(4, "0")}`;
-
-      ({ data: ticket, error: tErr } = await insertTicket({
-        ...insertPayload,
-        ticket_number: nextNum,
-        code,
-      }));
-    }
 
     if (tErr || !ticket) {
       logSupabaseError("[support/create] ticket insert failed:", tErr);
       return json(
         buildErrorPayload({
-          fallback: "DB insert failed",
+          fallback: "No se pudo crear el ticket.",
           err: tErr,
-          exposeDetails,
           isAdmin,
         }),
         500
@@ -181,9 +156,8 @@ export async function POST(req) {
       }
       return json(
         buildErrorPayload({
-          fallback: "DB insert failed",
+          fallback: "No se pudo crear el ticket.",
           err: mErr,
-          exposeDetails,
           isAdmin,
         }),
         500
@@ -203,7 +177,6 @@ export async function POST(req) {
           buildErrorPayload({
             fallback: "No se pudieron asociar adjuntos",
             err: aErr,
-            exposeDetails,
             isAdmin,
           }),
           500
