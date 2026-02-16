@@ -375,6 +375,7 @@ export default function MyTicketsPage() {
         payload.order_id = newTicket.orderId.trim();
       }
 
+      // Endpoint real: /support/create (App Router). Fallaba cuando support_tickets.ticket_number no tenía default y devolvía "DB insert failed" sin detalle.
       const res = await fetch("/support/create", {
         method: "POST",
         headers: {
@@ -386,7 +387,17 @@ export default function MyTicketsPage() {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setCreateError(json?.error || "No se pudo crear el ticket.");
+        const baseMsg = json?.error || "No se pudo crear el ticket.";
+        const isDev = process.env.NODE_ENV !== "production";
+        const showDebug = isDev || json?.is_admin === true;
+        const debugParts = [];
+        if (showDebug) {
+          if (json?.details) debugParts.push(json.details);
+          if (json?.hint) debugParts.push(json.hint);
+        }
+        if (json?.code) debugParts.push(`code ${json.code}`);
+        const suffix = debugParts.length ? ` (${debugParts.join(" | ")})` : "";
+        setCreateError(`${baseMsg}${suffix}`);
         return;
       }
 

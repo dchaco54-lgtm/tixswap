@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
+// Wrapper legacy: endpoint oficial es /support/* (App Router). Mantener para compat.
 function mapTicketCode(ticket) {
   if (!ticket || typeof ticket !== "object") return ticket;
   const next = { ...ticket };
@@ -62,7 +63,16 @@ export async function POST(req) {
   const { res: createRes, json: createJson } = await forwardJson(req, createTarget.toString(), "POST", payload);
 
   if (!createRes.ok) {
-    return NextResponse.json({ error: createJson?.error || "No se pudo crear" }, { status: createRes.status });
+    return NextResponse.json(
+      {
+        error: createJson?.error || "No se pudo crear",
+        details: createJson?.details || null,
+        hint: createJson?.hint || null,
+        code: createJson?.code || null,
+        is_admin: createJson?.is_admin || false,
+      },
+      { status: createRes.status }
+    );
   }
 
   const ticketId = createJson?.ticket_id;

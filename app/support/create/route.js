@@ -1,5 +1,5 @@
 // app/support/create/route.js
-import { getSupabaseAdmin, getUserFromBearer, getProfileForUser } from "@/lib/support/auth";
+import { getSupabaseAdmin, getUserFromBearer, getProfileForUser, isAdminUser } from "@/lib/support/auth";
 import { createNotification } from "@/lib/notifications";
 import { env, sendEmail } from "@/lib/email/resend";
 import { templateSupportNewTicketToInbox, templateSupportTicketCreated } from "@/lib/email/templates";
@@ -19,15 +19,48 @@ function isUuid(value) {
   );
 }
 
+function extractSupabaseError(err) {
+  if (!err) return { message: null, details: null, hint: null, code: null };
+  return {
+    message: err?.message || null,
+    details: err?.details || null,
+    hint: err?.hint || null,
+    code: err?.code || null,
+  };
+}
+
+function buildErrorPayload({ fallback, err, exposeDetails, isAdmin }) {
+  const info = extractSupabaseError(err);
+  const errorMessage = exposeDetails ? info.message || fallback : fallback;
+  return {
+    error: errorMessage,
+    details: exposeDetails ? info.details : null,
+    hint: exposeDetails ? info.hint : null,
+    code: info.code || null,
+    is_admin: Boolean(isAdmin),
+  };
+}
+
+function logSupabaseError(label, err) {
+  const info = extractSupabaseError(err);
+  console.error(label, info);
+}
+
 export async function POST(req) {
   try {
     const supabaseAdmin = getSupabaseAdmin();
 
     const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
     if (authErr || !user) return json({ error: "UNAUTHORIZED" }, 401);
+    const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
+    const exposeDetails = process.env.NODE_ENV !== "production" || isAdmin;
 
     const body = await req.json().catch(() => ({}));
-    const category = String(body?.category || "soporte").trim();
+    const rawKind = String(body?.kind || "").toLowerCase().trim();
+    const rawCategory = body?.category
+      || (rawKind === "dispute" ? "disputa_compra" : rawKind === "support" ? "soporte" : "")
+      || "soporte";
+    const category = String(rawCategory).trim();
     const subject = String(body?.subject || "").trim();
     const messageText = String(body?.message ?? body?.body ?? body?.text ?? "").trim();
     const orderIdRaw = String(body?.order_id || body?.orderId || "").trim();
@@ -93,7 +126,16 @@ export async function POST(req) {
     }
 
     if (tErr || !ticket) {
-      return json({ error: "DB insert failed", details: tErr?.message }, 500);
+      logSupabaseError("[support/create] ticket insert failed:", tErr);
+      return json(
+        buildErrorPayload({
+          fallback: "DB insert failed",
+          err: tErr,
+          exposeDetails,
+          isAdmin,
+        }),
+        500
+      );
     }
 
     // Insert mensaje inicial
@@ -110,6 +152,7 @@ export async function POST(req) {
       .single();
 
     if (mErr) {
+      logSupabaseError("[support/create] message insert failed:", mErr);
       const { error: delErr } = await supabaseAdmin
         .from("support_tickets")
         .delete()
@@ -117,7 +160,15 @@ export async function POST(req) {
       if (delErr) {
         console.error("[support/create] delete ticket failed:", delErr);
       }
-      return json({ error: "DB insert failed", details: mErr?.message }, 500);
+      return json(
+        buildErrorPayload({
+          fallback: "DB insert failed",
+          err: mErr,
+          exposeDetails,
+          isAdmin,
+        }),
+        500
+      );
     }
 
     if (attachment_ids.length) {
@@ -128,14 +179,40 @@ export async function POST(req) {
         .eq("ticket_id", ticket.id);
 
       if (aErr) {
-        return json({ error: "No se pudieron asociar adjuntos", details: aErr.message }, 500);
+        logSupabaseError("[support/create] attachment update failed:", aErr);
+        return json(
+          buildErrorPayload({
+            fallback: "No se pudieron asociar adjuntos",
+            err: aErr,
+            exposeDetails,
+            isAdmin,
+          }),
+          500
+        );
       }
     }
 
-    await supabaseAdmin
+    const preview = messageText.length > 160 ? `${messageText.slice(0, 160)}…` : messageText;
+    const updatePayload = { last_message_at: now, updated_at: now };
+    const updateWithPreview = { ...updatePayload, last_message_preview: preview };
+    const { error: uErr } = await supabaseAdmin
       .from("support_tickets")
-      .update({ last_message_at: now, updated_at: now })
+      .update(updateWithPreview)
       .eq("id", ticket.id);
+
+    if (uErr) {
+      const isMissingPreview =
+        String(uErr?.code || "") === "42703" ||
+        String(uErr?.message || "").toLowerCase().includes("last_message_preview");
+      if (isMissingPreview) {
+        await supabaseAdmin
+          .from("support_tickets")
+          .update(updatePayload)
+          .eq("id", ticket.id);
+      } else {
+        logSupabaseError("[support/create] ticket update failed:", uErr);
+      }
+    }
 
     if (user.id) {
       await createNotification({
@@ -192,7 +269,12 @@ export async function POST(req) {
     );
   } catch (e) {
     return json(
-      { error: "Unexpected error", details: e?.message || String(e) },
+      {
+        error: "Unexpected error",
+        details: e?.message || String(e),
+        hint: null,
+        code: null,
+      },
       500
     );
   }
