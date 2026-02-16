@@ -387,22 +387,14 @@ export default function MyTicketsPage() {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const baseMsg =
-          res.status === 400 || res.status === 401
-            ? json?.error || "No se pudo crear el ticket."
-            : "No se pudo crear el ticket.";
+        const baseMsg = json?.error || "No se pudo crear el ticket.";
         const isDev = process.env.NODE_ENV !== "production";
         const showDebug = isDev || json?.is_admin === true;
         if (showDebug) {
-          console.error("[support/create]", {
-            message: json?.message,
-            code: json?.code,
-            details: json?.details,
-            hint: json?.hint,
-            null_column: json?.null_column,
-          });
+          console.error("[support/create]", json);
         }
-        setCreateError(baseMsg);
+        const ref = json?.request_id ? ` (ref: ${json.request_id})` : "";
+        setCreateError(`${baseMsg}${ref}`);
         return;
       }
 

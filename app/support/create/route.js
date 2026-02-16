@@ -1,4 +1,6 @@
 // app/support/create/route.js
+import { cookies } from "next/headers";
+import { createClient } from "@/lib/supabase/server";
 import { getSupabaseAdmin, getUserFromBearer, getProfileForUser, isAdminUser } from "@/lib/support/auth";
 import { createNotification } from "@/lib/notifications";
 import { env, sendEmail } from "@/lib/email/resend";
@@ -23,6 +25,7 @@ function errorJson(error, status, extra = {}) {
       hint: extra.hint ?? null,
       null_column: extra.null_column ?? null,
       is_admin: extra.is_admin ?? false,
+      request_id: extra.request_id ?? null,
     },
     status
   );
@@ -50,7 +53,7 @@ function extractNullColumn(err) {
   return match ? match[1] : null;
 }
 
-function buildErrorPayload({ fallback, err, isAdmin }) {
+function buildErrorPayload({ fallback, err, isAdmin, requestId }) {
   const info = extractSupabaseError(err);
   const nullColumn = extractNullColumn(err);
   return {
@@ -61,13 +64,15 @@ function buildErrorPayload({ fallback, err, isAdmin }) {
     code: info.code || null,
     null_column: nullColumn,
     is_admin: Boolean(isAdmin),
+    request_id: requestId || null,
   };
 }
 
-function logSupabaseError(label, err) {
+function logSupabaseError(label, err, requestId) {
   const info = extractSupabaseError(err);
   const nullColumn = extractNullColumn(err);
   console.error(label, {
+    request_id: requestId || null,
     code: info.code,
     message: info.message,
     details: info.details,
@@ -80,11 +85,26 @@ function logSupabaseError(label, err) {
 }
 
 export async function POST(req) {
+  let requestId = null;
   try {
     const supabaseAdmin = getSupabaseAdmin();
+    requestId =
+      globalThis.crypto?.randomUUID?.() ||
+      `req_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
-    const { user, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
-    if (authErr || !user) return errorJson("UNAUTHORIZED", 401);
+    const cookieStore = cookies();
+    const supabaseAuth = createClient(cookieStore);
+    const { data: cookieData } = await supabaseAuth.auth.getUser();
+    let user = cookieData?.user || null;
+
+    if (!user) {
+      const { user: bearerUser, error: authErr } = await getUserFromBearer(req, supabaseAdmin);
+      if (authErr || !bearerUser) {
+        return errorJson("UNAUTHORIZED", 401, { request_id: requestId });
+      }
+      user = bearerUser;
+    }
+
     const { ok: isAdmin } = await isAdminUser(supabaseAdmin, user);
 
     const body = await req.json().catch(() => ({}));
@@ -98,12 +118,12 @@ export async function POST(req) {
     const orderIdRaw = String(body?.order_id || body?.orderId || "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
-    if (!category) return errorJson("Falta categoría", 400);
-    if (!subject) return errorJson("Falta asunto", 400);
-    if (!messageText) return errorJson("Falta mensaje", 400);
+    if (!category) return errorJson("Falta categoría", 400, { request_id: requestId });
+    if (!subject) return errorJson("Falta asunto", 400, { request_id: requestId });
+    if (!messageText) return errorJson("Falta mensaje", 400, { request_id: requestId });
 
     if (orderIdRaw && !isUuid(orderIdRaw)) {
-      return errorJson("Order ID inválido", 400);
+      return errorJson("Order ID inválido", 400, { request_id: requestId });
     }
 
     const now = new Date().toISOString();
@@ -139,12 +159,13 @@ export async function POST(req) {
     let { data: ticket, error: tErr } = await insertTicket(insertPayload);
 
     if (tErr || !ticket) {
-      logSupabaseError("create_ticket_error", tErr);
+      logSupabaseError("create_ticket_error", tErr, requestId);
       return json(
         buildErrorPayload({
           fallback: "No se pudo crear el ticket.",
           err: tErr,
           isAdmin,
+          requestId,
         }),
         500
       );
@@ -164,7 +185,7 @@ export async function POST(req) {
       .single();
 
     if (mErr) {
-      logSupabaseError("[support/create] message insert failed:", mErr);
+      logSupabaseError("[support/create] message insert failed:", mErr, requestId);
       const { error: delErr } = await supabaseAdmin
         .from("support_tickets")
         .delete()
@@ -177,6 +198,7 @@ export async function POST(req) {
           fallback: "No se pudo crear el ticket.",
           err: mErr,
           isAdmin,
+          requestId,
         }),
         500
       );
@@ -190,12 +212,13 @@ export async function POST(req) {
         .eq("ticket_id", ticket.id);
 
       if (aErr) {
-        logSupabaseError("[support/create] attachment update failed:", aErr);
+        logSupabaseError("[support/create] attachment update failed:", aErr, requestId);
         return json(
           buildErrorPayload({
             fallback: "No se pudieron asociar adjuntos",
             err: aErr,
             isAdmin,
+            requestId,
           }),
           500
         );
@@ -205,6 +228,9 @@ export async function POST(req) {
     const preview = messageText.length > 160 ? `${messageText.slice(0, 160)}…` : messageText;
     const updatePayload = { last_message_at: now, updated_at: now };
     const updateWithPreview = { ...updatePayload, last_message_preview: preview };
+    if (ticket?.ticket_number) {
+      updateWithPreview.code = `TS-${String(ticket.ticket_number).padStart(4, "0")}`;
+    }
     const { error: uErr } = await supabaseAdmin
       .from("support_tickets")
       .update(updateWithPreview)
@@ -220,7 +246,7 @@ export async function POST(req) {
           .update(updatePayload)
           .eq("id", ticket.id);
       } else {
-        logSupabaseError("[support/create] ticket update failed:", uErr);
+        logSupabaseError("[support/create] ticket update failed:", uErr, requestId);
       }
     }
 
@@ -280,6 +306,7 @@ export async function POST(req) {
   } catch (e) {
     return errorJson("Unexpected error", 500, {
       message: e?.message || String(e),
+      request_id: requestId,
     });
   }
 }
