@@ -71,21 +71,30 @@ function extractNullColumn(err) {
   return match ? match[1] : null;
 }
 
+function extractRlsTable(err) {
+  const src = String(err?.message || "");
+  const match = src.match(/table \"([^\"]+)\"/i);
+  return match ? match[1] : null;
+}
+
 function buildDebug(err) {
   const info = extractSupabaseError(err);
   const nullColumn = extractNullColumn(err);
+  const rlsTable = extractRlsTable(err);
   return {
     message: info.message || null,
     details: info.details || null,
     hint: info.hint || null,
     code: info.code || null,
     null_column: nullColumn,
+    rls_table: rlsTable,
   };
 }
 
 function logSupabaseError(label, err, ctx = {}) {
   const info = extractSupabaseError(err);
   const nullColumn = extractNullColumn(err);
+  const rlsTable = extractRlsTable(err);
   console.error(label, {
     ...ctx,
     code: info.code,
@@ -93,6 +102,7 @@ function logSupabaseError(label, err, ctx = {}) {
     details: info.details,
     hint: info.hint,
     null_column: nullColumn,
+    rls_table: rlsTable,
   });
   if (info.code === "23502" && nullColumn) {
     console.error("NOT_NULL column failed:", nullColumn);
@@ -194,6 +204,24 @@ export async function POST(req) {
     };
 
     let { data: ticket, error: tErr } = await insertTicket(insertPayload);
+
+    if (tErr) {
+      const isRls =
+        String(tErr?.code || "") === "42501" ||
+        String(tErr?.message || "").toLowerCase().includes("row-level security");
+      if (isRls) {
+        console.warn("[support/create] ticket insert RLS, retrying with admin", {
+          request_id: requestId,
+          user_id: user?.id || null,
+          rls_table: extractRlsTable(tErr),
+        });
+        ({ data: ticket, error: tErr } = await supabaseAdmin
+          .from("support_tickets")
+          .insert(insertPayload)
+          .select("id, ticket_number, subject, status, category, created_at")
+          .single());
+      }
+    }
 
     if (tErr || !ticket) {
       logSupabaseError("create_ticket_error", tErr, {
