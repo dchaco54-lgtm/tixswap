@@ -146,6 +146,10 @@ function getAdminEventsErrorMessage(error, fallbackMessage) {
     return "No tienes permisos para crear eventos (RLS). Verifica policies de events para admin.";
   }
 
+  if (isStatusColumnMissingError(error)) {
+    return "Tu BD aún no tiene la columna 'status'. Ejecuta la migración MIGRATION_EVENTS_STATUS.sql y recarga.";
+  }
+
   return error?.message || fallbackMessage;
 }
 
@@ -372,6 +376,9 @@ export default function AdminEventsPage() {
       });
       await loadEvents();
     } catch (e2) {
+      if (isStatusColumnMissingError(e2)) {
+        setHasStatusColumn(false);
+      }
       setErr(getAdminEventsErrorMessage(e2, "Error creando evento"));
     } finally {
       setCreating(false);
@@ -467,7 +474,10 @@ export default function AdminEventsPage() {
       setBulkFileName("");
       await loadEvents();
     } catch (e) {
-      setErr(e?.message || "Falló la importación masiva");
+      if (isStatusColumnMissingError(e)) {
+        setHasStatusColumn(false);
+      }
+      setErr(getAdminEventsErrorMessage(e, "Falló la importación masiva"));
     } finally {
       setBulkImporting(false);
     }
@@ -514,6 +524,12 @@ export default function AdminEventsPage() {
         {hasWarningsColumn === false && (
           <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 font-semibold">
             Tu BD aún no tiene la columna &apos;warnings&apos;. Ejecuta la migración MIGRATION_EVENTS_WARNINGS.sql y recarga.
+          </div>
+        )}
+
+        {hasStatusColumn === false && (
+          <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800 font-semibold">
+            Tu BD aún no tiene la columna &apos;status&apos;. Ejecuta la migración MIGRATION_EVENTS_STATUS.sql y recarga.
           </div>
         )}
 
