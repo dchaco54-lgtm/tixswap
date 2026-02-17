@@ -208,7 +208,7 @@ export async function POST(req) {
     }
 
     // Insert mensaje inicial
-    const { data: msg, error: mErr } = await supabaseAuth
+    let { data: msg, error: mErr } = await supabaseAuth
       .from("support_messages")
       .insert({
         ticket_id: ticket.id,
@@ -219,6 +219,30 @@ export async function POST(req) {
       })
       .select("id")
       .single();
+
+    if (mErr) {
+      const isRls =
+        String(mErr?.code || "") === "42501" ||
+        String(mErr?.message || "").toLowerCase().includes("row-level security");
+      if (isRls) {
+        console.warn("[support/create] message insert RLS, retrying with admin", {
+          request_id: requestId,
+          ticket_id: ticket.id,
+          user_id: user?.id || null,
+        });
+        ({ data: msg, error: mErr } = await supabaseAdmin
+          .from("support_messages")
+          .insert({
+            ticket_id: ticket.id,
+            sender_role: "user",
+            sender_user_id: user.id,
+            body: messageText,
+            created_at: now,
+          })
+          .select("id")
+          .single());
+      }
+    }
 
     if (mErr) {
       logSupabaseError("[support/create] message insert failed:", mErr, {
