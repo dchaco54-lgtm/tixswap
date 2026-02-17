@@ -34,6 +34,9 @@ export default function EventDetailPage() {
 
   const [event, setEvent] = useState(null);
   const [tickets, setTickets] = useState([]);
+  const [changeLogs, setChangeLogs] = useState([]);
+  const [hasRecentChange, setHasRecentChange] = useState(false);
+  const [showChanges, setShowChanges] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -44,6 +47,9 @@ export default function EventDetailPage() {
       try {
         setLoading(true);
         setErrorMsg("");
+        setChangeLogs([]);
+        setHasRecentChange(false);
+        setShowChanges(false);
 
         // Cache busting: timestamp + headers anti-caché
         const timestamp = Date.now();
@@ -77,6 +83,22 @@ export default function EventDetailPage() {
         const list = Array.isArray(tJson.tickets) ? tJson.tickets : [];
         setTickets(list);
 
+        // 3) Cambios recientes (sin bloquear la vista)
+        try {
+          const cRes = await fetch(`/api/events/${id}/changes?_t=${timestamp}`, {
+            cache: "no-store",
+            headers: cacheHeaders,
+          });
+          const cJson = await cRes.json().catch(() => ({}));
+          if (cRes.ok) {
+            const logs = Array.isArray(cJson.logs) ? cJson.logs : [];
+            setChangeLogs(logs);
+            setHasRecentChange(Boolean(cJson?.hasRecent));
+          }
+        } catch (changeErr) {
+          console.warn("[EventDetail] changes error:", changeErr);
+        }
+
       } catch (e) {
         console.error(e);
         setErrorMsg(e?.message || "Ocurrió un error cargando el evento.");
@@ -105,6 +127,20 @@ export default function EventDetailPage() {
 
   const imageUrl = event?.image_url || event?.poster_url || event?.cover_image || null;
   const warnings = event?.warnings || event?.recommendations || event?.alerts || null;
+  const latestChange = changeLogs[0] || null;
+
+  const FIELD_LABELS = {
+    title: "Nombre del evento",
+    starts_at: "Fecha y hora",
+    venue: "Recinto",
+    city: "Ciudad",
+    image_url: "Imagen/banner",
+  };
+
+  function formatChangeValue(field, value) {
+    if (field === "starts_at") return value ? `${formatDateCL(value)} · ${formatTimeCL(value)}` : "—";
+    return value || "—";
+  }
 
   // Advertencias genéricas por defecto de TixSwap
   const defaultWarnings = `🔒 No hagas transacciones fuera de la plataforma
@@ -143,6 +179,20 @@ export default function EventDetailPage() {
         </div>
       </div>
 
+      {hasRecentChange && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-amber-900 font-semibold">
+            Evento actualizado recientemente.
+          </div>
+          <button
+            onClick={() => setShowChanges(true)}
+            className="text-sm font-semibold text-amber-900 underline"
+          >
+            Ver cambios
+          </button>
+        </div>
+      )}
+
       {/* Advertencias/Recomendaciones - Compacto */}
       <div className="mt-3 p-2.5 rounded-lg bg-blue-50 border border-blue-200">
         <div className="flex items-start gap-2">
@@ -175,6 +225,62 @@ export default function EventDetailPage() {
           {tickets.map((t) => (
             <TicketCard key={t.id} ticket={t} />
           ))}
+        </div>
+      )}
+
+      {showChanges && latestChange && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold">Evento actualizado</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  {latestChange?.created_at
+                    ? new Date(latestChange.created_at).toLocaleString("es-CL", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })
+                    : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowChanges(false)}
+                className="text-slate-500 hover:text-slate-700"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {(latestChange?.changed_fields || []).map((field) => (
+                <div key={field} className="rounded-xl border border-slate-200 p-3">
+                  <div className="text-sm font-semibold text-slate-800">
+                    {FIELD_LABELS[field] || field}
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3 mt-2 text-sm">
+                    <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">
+                      <div className="text-xs uppercase text-slate-400">Antes</div>
+                      <div className="font-medium text-slate-700">
+                        {formatChangeValue(field, latestChange?.old_values?.[field])}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">
+                      <div className="text-xs uppercase text-emerald-400">Después</div>
+                      <div className="font-semibold text-emerald-700">
+                        {formatChangeValue(field, latestChange?.new_values?.[field])}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {latestChange?.message_to_users && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 whitespace-pre-line">
+                {latestChange.message_to_users}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

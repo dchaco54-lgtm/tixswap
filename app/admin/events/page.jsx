@@ -296,6 +296,24 @@ export default function AdminEventsPage() {
     setEditForm({ warnings: event?.warnings || "" });
   };
 
+  const handleDeleteEvent = async (event) => {
+    if (!event?.id) return;
+    const ok = window.confirm(
+      `¿Eliminar el evento \"${event.title || "sin nombre"}\"? Esta acción no se puede deshacer.`
+    );
+    if (!ok) return;
+
+    try {
+      const { error } = await supabase.from("events").delete().eq("id", event.id);
+      if (error) throw error;
+      setMsg("Evento eliminado ✅");
+      await loadEvents();
+    } catch (e) {
+      console.warn("[AdminEvents] delete error:", e);
+      setErr("No se pudo eliminar el evento.");
+    }
+  };
+
   const handleUpdateWarnings = async () => {
     if (!editingEvent) return;
     try {
@@ -739,18 +757,59 @@ export default function AdminEventsPage() {
                         {ev.category || "—"}
                       </td>
                       <td className="px-4 py-3">
-                        {hasWarningsColumn === true ? (
+                        <div className="flex items-center gap-2">
                           <button
-                            onClick={() => openEditModal(ev)}
-                            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                            onClick={() => router.push(`/admin/events/${ev.id}/edit`)}
+                            title="Editar evento"
+                            className="h-9 w-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-700 hover:text-blue-700 hover:border-blue-200"
                           >
-                            Editar advertencias
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="h-4 w-4"
+                            >
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                            </svg>
                           </button>
-                        ) : (
-                          <span className="text-slate-400 text-sm">
-                            No disponible
-                          </span>
-                        )}
+
+                          <button
+                            onClick={() => handleDeleteEvent(ev)}
+                            title="Eliminar evento"
+                            className="h-9 w-9 rounded-full border border-slate-200 flex items-center justify-center text-slate-700 hover:text-rose-700 hover:border-rose-200"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="h-4 w-4"
+                            >
+                              <path d="M3 6h18" />
+                              <path d="M8 6V4h8v2" />
+                              <path d="M6 6l1 14h10l1-14" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                            </svg>
+                          </button>
+
+                          {hasWarningsColumn === true && (
+                            <button
+                              onClick={() => openEditModal(ev)}
+                              className="text-blue-600 hover:text-blue-800 text-xs font-semibold"
+                            >
+                              Advertencias
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
