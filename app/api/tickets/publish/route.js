@@ -237,15 +237,15 @@ export async function POST(request) {
             const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://tixswap.cl').replace(/\/+$/, '');
             const eventLink = `${baseUrl}/events/${eventId}`;
             const notifBody = eventName
-              ? `Se publicaron nuevas entradas para ${eventName}`
-              : 'Se publicaron nuevas entradas para un evento que sigues';
+              ? `Se publicó una nueva entrada para ${eventName}.`
+              : 'Se publicó una nueva entrada para un evento que sigues.';
 
             await Promise.all(
               subscriberIds.map(async (userId) => {
                 await createNotification({
                   userId,
                   type: 'event_new_ticket',
-                  title: 'Nuevas entradas publicadas',
+                  title: 'Nueva entrada publicada',
                   body: notifBody,
                   link: `/events/${eventId}`,
                   metadata: { eventId, ticketId: created.id },

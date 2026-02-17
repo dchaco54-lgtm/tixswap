@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import TicketCard from "./TicketCard";
-import { createClient } from "@/lib/supabase/client";
+import EventAlertButton from "@/app/components/EventAlertButton";
 
 function formatDateCL(value) {
   if (!value) return "";
@@ -31,20 +31,11 @@ function formatTimeCL(value) {
 export default function EventDetailPage() {
   const params = useParams();
   const id = params?.id;
-  const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
 
   const [event, setEvent] = useState(null);
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-  const [session, setSession] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [subscribed, setSubscribed] = useState(false);
-  const [subLoading, setSubLoading] = useState(false);
-  const [subError, setSubError] = useState("");
-
-  const isLoggedIn = !!session;
 
   useEffect(() => {
     if (!id) return;
@@ -99,103 +90,6 @@ export default function EventDetailPage() {
     load();
   }, [id]);
 
-  useEffect(() => {
-    let mounted = true;
-    const loadAuth = async () => {
-      try {
-        const { data } = await supabase.auth.getSession();
-        if (!mounted) return;
-        setSession(data?.session ?? null);
-      } finally {
-        if (mounted) setAuthLoading(false);
-      }
-    };
-    loadAuth();
-    return () => {
-      mounted = false;
-    };
-  }, [supabase]);
-
-  useEffect(() => {
-    if (!id || !session?.access_token) {
-      setSubscribed(false);
-      return;
-    }
-
-    let mounted = true;
-    const loadSubscription = async () => {
-      setSubLoading(true);
-      setSubError("");
-      try {
-        const res = await fetch(`/api/events/${id}/alerts`, {
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(json?.error || "No pudimos validar la alerta.");
-        }
-        if (!mounted) return;
-        setSubscribed(Boolean(json?.subscribed));
-      } catch (err) {
-        console.error(err);
-        if (mounted) {
-          setSubError(err?.message || "No pudimos validar la alerta.");
-        }
-      } finally {
-        if (mounted) setSubLoading(false);
-      }
-    };
-
-    loadSubscription();
-
-    return () => {
-      mounted = false;
-    };
-  }, [id, session?.access_token]);
-
-  const handleLogin = () => {
-    if (!id) return;
-    const currentPath =
-      typeof window !== "undefined"
-        ? `${window.location.pathname}${window.location.search}`
-        : `/events/${id}`;
-    const redirect = encodeURIComponent(currentPath);
-    const subscribeEvent = encodeURIComponent(id);
-    router.push(`/login?redirectTo=${redirect}&subscribeEvent=${subscribeEvent}`);
-  };
-
-  const toggleSubscription = async () => {
-    if (!id || !session?.access_token) {
-      handleLogin();
-      return;
-    }
-
-    setSubLoading(true);
-    setSubError("");
-    try {
-      const method = subscribed ? "DELETE" : "POST";
-      const res = await fetch(`/api/events/${id}/alerts`, {
-        method,
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(json?.error || "No pudimos actualizar la alerta.");
-      }
-      setSubscribed(Boolean(json?.subscribed));
-    } catch (err) {
-      console.error(err);
-      setSubError(err?.message || "No pudimos actualizar la alerta.");
-    } finally {
-      setSubLoading(false);
-    }
-  };
-
   const title = useMemo(() => {
     return event?.title || event?.name || "Evento";
   }, [event]);
@@ -219,20 +113,6 @@ export default function EventDetailPage() {
 📄 Siempre pide el PDF de la entrada al vendedor`;
 
   const displayWarnings = warnings || defaultWarnings;
-
-  const buttonLabel = authLoading
-    ? "Cargando..."
-    : isLoggedIn
-    ? subscribed
-      ? "Alerta activada"
-      : "Alerta por nuevas entradas"
-    : "Inicia sesión para alertas";
-
-  const buttonClass = isLoggedIn
-    ? subscribed
-      ? "tix-btn-secondary"
-      : "tix-btn-primary"
-    : "tix-btn-secondary";
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-4">
@@ -258,28 +138,8 @@ export default function EventDetailPage() {
         
         {/* Información del evento */}
         <div className="p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold">{title}</h1>
-              {subtitle && <div className="text-gray-600 mt-1 text-sm">{subtitle}</div>}
-            </div>
-            <div className="flex flex-col items-start md:items-end gap-1.5">
-              <button
-                type="button"
-                className={buttonClass}
-                onClick={isLoggedIn ? toggleSubscription : handleLogin}
-                disabled={authLoading || subLoading}
-              >
-                {buttonLabel}
-              </button>
-              <div className="text-xs text-gray-500">
-                Te avisamos por correo y en notificaciones.
-              </div>
-              {subError && (
-                <div className="text-xs text-red-600">{subError}</div>
-              )}
-            </div>
-          </div>
+          <h1 className="text-xl md:text-2xl font-bold">{title}</h1>
+          {subtitle && <div className="text-gray-600 mt-1 text-sm">{subtitle}</div>}
         </div>
       </div>
 
@@ -293,7 +153,10 @@ export default function EventDetailPage() {
         </div>
       </div>
 
-      <h2 className="text-2xl font-semibold mt-10 mb-4">Entradas disponibles</h2>
+      <div className="mt-10 mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <h2 className="text-2xl font-semibold">Entradas disponibles</h2>
+        <EventAlertButton eventId={id} eventName={title} />
+      </div>
 
       {loading && <div className="text-gray-600">Cargando entradas...</div>}
 
