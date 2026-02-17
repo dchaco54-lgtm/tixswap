@@ -53,6 +53,16 @@ function fmtBytes(n) {
   return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function getAttachmentMeta(a) {
+  const name = a?.file_name || a?.filename || "archivo";
+  const size = a?.file_size || a?.size_bytes || null;
+  const url = a?.signed_url || a?.url || null;
+  const mime = String(a?.mime_type || "");
+  const isImage = mime.startsWith("image/");
+  const isPdf = mime === "application/pdf" || mime.includes("pdf");
+  return { name, size, url, mime, isImage, isPdf };
+}
+
 function normalizeRole(v) {
   return String(v || "").toLowerCase().trim();
 }
@@ -588,22 +598,57 @@ export default function AdminSupportConsole() {
                       <div className="text-xs font-semibold text-amber-800">
                         Adjuntos del ticket (sin mensaje)
                       </div>
-                      <div className="mt-2 space-y-1">
-                        {looseAttachments.map((a) => (
-                          <a
-                            key={a.id}
-                            href={a.signed_url || "#"}
-                            target="_blank"
-                            rel="noreferrer"
-                            download={a.file_name || undefined}
-                            className="block text-xs text-blue-700 hover:underline"
-                          >
-                            📎 {a.file_name || "archivo"}{" "}
-                            <span className="text-slate-500">
-                              ({a.mime_type || "—"} · {fmtBytes(a.file_size)})
-                            </span>
-                          </a>
-                        ))}
+                      <div className="mt-2 space-y-2">
+                        {looseAttachments.map((a) => {
+                          const meta = getAttachmentMeta(a);
+                          return (
+                            <div key={a.id} className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                              {meta.isImage && meta.url ? (
+                                <a href={meta.url} target="_blank" rel="noreferrer">
+                                  <img
+                                    src={meta.url}
+                                    alt={meta.name}
+                                    className="mb-2 max-h-36 w-auto rounded border"
+                                  />
+                                </a>
+                              ) : null}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                                    {meta.isPdf ? "PDF" : meta.isImage ? "IMG" : "ARCH"}
+                                  </span>
+                                  <span className="text-xs font-medium truncate">{meta.name}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400">
+                                  {meta.size ? fmtBytes(meta.size) : ""}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex items-center gap-2 text-xs">
+                                {meta.url ? (
+                                  <>
+                                    <a
+                                      href={meta.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-blue-700 hover:underline"
+                                    >
+                                      Ver
+                                    </a>
+                                    <a
+                                      href={meta.url}
+                                      download={meta.name}
+                                      className="text-slate-600 hover:underline"
+                                    >
+                                      Descargar
+                                    </a>
+                                  </>
+                                ) : (
+                                  <span className="text-slate-400">Link no disponible</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                       <div className="mt-1 text-[11px] text-amber-700">
                         Tip: el link expira en ~30 min. Si expira, recarga el ticket.
@@ -614,7 +659,9 @@ export default function AdminSupportConsole() {
                   <div className="space-y-3 max-h-[46vh] overflow-auto pr-1">
                     {messages.map((m) => {
                       const mine = m.sender_type === "admin";
-                      const related = attachments.filter((a) => a.message_id === m.id);
+                      const related = Array.isArray(m.attachments) && m.attachments.length
+                        ? m.attachments
+                        : attachments.filter((a) => a.message_id === m.id);
 
                       return (
                         <div
@@ -642,22 +689,57 @@ export default function AdminSupportConsole() {
                             ) : null}
 
                             {related.length ? (
-                              <div className="mt-2 space-y-1">
-                                {related.map((a) => (
-                                  <a
-                                    key={a.id}
-                                    href={a.signed_url || "#"}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    download={a.file_name || undefined}
-                                    className="block text-xs text-blue-700 hover:underline"
-                                  >
-                                    📎 {a.file_name || "archivo"}{" "}
-                                    <span className="text-slate-400">
-                                      ({a.mime_type || "—"} · {fmtBytes(a.file_size)})
-                                    </span>
-                                  </a>
-                                ))}
+                              <div className="mt-2 space-y-2">
+                                {related.map((a) => {
+                                  const meta = getAttachmentMeta(a);
+                                  return (
+                                    <div key={a.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                      {meta.isImage && meta.url ? (
+                                        <a href={meta.url} target="_blank" rel="noreferrer">
+                                          <img
+                                            src={meta.url}
+                                            alt={meta.name}
+                                            className="mb-2 max-h-36 w-auto rounded border"
+                                          />
+                                        </a>
+                                      ) : null}
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                                            {meta.isPdf ? "PDF" : meta.isImage ? "IMG" : "ARCH"}
+                                          </span>
+                                          <span className="text-xs font-medium truncate">{meta.name}</span>
+                                        </div>
+                                        <span className="text-[10px] text-slate-400">
+                                          {meta.size ? fmtBytes(meta.size) : ""}
+                                        </span>
+                                      </div>
+                                      <div className="mt-1 flex items-center gap-2 text-xs">
+                                        {meta.url ? (
+                                          <>
+                                            <a
+                                              href={meta.url}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              className="text-blue-700 hover:underline"
+                                            >
+                                              Ver
+                                            </a>
+                                            <a
+                                              href={meta.url}
+                                              download={meta.name}
+                                              className="text-slate-600 hover:underline"
+                                            >
+                                              Descargar
+                                            </a>
+                                          </>
+                                        ) : (
+                                          <span className="text-slate-400">Link no disponible</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             ) : null}
                           </div>
@@ -735,4 +817,3 @@ export default function AdminSupportConsole() {
     </main>
   );
 }
-

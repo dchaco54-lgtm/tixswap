@@ -71,6 +71,15 @@ export async function GET(req) {
       });
     }
 
+    const byMessageId = {};
+    for (const a of attachments) {
+      if (!a?.message_id) continue;
+      if (!byMessageId[a.message_id]) byMessageId[a.message_id] = [];
+      byMessageId[a.message_id].push(a);
+    }
+
+    const loose = attachments.filter((a) => !a?.message_id);
+
     return json({
       ok: true,
       ticket,
@@ -79,8 +88,10 @@ export async function GET(req) {
         body: m.body ?? m.message,
         sender_type: m.sender_role,
         sender_id: m.sender_user_id,
+        attachments: byMessageId[m.id] || [],
       })),
       attachments,
+      loose_attachments: loose,
     });
   } catch (e) {
     return json(

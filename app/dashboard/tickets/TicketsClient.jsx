@@ -39,6 +39,19 @@ function fmtCL(dt) {
   });
 }
 
+function fmtBytes(n) {
+  const x = Number(n || 0);
+  if (!x) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = x;
+  while (v >= 1024 && i < units.length - 1) {
+    v = v / 1024;
+    i++;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 export default function MyTicketsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -51,6 +64,7 @@ export default function MyTicketsPage() {
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
   const [attachments, setAttachments] = useState([]);
+  const [looseAttachments, setLooseAttachments] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   const [q, setQ] = useState("");
@@ -129,11 +143,13 @@ export default function MyTicketsPage() {
       setSelected(json.ticket);
       setMessages(json.messages || []);
       setAttachments(json.attachments || []);
+      setLooseAttachments(json.loose_attachments || []);
     } catch (e) {
       setErr(e.message || "Error abriendo ticket");
       setSelected(null);
       setMessages([]);
       setAttachments([]);
+      setLooseAttachments([]);
     } finally {
       setLoadingDetail(false);
     }
@@ -201,6 +217,19 @@ export default function MyTicketsPage() {
   const safeFiltered = Array.isArray(filtered) ? filtered : [];
   const safeMessages = Array.isArray(messages) ? messages : [];
   const safeAttachments = Array.isArray(attachments) ? attachments : [];
+  const safeLooseAttachments = (looseAttachments && looseAttachments.length)
+    ? looseAttachments
+    : safeAttachments.filter((a) => !a?.message_id);
+
+  const getAttachmentMeta = (a) => {
+    const name = a?.file_name || a?.filename || "archivo";
+    const size = a?.file_size || a?.size_bytes || null;
+    const url = a?.signed_url || a?.url || null;
+    const mime = String(a?.mime_type || "");
+    const isImage = mime.startsWith("image/");
+    const isPdf = mime === "application/pdf" || mime.includes("pdf");
+    return { name, size, url, mime, isImage, isPdf };
+  };
 
   const onPickFiles = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -615,6 +644,69 @@ export default function MyTicketsPage() {
                     Conversación
                   </h3>
 
+                  {safeLooseAttachments.length ? (
+                    <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2">
+                      <div className="text-xs font-semibold text-amber-800">
+                        Adjuntos del ticket (sin mensaje)
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {safeLooseAttachments.map((a) => {
+                          const meta = getAttachmentMeta(a);
+                          return (
+                            <div key={a.id} className="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                              {meta.isImage && meta.url ? (
+                                <a href={meta.url} target="_blank" rel="noreferrer">
+                                  <img
+                                    src={meta.url}
+                                    alt={meta.name}
+                                    className="mb-2 max-h-36 w-auto rounded border"
+                                  />
+                                </a>
+                              ) : null}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                                    {meta.isPdf ? "PDF" : meta.isImage ? "IMG" : "ARCH"}
+                                  </span>
+                                  <span className="text-xs font-medium truncate">{meta.name}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400">
+                                  {meta.size ? fmtBytes(meta.size) : ""}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex items-center gap-2 text-xs">
+                                {meta.url ? (
+                                  <>
+                                    <a
+                                      href={meta.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-blue-700 hover:underline"
+                                    >
+                                      Ver
+                                    </a>
+                                    <a
+                                      href={meta.url}
+                                      download={meta.name}
+                                      className="text-slate-600 hover:underline"
+                                    >
+                                      Descargar
+                                    </a>
+                                  </>
+                                ) : (
+                                  <span className="text-slate-400">Link no disponible</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-1 text-[11px] text-amber-700">
+                        Tip: el link expira en ~30 min. Si expira, recarga el ticket.
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="space-y-3 max-h-[46vh] overflow-auto pr-1">
                     {safeMessages.length === 0 ? (
                       <div className="text-center py-8">
@@ -627,7 +719,9 @@ export default function MyTicketsPage() {
                       safeMessages.map((m) => {
                         const mine = m.sender_type === "user" || m.sender_role === "user";
                         const content = m.body ?? m.message ?? "";
-                        const related = safeAttachments.filter((a) => a.message_id === m.id);
+                        const related = Array.isArray(m.attachments) && m.attachments.length
+                          ? m.attachments
+                          : safeAttachments.filter((a) => a.message_id === m.id);
                         return (
                           <div
                             key={m.id}
@@ -665,24 +759,57 @@ export default function MyTicketsPage() {
                               ) : null}
 
                               {related.length > 0 && (
-                                <div className="mt-3 space-y-1.5">
-                                  {related.map((a) => (
-                                    <a
-                                      key={a.id}
-                                      href={a.signed_url || "#"}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="flex items-center gap-2 text-xs text-blue-700 hover:text-blue-800 hover:underline group"
-                                    >
-                                      <svg className="w-4 h-4 flex-shrink-0 group-hover:scale-110 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                      </svg>
-                                      <span className="flex-1 truncate">{a.file_name || "archivo"}</span>
-                                      <span className="text-[10px] text-slate-400">
-                                        {a.file_size ? `${Math.round(a.file_size / 1024)}KB` : ""}
-                                      </span>
-                                    </a>
-                                  ))}
+                                <div className="mt-3 space-y-2">
+                                  {related.map((a) => {
+                                    const meta = getAttachmentMeta(a);
+                                    return (
+                                      <div key={a.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                        {meta.isImage && meta.url ? (
+                                          <a href={meta.url} target="_blank" rel="noreferrer">
+                                            <img
+                                              src={meta.url}
+                                              alt={meta.name}
+                                              className="mb-2 max-h-36 w-auto rounded border"
+                                            />
+                                          </a>
+                                        ) : null}
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="flex items-center gap-2 min-w-0">
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                                              {meta.isPdf ? "PDF" : meta.isImage ? "IMG" : "ARCH"}
+                                            </span>
+                                            <span className="text-xs font-medium truncate">{meta.name}</span>
+                                          </div>
+                                          <span className="text-[10px] text-slate-400">
+                                            {meta.size ? fmtBytes(meta.size) : ""}
+                                          </span>
+                                        </div>
+                                        <div className="mt-1 flex items-center gap-2 text-xs">
+                                          {meta.url ? (
+                                            <>
+                                              <a
+                                                href={meta.url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-blue-700 hover:underline"
+                                              >
+                                                Ver
+                                              </a>
+                                              <a
+                                                href={meta.url}
+                                                download={meta.name}
+                                                className="text-slate-600 hover:underline"
+                                              >
+                                                Descargar
+                                              </a>
+                                            </>
+                                          ) : (
+                                            <span className="text-slate-400">Link no disponible</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
