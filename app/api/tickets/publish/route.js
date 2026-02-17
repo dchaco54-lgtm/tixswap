@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
 import { detectTicketColumns } from '@/lib/db/ticketSchema';
 import { sendEmail } from '@/lib/email/resend';
-import { templateTicketPublished } from '@/lib/email/templates';
+import { templateTicketPublished, templateEventNewTicketAlert } from '@/lib/email/templates';
 import { createNotification } from '@/lib/notifications';
 
 export async function POST(request) {
@@ -150,21 +150,30 @@ export async function POST(request) {
       // No bloqueamos si falla
     }
 
+    let eventName = null;
+    let eventVenue = null;
+    let eventCity = null;
+
+    if (eventId) {
+      const { data: eventRow, error: eventErr } = await supabase
+        .from('events')
+        .select('title,venue,city')
+        .eq('id', eventId)
+        .maybeSingle();
+
+      if (eventErr) {
+        console.warn('[Publish] Error cargando evento:', eventErr);
+      }
+
+      eventName = eventRow?.title || null;
+      eventVenue = eventRow?.venue || null;
+      eventCity = eventRow?.city || null;
+    }
+
     // ✅ Email al vendedor (no bloquea)
     try {
       const sellerEmail = profile?.email || user.email;
       if (sellerEmail) {
-        let eventName = null;
-        if (eventId) {
-          const { data: eventRow, error: eventErr } = await supabase
-            .from('events')
-            .select('title')
-            .eq('id', eventId)
-            .maybeSingle();
-          if (eventErr) console.warn('[Publish] Error cargando evento:', eventErr);
-          eventName = eventRow?.title || null;
-        }
-
         const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://tixswap.cl').replace(/\/+$/, '');
         const link = `${baseUrl}/dashboard/publications/${created.id}`;
 
@@ -197,6 +206,80 @@ export async function POST(request) {
       link: `/dashboard/publications/${created.id}`,
       metadata: { ticketId: created.id, eventId },
     });
+
+    // ✅ Alertas a suscriptores del evento (no bloquea)
+    try {
+      if (eventId) {
+        const { data: subs, error: subsErr } = await supabase
+          .from('event_alert_subscriptions')
+          .select('user_id')
+          .eq('event_id', eventId);
+
+        if (subsErr) {
+          console.warn('[Publish] Error cargando suscriptores:', subsErr);
+        } else {
+          const subscriberIds = (subs || [])
+            .map((s) => s.user_id)
+            .filter(Boolean)
+            .filter((uid) => uid !== sellerId);
+
+          if (subscriberIds.length) {
+            const { data: profiles, error: profErr } = await supabase
+              .from('profiles')
+              .select('id,full_name,email')
+              .in('id', subscriberIds);
+
+            if (profErr) {
+              console.warn('[Publish] Error cargando perfiles suscriptores:', profErr);
+            }
+
+            const byId = new Map((profiles || []).map((p) => [p.id, p]));
+            const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://tixswap.cl').replace(/\/+$/, '');
+            const eventLink = `${baseUrl}/events/${eventId}`;
+            const notifBody = eventName
+              ? `Se publicaron nuevas entradas para ${eventName}`
+              : 'Se publicaron nuevas entradas para un evento que sigues';
+
+            await Promise.all(
+              subscriberIds.map(async (userId) => {
+                await createNotification({
+                  userId,
+                  type: 'event_new_ticket',
+                  title: 'Nuevas entradas publicadas',
+                  body: notifBody,
+                  link: `/events/${eventId}`,
+                  metadata: { eventId, ticketId: created.id },
+                });
+
+                const prof = byId.get(userId);
+                const email = prof?.email || null;
+                if (!email) return;
+
+                const { subject, html } = templateEventNewTicketAlert({
+                  recipientName: prof?.full_name || null,
+                  eventName,
+                  price: created.price,
+                  link: eventLink,
+                  sector: created.sector || sector || null,
+                  sectionLabel: created.section_label || null,
+                  rowLabel: created.row_label || fila || null,
+                  seatLabel: created.seat_label || asiento || null,
+                  venue: eventVenue,
+                  city: eventCity,
+                });
+
+                const mailRes = await sendEmail({ to: email, subject, html });
+                if (!mailRes.ok && !mailRes.skipped) {
+                  console.warn('[Publish] Error enviando alerta mail:', mailRes.error);
+                }
+              })
+            );
+          }
+        }
+      }
+    } catch (alertErr) {
+      console.warn('[Publish] Error notificando suscriptores:', alertErr);
+    }
 
     return NextResponse.json({ ok: true, ticket: created });
   } catch (e) {
