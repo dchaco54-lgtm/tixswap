@@ -150,11 +150,14 @@ export async function POST(req) {
     const orderIdRaw = String(body?.order_id || body?.orderId || "").trim();
     const attachment_ids = Array.isArray(body?.attachment_ids) ? body.attachment_ids : [];
 
+    const orderIdIsValid = orderIdRaw ? isUuid(orderIdRaw) : false;
+    const orderIdInvalid = Boolean(orderIdRaw) && !orderIdIsValid;
     const safePayload = {
       category,
       subject_len: subject.length,
       message_len: messageText.length,
       has_order_id: Boolean(orderIdRaw),
+      order_id_valid: orderIdIsValid,
       attachments: attachment_ids.length,
     };
 
@@ -169,8 +172,12 @@ export async function POST(req) {
     if (!subject) return errorJson("Falta asunto", 400, { requestId });
     if (!messageText) return errorJson("Falta mensaje", 400, { requestId });
 
-    if (orderIdRaw && !isUuid(orderIdRaw)) {
-      return errorJson("Order ID inválido", 400, { requestId });
+    if (orderIdInvalid) {
+      console.warn("[support/create] order_id invalid, ignoring", {
+        request_id: requestId,
+        user_id: user?.id || null,
+        order_id: orderIdRaw,
+      });
     }
 
     const now = new Date().toISOString();
@@ -180,6 +187,10 @@ export async function POST(req) {
     const requesterName = profile?.full_name || null;
     const requesterRut = profile?.rut || null;
 
+    const finalMessageText = orderIdInvalid
+      ? `${messageText}\n\n[Orden entregada por usuario: ${orderIdRaw}]`
+      : messageText;
+
     const insertPayload = {
       user_id: user.id,
       status: "open",
@@ -188,8 +199,8 @@ export async function POST(req) {
       created_at: now,
       updated_at: now,
       last_message_at: now,
-      message: messageText,
-      order_id: orderIdRaw || null,
+      message: finalMessageText,
+      order_id: orderIdIsValid ? orderIdRaw : null,
       requester_email: requesterEmail,
       requester_name: requesterName,
       requester_rut: requesterRut,
@@ -242,7 +253,7 @@ export async function POST(req) {
         ticket_id: ticket.id,
         sender_role: "user",
         sender_user_id: user.id,
-        body: messageText,
+        body: finalMessageText,
         created_at: now,
       })
       .select("id")
@@ -264,7 +275,7 @@ export async function POST(req) {
             ticket_id: ticket.id,
             sender_role: "user",
             sender_user_id: user.id,
-            body: messageText,
+            body: finalMessageText,
             created_at: now,
           })
           .select("id")
@@ -313,7 +324,7 @@ export async function POST(req) {
       }
     }
 
-    const preview = messageText.length > 160 ? `${messageText.slice(0, 160)}…` : messageText;
+    const preview = finalMessageText.length > 160 ? `${finalMessageText.slice(0, 160)}…` : finalMessageText;
     const updatePayload = { last_message_at: now, updated_at: now };
     const updateWithPreview = { ...updatePayload, last_message_preview: preview };
     if (ticket?.ticket_number) {
@@ -380,7 +391,7 @@ export async function POST(req) {
         const { subject: mailSubject, html } = templateSupportNewTicketToInbox({
           ticketNumber: ticket.ticket_number,
           subject,
-          message: messageText,
+          message: finalMessageText,
           requesterEmail,
           requesterName,
           category,
