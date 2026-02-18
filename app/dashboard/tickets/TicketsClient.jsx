@@ -4,7 +4,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { statusLabel, statusBadgeClass, canChat, TICKET_STATUS, isTerminalStatus } from "@/lib/support/status";
+import {
+  statusLabel,
+  statusBadgeClass,
+  canChat,
+  TICKET_STATUS,
+  isTerminalStatus,
+  canReopenTicket,
+} from "@/lib/support/status";
 
 const CATEGORY_LABEL = (c) => {
   if (c === "soporte") return "Soporte general";
@@ -270,6 +277,9 @@ export default function MyTicketsPage() {
 
   const canReply = !!selected && canChat(selected.status);
   const isTicketClosed = selected && isTerminalStatus(selected.status);
+  const reopenCount = Number(selected?.reopen_count || 0);
+  const isResolved = selected?.status === TICKET_STATUS.RESOLVED;
+  const canReopen = canReopenTicket(selected?.status, reopenCount);
 
   const handleReopenTicket = async () => {
     if (!selected?.id) return;
@@ -294,19 +304,16 @@ export default function MyTicketsPage() {
 
       const json = await res.json();
       if (!res.ok) {
-        const errText = json?.error
-          ? json?.details
-            ? `${json.error}: ${json.details}`
-            : json.error
-          : "No se pudo reabrir el ticket";
-        setErr(errText || "No se pudo reabrir el ticket");
+        console.error("[support/reopen]", json);
+        setErr("No pudimos reabrir el ticket. Si el caso está cerrado, crea uno nuevo.");
         return;
       }
 
       await loadDetail(selected.id);
       await refreshList();
     } catch (e) {
-      setErr(e.message || "Error reabriendo ticket");
+      console.error("[support/reopen] error", e);
+      setErr("No pudimos reabrir el ticket. Si el caso está cerrado, crea uno nuevo.");
     } finally {
       setSending(false);
     }
@@ -602,19 +609,60 @@ export default function MyTicketsPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                         </svg>
                         <div className="flex-1">
-                          <p className="text-sm font-semibold text-slate-900">
-                            Este ticket está {selected.status === TICKET_STATUS.CLOSED ? 'cerrado' : 'resuelto'}
-                          </p>
-                          <p className="text-xs text-slate-600 mt-1">
-                            Si necesitas seguimiento, puedes reabrirlo o crear un nuevo ticket
-                          </p>
-                          <button
-                            onClick={handleReopenTicket}
-                            disabled={sending}
-                            className="mt-3 text-xs px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50"
-                          >
-                            {sending ? "Reabriendo..." : "Reabrir ticket"}
-                          </button>
+                          {isResolved ? (
+                            <>
+                              <p className="text-sm font-semibold text-slate-900">
+                                Ticket resuelto
+                              </p>
+                              {canReopen ? (
+                                <>
+                                  <p className="text-xs text-slate-600 mt-1">
+                                    Puedes reabrir 1 vez si no quedaste conforme. Lo revisaremos nuevamente.
+                                  </p>
+                                  <button
+                                    onClick={handleReopenTicket}
+                                    disabled={sending}
+                                    className="mt-3 text-xs px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50"
+                                  >
+                                    {sending ? "Reabriendo..." : "Reabrir por disconformidad"}
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-xs text-slate-600 mt-1">
+                                    Este caso ya fue reabierto una vez. Para un nuevo requerimiento crea un ticket nuevo.
+                                  </p>
+                                  <button
+                                    onClick={() => {
+                                      setShowNewTicket(true);
+                                      setCreateError("");
+                                    }}
+                                    className="mt-3 text-xs px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700"
+                                  >
+                                    Crear nuevo ticket
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm font-semibold text-slate-900">
+                                Ticket cerrado
+                              </p>
+                              <p className="text-xs text-slate-600 mt-1">
+                                Este caso está cerrado. Para un nuevo requerimiento crea un ticket nuevo.
+                              </p>
+                              <button
+                                onClick={() => {
+                                  setShowNewTicket(true);
+                                  setCreateError("");
+                                }}
+                                className="mt-3 text-xs px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700"
+                              >
+                                Crear nuevo ticket
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

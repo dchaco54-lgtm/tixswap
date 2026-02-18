@@ -39,15 +39,30 @@ export async function POST(req) {
     // cargar ticket
     const { data: ticket, error: tErr } = await supabaseAdmin
       .from("support_tickets")
-      .select("id, user_id, status, ticket_number, subject, requester_email, category")
+      .select("id, user_id, status, reopen_count, ticket_number, subject, requester_email, category")
       .eq("id", ticket_id)
       .single();
 
     if (tErr || !ticket) return json({ ok: false, error: "Ticket no existe" }, 404);
 
-    // Si el ticket está cerrado, no aceptamos más mensajes (ni usuario ni admin)
     const normalizedStatus = normalizeStatus(ticket.status);
     const isTerminal = isTerminalStatus(normalizedStatus);
+    const reopenCount = Number(ticket?.reopen_count || 0);
+
+    if (reopen && isAdmin) {
+      return json({ ok: false, error: "Reapertura no permitida" }, 403);
+    }
+
+    if (reopen) {
+      if (normalizedStatus !== TICKET_STATUS.RESOLVED) {
+        return json({ ok: false, error: "Solo puedes reabrir tickets resueltos" }, 403);
+      }
+      if (reopenCount >= 1) {
+        return json({ ok: false, error: "Este ticket ya fue reabierto una vez" }, 403);
+      }
+    }
+
+    // Si el ticket está cerrado o resuelto, no aceptamos más mensajes (salvo reopen)
     if (isTerminal && !reopen) {
       return json({ ok: false, error: "Este ticket está cerrado" }, 403);
     }
@@ -114,8 +129,8 @@ export async function POST(req) {
 
     // auto-transición de estado
     let nextStatus = normalizedStatus || TICKET_STATUS.OPEN;
-    if (reopen && isTerminal && !isAdmin) {
-      nextStatus = TICKET_STATUS.OPEN;
+    if (reopen) {
+      nextStatus = TICKET_STATUS.IN_PROGRESS;
     } else if (isAdmin) {
       nextStatus = TICKET_STATUS.WAITING_USER;
     } else if (normalizedStatus === TICKET_STATUS.WAITING_USER) {
@@ -133,12 +148,27 @@ export async function POST(req) {
       updated_at: now,
     };
 
-    if (reopen && isTerminal && !isAdmin) {
+    if (reopen) {
+      updatePayload.reopen_count = reopenCount + 1;
       updatePayload.closed_at = null;
       updatePayload.closed_by = null;
+      updatePayload.closed_reason = null;
     }
 
     await supabaseAdmin.from("support_tickets").update(updatePayload).eq("id", ticket_id);
+
+    if (normalizedStatus !== nextStatus) {
+      try {
+        await supabaseAdmin.from("support_ticket_status_logs").insert({
+          ticket_id,
+          from_status: normalizedStatus,
+          to_status: nextStatus,
+          changed_by: user.id,
+        });
+      } catch (logErr) {
+        console.warn("[support/message] status log skipped", logErr?.message || logErr);
+      }
+    }
 
     // email: si admin responde => usuario
     if (isAdmin && ticket.requester_email) {

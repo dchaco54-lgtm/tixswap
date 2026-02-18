@@ -520,6 +520,41 @@ export type Database = {
           },
         ]
       }
+      support_ticket_status_logs: {
+        Row: {
+          changed_by: string | null
+          created_at: string
+          from_status: string | null
+          id: string
+          ticket_id: string
+          to_status: string
+        }
+        Insert: {
+          changed_by?: string | null
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          ticket_id: string
+          to_status: string
+        }
+        Update: {
+          changed_by?: string | null
+          created_at?: string
+          from_status?: string | null
+          id?: string
+          ticket_id?: string
+          to_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_ticket_status_logs_ticket_id_fkey"
+            columns: ["ticket_id"]
+            isOneToOne: false
+            referencedRelation: "support_tickets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       support_tickets: {
         Row: {
           admin_response: string | null
@@ -527,6 +562,7 @@ export type Database = {
           category: string | null
           closed_at: string | null
           closed_by: string | null
+          closed_reason: string | null
           code: string | null
           created_at: string | null
           due_at: string | null
@@ -537,6 +573,8 @@ export type Database = {
           requester_email: string | null
           requester_name: string | null
           requester_rut: string | null
+          reopen_count: number
+          resolved_at: string | null
           status: string | null
           subject: string
           ticket_number: number
@@ -549,6 +587,7 @@ export type Database = {
           category?: string | null
           closed_at?: string | null
           closed_by?: string | null
+          closed_reason?: string | null
           code?: string | null
           created_at?: string | null
           due_at?: string | null
@@ -559,6 +598,8 @@ export type Database = {
           requester_email?: string | null
           requester_name?: string | null
           requester_rut?: string | null
+          reopen_count?: number
+          resolved_at?: string | null
           status?: string | null
           subject: string
           ticket_number?: number
@@ -571,6 +612,7 @@ export type Database = {
           category?: string | null
           closed_at?: string | null
           closed_by?: string | null
+          closed_reason?: string | null
           code?: string | null
           created_at?: string | null
           due_at?: string | null
@@ -581,6 +623,8 @@ export type Database = {
           requester_email?: string | null
           requester_name?: string | null
           requester_rut?: string | null
+          reopen_count?: number
+          resolved_at?: string | null
           status?: string | null
           subject?: string
           ticket_number?: number

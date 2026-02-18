@@ -112,6 +112,7 @@ export default function AdminSupportConsole() {
 
   const [adminStatus, setAdminStatus] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+  const [closedReason, setClosedReason] = useState("");
 
   const [draft, setDraft] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -207,6 +208,7 @@ export default function AdminSupportConsole() {
 
       setSelected(json.ticket);
       setAdminStatus(json.ticket?.status || "open");
+      setClosedReason(json.ticket?.closed_reason || "");
       setMessages(json.messages || []);
       setAttachments(json.attachments || []);
     } catch (e) {
@@ -303,16 +305,21 @@ export default function AdminSupportConsole() {
         body: JSON.stringify({
           ticket_id: selected.id,
           status: adminStatus,
+          closed_reason: adminStatus === "closed" ? closedReason : null,
         }),
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.error || "No se pudo guardar el estado");
+      if (!res.ok) {
+        console.error("[support/admin/status]", json);
+        throw new Error("No se pudo guardar el estado");
+      }
 
       await loadDetail(selected.id);
       await refreshList();
     } catch (e) {
-      setErr(e.message || "Error guardando estado");
+      console.error("[support/admin/status] error", e);
+      setErr("No se pudo guardar el estado. Intenta nuevamente.");
     } finally {
       setSavingStatus(false);
     }
@@ -489,9 +496,16 @@ export default function AdminSupportConsole() {
                       <div className="text-xs font-semibold text-slate-700">
                         TS-{t.ticket_number}
                       </div>
-                      <span className={statusBadgeClass(t.status)}>
-                        {statusLabel(t.status)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={statusBadgeClass(t.status)}>
+                          {statusLabel(t.status)}
+                        </span>
+                        {t.reopen_count > 0 ? (
+                          <span className="px-2 py-1 rounded-full text-[10px] font-semibold border bg-amber-50 text-amber-800 border-amber-200">
+                            Reabierto
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
 
                     <p className="text-sm font-semibold text-slate-900 line-clamp-1 mt-1">
@@ -538,6 +552,11 @@ export default function AdminSupportConsole() {
                       <span className={statusBadgeClass(selected.status)}>
                         {statusLabel(selected.status)}
                       </span>
+                      {selected?.reopen_count > 0 ? (
+                        <span className="px-2 py-1 rounded-full text-[10px] font-semibold border bg-amber-50 text-amber-800 border-amber-200">
+                          Reabierto
+                        </span>
+                      ) : null}
                       <span className="text-xs text-slate-500">
                         {CATEGORY_LABEL(selected.category)}
                       </span>
@@ -585,6 +604,24 @@ export default function AdminSupportConsole() {
                         {savingStatus ? "Guardando…" : "Guardar"}
                       </button>
                     </div>
+                    {String(adminStatus || "").toLowerCase() === "closed" ? (
+                      <div className="mt-2">
+                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                          Motivo de cierre
+                        </label>
+                        <select
+                          value={closedReason}
+                          onChange={(e) => setClosedReason(e.target.value)}
+                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white"
+                        >
+                          <option value="">Selecciona motivo</option>
+                          <option value="resolved_final">Resuelto (final)</option>
+                          <option value="user_inactive">Usuario inactivo</option>
+                          <option value="duplicate">Duplicado</option>
+                          <option value="other">Otro</option>
+                        </select>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
