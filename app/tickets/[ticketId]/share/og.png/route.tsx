@@ -14,14 +14,14 @@ export async function GET(_request: Request, { params }: { params: { ticketId: s
     return new Response("Not found", { status: 404 });
   }
 
-  const size = getShareImageSize("post");
+  const size = getShareImageSize("og");
   const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(ticket.event));
 
   return new ImageResponse(
     (
       <ShareImage
         kind="ticket"
-        variant="post"
+        variant="og"
         eventName={getEventDisplayName(ticket.event)}
         eventDate={ticket.event?.starts_at || null}
         venue={ticket.event?.venue || null}

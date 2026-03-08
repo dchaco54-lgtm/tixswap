@@ -6,13 +6,13 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET() {
-  const size = getShareImageSize("post");
+  const size = getShareImageSize("og");
 
   return new ImageResponse(
     (
       <ShareImage
         kind="default"
-        variant="post"
+        variant="og"
         eventName="TixSwap"
         eventDate={null}
         venue="Reventa segura"

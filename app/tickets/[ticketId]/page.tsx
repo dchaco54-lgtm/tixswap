@@ -173,7 +173,7 @@ export async function generateMetadata({ params }: { params: { ticketId: string 
     : "Vendedor nuevo";
 
   const description = `${priceLabel} CLP · ${ratingLabel} · Compra segura en TixSwap`;
-  const imageUrl = ensureAbsoluteUrl(event?.image_url, baseUrl);
+  const imageUrl = baseUrl ? `${baseUrl}/tickets/${params.ticketId}/share/og.png` : ensureAbsoluteUrl(event?.image_url, baseUrl);
 
   return {
     title,

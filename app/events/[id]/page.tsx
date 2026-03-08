@@ -5,7 +5,6 @@ import {
   buildTicketMetadataDescription,
   ensureAbsoluteUrl,
   getEventDisplayName,
-  getEventImageUrl,
 } from "@/lib/share";
 import { getEventById, getEventPageData, getShareableTicket } from "@/lib/share/server";
 
@@ -43,7 +42,7 @@ export async function generateMetadata({ params, searchParams }: PageProps) {
     city: event?.city || null,
   });
   let canonical = cleanEventUrl;
-  let image = ensureAbsoluteUrl(getEventImageUrl(event) || "/og-default.png");
+  let image = ensureAbsoluteUrl(`/events/${params.id}/share/og.png`);
 
   if (sharedTicketId) {
     const ticket = await getShareableTicket(sharedTicketId);
@@ -54,7 +53,7 @@ export async function generateMetadata({ params, searchParams }: PageProps) {
       title = `Entrada para ${eventName} | TixSwap`;
       description = buildTicketMetadataDescription(ticket);
       canonical = `${cleanEventUrl}?ticket=${encodeURIComponent(sharedTicketId)}`;
-      image = ensureAbsoluteUrl(`/tickets/${sharedTicketId}/share/post.png`);
+      image = ensureAbsoluteUrl(`/tickets/${sharedTicketId}/share/og.png`);
     }
   }
 

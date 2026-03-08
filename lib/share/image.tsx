@@ -1,13 +1,14 @@
 import {
   buildEventLocationLine,
   buildTicketSeatLabel,
+  ensureAbsoluteUrl,
   formatCLP,
   formatEventDateLabel,
   formatEventTimeLabel,
   getTicketPrice,
 } from "@/lib/share";
 
-type ShareVariant = "story" | "post";
+type ShareVariant = "story" | "post" | "og";
 type ShareKind = "event" | "ticket" | "default";
 
 type ShareImageProps = {
@@ -18,30 +19,278 @@ type ShareImageProps = {
   venue?: string | null;
   city?: string | null;
   ticket?: Record<string, unknown> | null;
+  backgroundSrc?: string | null;
 };
 
-const BRAND_DARK = "#0f172a";
-const BRAND_SOFT = "#dbeafe";
+type VariantConfig = {
+  width: number;
+  height: number;
+  paddingX: number;
+  paddingTop: number;
+  paddingBottom: number;
+  titleSize: number;
+  metaSize: number;
+  priceSize: number;
+  footerSize: number;
+  logoSize: number;
+  logoSubSize: number;
+  maxTitleChars: number;
+  maxContentWidth: number;
+};
+
+const FALLBACK_BG =
+  "linear-gradient(180deg, #0f172a 0%, #111827 32%, #1d4ed8 100%)";
+
+const VARIANT_CONFIG: Record<ShareVariant, VariantConfig> = {
+  story: {
+    width: 1080,
+    height: 1920,
+    paddingX: 72,
+    paddingTop: 78,
+    paddingBottom: 76,
+    titleSize: 94,
+    metaSize: 34,
+    priceSize: 110,
+    footerSize: 26,
+    logoSize: 46,
+    logoSubSize: 22,
+    maxTitleChars: 54,
+    maxContentWidth: 820,
+  },
+  post: {
+    width: 1080,
+    height: 1080,
+    paddingX: 72,
+    paddingTop: 72,
+    paddingBottom: 68,
+    titleSize: 78,
+    metaSize: 30,
+    priceSize: 94,
+    footerSize: 24,
+    logoSize: 40,
+    logoSubSize: 20,
+    maxTitleChars: 46,
+    maxContentWidth: 760,
+  },
+  og: {
+    width: 1200,
+    height: 630,
+    paddingX: 58,
+    paddingTop: 52,
+    paddingBottom: 52,
+    titleSize: 58,
+    metaSize: 24,
+    priceSize: 66,
+    footerSize: 20,
+    logoSize: 30,
+    logoSubSize: 16,
+    maxTitleChars: 54,
+    maxContentWidth: 760,
+  },
+};
 
 export function getShareImageSize(variant: ShareVariant) {
-  if (variant === "story") {
-    return { width: 1080, height: 1920 };
-  }
-
-  return { width: 1080, height: 1080 };
+  const config = VARIANT_CONFIG[variant];
+  return { width: config.width, height: config.height };
 }
 
-function pillStyle(background: string, color: string) {
-  return {
-    display: "flex",
-    alignItems: "center",
-    borderRadius: 999,
-    padding: "14px 24px",
-    background,
-    color,
-    fontSize: 28,
-    fontWeight: 600,
-  } as const;
+function truncateText(value: string, maxChars: number) {
+  const normalized = String(value || "").trim().replace(/\s+/g, " ");
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function resolveTitleSize(baseSize: number, title: string) {
+  const length = String(title || "").trim().length;
+  if (length > 60) return Math.round(baseSize * 0.8);
+  if (length > 42) return Math.round(baseSize * 0.9);
+  return baseSize;
+}
+
+function detectImageMime(url: string) {
+  const lower = url.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/jpeg";
+}
+
+export async function loadRemoteImageDataUrl(imageUrl?: string | null) {
+  if (!imageUrl) return null;
+
+  try {
+    const absoluteUrl = ensureAbsoluteUrl(imageUrl);
+    const response = await fetch(absoluteUrl, {
+      cache: "no-store",
+      next: { revalidate: 0 },
+    });
+
+    if (!response.ok) {
+      console.error("[share/image] poster fetch failed:", absoluteUrl, response.status);
+      return null;
+    }
+
+    const contentType =
+      response.headers.get("content-type") || detectImageMime(absoluteUrl);
+    const bytes = Buffer.from(await response.arrayBuffer()).toString("base64");
+    return `data:${contentType};base64,${bytes}`;
+  } catch (error) {
+    console.error("[share/image] poster fetch error:", error);
+    return null;
+  }
+}
+
+function FooterBadge({ text, size }: { text: string; size: number }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        borderRadius: 999,
+        border: "1px solid rgba(255,255,255,0.22)",
+        background: "rgba(15, 23, 42, 0.28)",
+        padding: `${Math.max(10, size * 0.38)}px ${Math.max(16, size * 0.82)}px`,
+        fontSize: size,
+        fontWeight: 600,
+        color: "rgba(255,255,255,0.96)",
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function PosterBackdrop({
+  backgroundSrc,
+  variant,
+}: {
+  backgroundSrc?: string | null;
+  variant: ShareVariant;
+}) {
+  const overlayBottom = variant === "og" ? 0.8 : 0.86;
+
+  return (
+    <>
+      {backgroundSrc ? (
+        <img
+          src={backgroundSrc}
+          alt=""
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: FALLBACK_BG,
+          }}
+        />
+      )}
+
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.14) 0%, rgba(0,0,0,0.22) 24%, rgba(0,0,0,0.68) 74%, rgba(0,0,0,0.86) 100%)",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: `linear-gradient(180deg, rgba(37,99,235,0.10) 0%, rgba(59,130,246,0.08) 34%, rgba(29,78,216,${overlayBottom}) 100%)`,
+        }}
+      />
+    </>
+  );
+}
+
+function BrandHeader({
+  logoSize,
+  subSize,
+}: {
+  logoSize: number;
+  subSize: number;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div
+        style={{
+          fontSize: logoSize,
+          lineHeight: 1,
+          fontWeight: 800,
+          letterSpacing: -0.9,
+          color: "white",
+        }}
+      >
+        TixSwap
+      </div>
+      <div
+        style={{
+          marginTop: 10,
+          fontSize: subSize,
+          color: "rgba(255,255,255,0.88)",
+        }}
+      >
+        Reventa segura
+      </div>
+    </div>
+  );
+}
+
+function TicketPriceBlock({
+  labelSize,
+  priceSize,
+  priceLabel,
+}: {
+  labelSize: number;
+  priceSize: number;
+  priceLabel: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div
+        style={{
+          fontSize: labelSize,
+          fontWeight: 600,
+          color: "rgba(255,255,255,0.78)",
+          textTransform: "uppercase",
+          letterSpacing: 1.2,
+        }}
+      >
+        Precio
+      </div>
+      <div
+        style={{
+          marginTop: 10,
+          fontSize: priceSize,
+          lineHeight: 1,
+          fontWeight: 800,
+          letterSpacing: -1.8,
+          color: "white",
+        }}
+      >
+        {priceLabel || "Consultar"}
+      </div>
+    </div>
+  );
 }
 
 export function ShareImage({
@@ -52,14 +301,19 @@ export function ShareImage({
   venue,
   city,
   ticket,
+  backgroundSrc = null,
 }: ShareImageProps) {
+  const config = VARIANT_CONFIG[variant];
+  const isTicket = kind === "ticket";
+  const eventTitle = truncateText(eventName || "Evento", config.maxTitleChars);
+  const titleSize = resolveTitleSize(config.titleSize, eventTitle);
   const dateLabel = formatEventDateLabel(eventDate);
   const timeLabel = formatEventTimeLabel(eventDate);
-  const locationLabel = buildEventLocationLine(venue, city);
-  const seatLabel = buildTicketSeatLabel(ticket || {});
+  const dateTimeLabel = [dateLabel, timeLabel].filter(Boolean).join(" · ");
+  const locationLabel = truncateText(buildEventLocationLine(venue, city), variant === "og" ? 54 : 64);
+  const seatLabel = truncateText(buildTicketSeatLabel(ticket || {}), variant === "og" ? 48 : 58);
   const priceLabel = formatCLP(getTicketPrice(ticket || {}));
-  const isTicket = kind === "ticket";
-  const isStory = variant === "story";
+  const footerText = variant === "story" ? "Link en sticker" : "Compra protegida";
 
   return (
     <div
@@ -69,239 +323,111 @@ export function ShareImage({
         display: "flex",
         position: "relative",
         overflow: "hidden",
-        background:
-          "linear-gradient(180deg, #eff6ff 0%, #dbeafe 18%, #2563eb 62%, #1d4ed8 100%)",
+        background: "#020617",
         color: "white",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          inset: -180,
-          borderRadius: "50%",
-          background: "rgba(147, 197, 253, 0.22)",
-          transform: "translate(42%, -18%)",
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          width: 700,
-          height: 700,
-          borderRadius: "50%",
-          background: "rgba(15, 23, 42, 0.18)",
-          bottom: -220,
-          left: -140,
-        }}
-      />
+      <PosterBackdrop backgroundSrc={backgroundSrc} variant={variant} />
 
       <div
         style={{
+          position: "relative",
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
           width: "100%",
-          padding: isStory ? "92px 72px 84px" : "72px 68px 64px",
-          position: "relative",
+          height: "100%",
+          padding: `${config.paddingTop}px ${config.paddingX}px ${config.paddingBottom}px`,
         }}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 24,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 52,
-                  lineHeight: 1,
-                  fontWeight: 800,
-                  letterSpacing: -1.5,
-                }}
-              >
-                TixSwap
-              </div>
-              <div
-                style={{
-                  fontSize: 24,
-                  color: "rgba(255,255,255,0.84)",
-                }}
-              >
-                Reventa segura
-              </div>
-            </div>
-
-            <div style={pillStyle("rgba(255,255,255,0.18)", "white")}>
-              {isTicket ? "Entrada" : kind === "event" ? "Evento" : "TixSwap"}
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 22,
-              borderRadius: 42,
-              padding: isStory ? "48px 44px" : "42px 40px",
-              background: "rgba(15, 23, 42, 0.20)",
-              boxShadow: "0 30px 80px rgba(15, 23, 42, 0.18)",
-              backdropFilter: "blur(10px)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: isStory ? 84 : 74,
-                lineHeight: 1.04,
-                fontWeight: 800,
-                letterSpacing: -2.2,
-              }}
-            >
-              {eventName}
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                color: "rgba(255,255,255,0.92)",
-                fontSize: isStory ? 34 : 30,
-              }}
-            >
-              {dateLabel ? <div>{dateLabel}</div> : null}
-              {timeLabel ? <div>{timeLabel}</div> : null}
-              {locationLabel ? <div>{locationLabel}</div> : null}
-            </div>
-
-            {isTicket ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 18,
-                  marginTop: 10,
-                  paddingTop: 26,
-                  borderTop: "1px solid rgba(255,255,255,0.20)",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 30,
-                    color: "rgba(255,255,255,0.72)",
-                    textTransform: "uppercase",
-                    letterSpacing: 1.6,
-                  }}
-                >
-                  Precio publicado
-                </div>
-                <div
-                  style={{
-                    fontSize: isStory ? 82 : 74,
-                    lineHeight: 1,
-                    fontWeight: 800,
-                    color: "#f8fafc",
-                  }}
-                >
-                  {priceLabel || "Consultar"}
-                </div>
-                {seatLabel ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      borderRadius: 30,
-                      padding: "18px 22px",
-                      background: "rgba(255,255,255,0.12)",
-                      color: BRAND_SOFT,
-                      fontSize: isStory ? 30 : 28,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {seatLabel}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 18,
-                  marginTop: 8,
-                }}
-              >
-                <div style={pillStyle("rgba(15, 23, 42, 0.24)", "#f8fafc")}>
-                  Compra protegida
-                </div>
-                <div style={pillStyle("rgba(255,255,255,0.14)", "#dbeafe")}>
-                  Compartir en redes
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <BrandHeader logoSize={config.logoSize} subSize={config.logoSubSize} />
 
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: 18,
+            width: "100%",
+            maxWidth: config.maxContentWidth,
+            alignSelf: variant === "post" ? "center" : "flex-start",
+            gap: variant === "og" ? 14 : 18,
           }}
         >
+          {isTicket && priceLabel ? (
+            <TicketPriceBlock
+              labelSize={variant === "og" ? 18 : 24}
+              priceSize={config.priceSize}
+              priceLabel={priceLabel}
+            />
+          ) : null}
+
           <div
             style={{
-              height: 14,
-              width: "100%",
-              borderRadius: 999,
-              background:
-                "linear-gradient(90deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.68) 52%, rgba(255,255,255,0.10) 100%)",
+              fontSize: titleSize,
+              lineHeight: 1.02,
+              fontWeight: 800,
+              letterSpacing: -2.1,
             }}
-          />
+          >
+            {eventTitle}
+          </div>
+
+          {dateTimeLabel ? (
+            <div
+              style={{
+                fontSize: config.metaSize,
+                lineHeight: 1.25,
+                fontWeight: 600,
+                color: "rgba(255,255,255,0.92)",
+              }}
+            >
+              {dateTimeLabel}
+            </div>
+          ) : null}
+
+          {locationLabel ? (
+            <div
+              style={{
+                fontSize: config.metaSize,
+                lineHeight: 1.25,
+                color: "rgba(255,255,255,0.86)",
+              }}
+            >
+              {locationLabel}
+            </div>
+          ) : null}
+
+          {isTicket && seatLabel ? (
+            <div
+              style={{
+                fontSize: Math.max(config.footerSize, 20),
+                lineHeight: 1.25,
+                color: "rgba(255,255,255,0.84)",
+              }}
+            >
+              {seatLabel}
+            </div>
+          ) : null}
+
           <div
             style={{
               display: "flex",
-              justifyContent: "space-between",
               alignItems: "center",
-              gap: 18,
-              color: "rgba(255,255,255,0.88)",
-              fontSize: 28,
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: 16,
+              marginTop: variant === "og" ? 6 : 12,
             }}
           >
-            <div>Compra protegida · Disputas con evidencia</div>
             <div
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 68,
-                height: 68,
-                borderRadius: 999,
-                background: "rgba(255,255,255,0.18)",
-                color: BRAND_DARK,
-                fontSize: 34,
-                fontWeight: 800,
+                fontSize: config.footerSize,
+                color: "rgba(255,255,255,0.86)",
+                fontWeight: 500,
               }}
             >
-              TS
+              {footerText}
             </div>
-          </div>
-          <div
-            style={{
-              fontSize: 22,
-              color: "rgba(255,255,255,0.64)",
-            }}
-          >
-            {isTicket ? "Publicación sin datos personales del vendedor" : "Publica y comparte directo desde TixSwap"}
+            <FooterBadge text="Compra protegida" size={config.footerSize} />
           </div>
         </div>
       </div>

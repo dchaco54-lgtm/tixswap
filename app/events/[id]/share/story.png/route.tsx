@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
-import { ShareImage, getShareImageSize } from "@/lib/share/image";
-import { getEventDisplayName } from "@/lib/share";
+import { ShareImage, getShareImageSize, loadRemoteImageDataUrl } from "@/lib/share/image";
+import { getEventDisplayName, getEventImageUrl } from "@/lib/share";
 import { getEventById } from "@/lib/share/server";
 
 export const runtime = "nodejs";
@@ -15,6 +15,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   }
 
   const size = getShareImageSize("story");
+  const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(event));
 
   return new ImageResponse(
     (
@@ -26,6 +27,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
         venue={event?.venue || null}
         city={event?.city || null}
         ticket={null}
+        backgroundSrc={backgroundSrc}
       />
     ),
     size
