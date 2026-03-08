@@ -3,6 +3,7 @@
 import Link from "next/link";
 import TrustBadges from "@/components/TrustBadges";
 import StarRating from "@/components/StarRating";
+import ShareButton from "@/components/ShareButton";
 
 function formatCLP(value: number | null) {
   const n = Number(value);
@@ -42,26 +43,77 @@ type TrustSignalsLike = {
   avgRating?: number | null;
 };
 
+type EventLike = {
+  id?: string | null;
+  title?: string | null;
+  name?: string | null;
+  starts_at?: string | null;
+  venue?: string | null;
+  city?: string | null;
+  image_url?: string | null;
+  poster_url?: string | null;
+  cover_image?: string | null;
+};
+
 interface TicketCardProps {
   ticket: TicketLike;
   seller?: SellerLike | null;
   trustSignals?: TrustSignalsLike | null;
+  event?: EventLike | null;
+  highlighted?: boolean;
+  sharedBadge?: boolean;
+  domId?: string;
 }
 
-export default function TicketCard({ ticket, seller, trustSignals }: TicketCardProps) {
-
+export default function TicketCard({
+  ticket,
+  seller,
+  trustSignals,
+  event = null,
+  highlighted = false,
+  sharedBadge = false,
+  domId,
+}: TicketCardProps) {
   const price = ticket.price || ticket.price_clp || ticket.amount || null;
   const section = ticket.section || ticket.sector || "";
   const row = ticket.row || ticket.row_label || ticket.fila || "";
   const seat = ticket.seat || ticket.seat_label || ticket.asiento || "";
   const sellerName = seller?.full_name || seller?.email || ticket.seller_name || "Vendedor";
+  const eventName = event?.title || event?.name || "Evento";
+  const eventImageUrl = event?.image_url || event?.poster_url || event?.cover_image || null;
+  const cardClassName = highlighted
+    ? "p-5 rounded-2xl border border-blue-400 bg-white shadow-[0_0_0_4px_rgba(37,99,235,0.12),0_18px_44px_rgba(37,99,235,0.18)] transition-all duration-300"
+    : "p-5 rounded-2xl border bg-white hover:shadow-md transition-shadow";
 
   return (
-    <div className="p-5 rounded-2xl border bg-white hover:shadow-md transition-shadow">
+    <div id={domId} className={cardClassName}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
-          <div className="text-lg font-semibold">
-            {section ? `Sección ${section}` : "Entrada"}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-lg font-semibold">{section ? `Sección ${section}` : "Entrada"}</div>
+            {sharedBadge ? (
+              <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                Entrada compartida
+              </span>
+            ) : null}
+            {event?.id ? (
+              <ShareButton
+                type="ticket"
+                eventId={event.id}
+                eventName={eventName}
+                eventDate={event?.starts_at || null}
+                venue={event?.venue || null}
+                city={event?.city || null}
+                eventImageUrl={eventImageUrl}
+                ticketId={ticket.id}
+                ticketPrice={price}
+                sector={section}
+                row_label={row}
+                seat_label={seat}
+                buttonText="Compartir entrada"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white"
+              />
+            ) : null}
           </div>
           <div className="text-gray-600 mt-1">
             {[row && `Fila ${row}`, seat && `Asiento ${seat}`].filter(Boolean).join(" · ")}

@@ -1,8 +1,74 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ShareModal from "@/components/ShareModal";
 
-export default function ShareButton({
+function ShareGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M8 12a4 4 0 0 1 0-.2m8.3-4.6a3 3 0 1 0-2.6-5.4 3 3 0 0 0 2.6 5.4Zm0 15a3 3 0 1 0-2.6-5.4 3 3 0 0 0 2.6 5.4ZM7.7 13.7a3 3 0 1 0-2.4-5.5 3 3 0 0 0 2.4 5.5Zm7.1 4-4.7-2.8m4.7-8.7-4.7 2.8" />
+    </svg>
+  );
+}
+
+function ModernShareButton({
+  type,
+  eventId,
+  eventName,
+  eventDate,
+  venue,
+  city,
+  eventImageUrl,
+  ticketId = null,
+  ticketPrice = null,
+  sector = null,
+  row_label = null,
+  seat_label = null,
+  className = "",
+  buttonText = "",
+  disabled = false,
+  disabledReason = "No disponible",
+}) {
+  const [open, setOpen] = useState(false);
+  const label = buttonText || (type === "ticket" ? "Compartir entrada" : "Compartir evento");
+  const buttonClass = className || "tix-btn-secondary";
+
+  return (
+    <>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (!disabled) setOpen(true);
+        }}
+        className={`${buttonClass} gap-2`.trim()}
+        title={disabled ? disabledReason : label}
+      >
+        <ShareGlyph />
+        <span>{label}</span>
+      </button>
+
+      <ShareModal
+        open={open}
+        onClose={() => setOpen(false)}
+        type={type}
+        eventId={eventId}
+        eventName={eventName}
+        eventDate={eventDate}
+        venue={venue}
+        city={city}
+        eventImageUrl={eventImageUrl}
+        ticketId={ticketId}
+        ticketPrice={ticketPrice}
+        sector={sector}
+        row_label={row_label}
+        seat_label={seat_label}
+      />
+    </>
+  );
+}
+
+function LegacyShareButton({
   url,
   title = "",
   text = "",
@@ -222,6 +288,14 @@ export default function ShareButton({
       ) : null}
     </div>
   );
+}
+
+export default function ShareButton(props) {
+  if (props?.type === "event" || props?.type === "ticket") {
+    return <ModernShareButton {...props} />;
+  }
+
+  return <LegacyShareButton {...props} />;
 }
 
 function MenuItem({ children, onClick }) {
