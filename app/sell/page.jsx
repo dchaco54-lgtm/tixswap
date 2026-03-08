@@ -185,7 +185,7 @@ export default function SellPage() {
   // Mostrar cargando mientras verifica autenticación
   if (checkingAuth) {
     return (
-      <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
+      <div className="min-h-[calc(100dvh-64px)] overflow-x-hidden bg-slate-50 px-4 py-8">
         <div className="mx-auto max-w-5xl">
           <div className="tix-card p-8 text-center">
             <p className="text-gray-600">Verificando sesión…</p>
@@ -198,7 +198,7 @@ export default function SellPage() {
   return (
     <>
       <BreadcrumbBar items={[{ label: 'Vender', href: '#' }]} />
-      <div className="min-h-[calc(100vh-64px)] bg-slate-50 px-4 py-8">
+      <div className="min-h-[calc(100dvh-64px)] overflow-x-hidden bg-slate-50 px-4 py-8">
         <div className="mx-auto max-w-5xl">
           {/* Stepper (sólido) */}
           <div className="mb-8 overflow-hidden rounded-3xl shadow-soft">

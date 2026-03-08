@@ -8,8 +8,8 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="es">
-      <body className="min-h-screen antialiased">
+    <html lang="es" className="overflow-x-hidden">
+      <body className="min-h-[100dvh] overflow-x-hidden antialiased">
         <Header />
         {children}
       </body>

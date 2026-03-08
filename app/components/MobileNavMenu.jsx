@@ -55,7 +55,7 @@ export default function MobileNavMenu({ user, displayName, onLogout }) {
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="md:hidden tix-btn-secondary px-3 py-2 gap-2 shadow-sm"
+        className="md:hidden tix-btn-secondary min-h-[44px] px-3 py-2 gap-2 shadow-sm"
         aria-label="Menú"
       >
         <svg
@@ -86,7 +86,7 @@ export default function MobileNavMenu({ user, displayName, onLogout }) {
       />
 
       {/* Menu drawer */}
-      <div className="fixed right-0 top-0 bottom-0 w-[290px] max-w-[88vw] bg-white z-50 md:hidden shadow-2xl overflow-y-auto rounded-l-3xl border-l border-slate-100">
+      <div className="fixed right-0 top-0 bottom-0 h-[100dvh] w-[310px] max-w-[88vw] bg-white z-50 md:hidden shadow-2xl overflow-y-auto overscroll-contain rounded-l-3xl border-l border-slate-100 pb-[env(safe-area-inset-bottom)]">
         {/* Header del drawer */}
         <div className="flex items-center justify-between p-4 border-b border-slate-200">
           <div className="flex items-center gap-2">
@@ -123,19 +123,19 @@ export default function MobileNavMenu({ user, displayName, onLogout }) {
         <nav className="p-4 space-y-1.5">
           <button
             onClick={handleBuyClick}
-            className="w-full text-left px-4 py-2.5 rounded-xl bg-blue-50 text-blue-700 font-semibold transition hover:bg-blue-100"
+            className="w-full min-h-[48px] text-left px-4 py-3 rounded-xl bg-blue-50 text-blue-700 font-semibold transition hover:bg-blue-100"
           >
             Comprar
           </button>
           <button
             onClick={handleSellClick}
-            className="w-full text-left px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-medium transition hover:bg-slate-50"
+            className="w-full min-h-[48px] text-left px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-700 font-medium transition hover:bg-slate-50"
           >
             Vender
           </button>
           <button
             onClick={handleHowItWorksClick}
-            className="w-full text-left px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-medium transition hover:bg-slate-50"
+            className="w-full min-h-[48px] text-left px-4 py-3 rounded-xl bg-white border border-slate-200 text-slate-700 font-medium transition hover:bg-slate-50"
           >
             Cómo funciona
           </button>
@@ -150,13 +150,13 @@ export default function MobileNavMenu({ user, displayName, onLogout }) {
               <Link
                 href="/dashboard"
                 onClick={() => setIsOpen(false)}
-                className="block w-full text-left px-4 py-2.5 rounded-xl hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-medium transition"
+                className="block w-full min-h-[48px] text-left px-4 py-3 rounded-xl hover:bg-blue-50 text-slate-700 hover:text-blue-600 font-medium transition"
               >
                 Mi cuenta
               </Link>
               <button
                 onClick={handleLogout}
-                className="w-full text-left px-4 py-2.5 rounded-xl hover:bg-red-50 text-slate-700 hover:text-red-600 font-medium transition"
+                className="w-full min-h-[48px] text-left px-4 py-3 rounded-xl hover:bg-red-50 text-slate-700 hover:text-red-600 font-medium transition"
               >
                 Cerrar sesión
               </button>
@@ -166,14 +166,14 @@ export default function MobileNavMenu({ user, displayName, onLogout }) {
               <Link
                 href="/login"
                 onClick={() => setIsOpen(false)}
-                className="block w-full text-left px-4 py-2.5 rounded-xl hover:bg-slate-100 text-slate-700 font-medium transition"
+                className="block w-full min-h-[48px] text-left px-4 py-3 rounded-xl hover:bg-slate-100 text-slate-700 font-medium transition"
               >
                 Iniciar sesión
               </Link>
               <Link
                 href="/register"
                 onClick={() => setIsOpen(false)}
-                className="block w-full text-left px-4 py-2.5 rounded-xl bg-blue-600 text-white font-medium transition hover:bg-blue-700"
+                className="block w-full min-h-[48px] text-left px-4 py-3 rounded-xl bg-blue-600 text-white font-medium transition hover:bg-blue-700"
               >
                 Crear cuenta
               </Link>

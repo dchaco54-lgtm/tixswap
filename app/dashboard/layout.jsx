@@ -1,7 +1,9 @@
 'use client';
 
-import DashboardSidebar from './components/DashboardSidebar';
+import { useMemo } from "react";
+import { usePathname } from "next/navigation";
 import BreadcrumbBar from '@/app/components/BreadcrumbBar';
+import DashboardNav from "@/components/dashboard/DashboardNav";
 
 /**
  * Layout para todas las rutas bajo /dashboard/*
@@ -14,43 +16,66 @@ import BreadcrumbBar from '@/app/components/BreadcrumbBar';
  * Subpáginas como /dashboard/purchases usan este layout automáticamente
  */
 export default function DashboardLayout({ children }) {
+  const pathname = usePathname();
+
+  const breadcrumbItems = useMemo(() => {
+    if (pathname === "/dashboard") {
+      return [{ label: "Mi cuenta", href: "#" }];
+    }
+    if (pathname.startsWith("/dashboard/purchases")) {
+      return [
+        { label: "Mi cuenta", href: "/dashboard" },
+        { label: "Mis compras", href: "#" },
+      ];
+    }
+    if (pathname.startsWith("/dashboard/publicaciones")) {
+      return [
+        { label: "Mi cuenta", href: "/dashboard" },
+        { label: "Mis publicaciones", href: "#" },
+      ];
+    }
+    if (pathname.startsWith("/dashboard/publications")) {
+      return [
+        { label: "Mi cuenta", href: "/dashboard" },
+        { label: "Detalle publicación", href: "#" },
+      ];
+    }
+    if (pathname.startsWith("/dashboard/calificaciones")) {
+      return [
+        { label: "Mi cuenta", href: "/dashboard" },
+        { label: "Mis calificaciones", href: "#" },
+      ];
+    }
+    if (pathname.startsWith("/dashboard/wallet")) {
+      return [
+        { label: "Mi cuenta", href: "/dashboard" },
+        { label: "Wallet", href: "#" },
+      ];
+    }
+    if (pathname.startsWith("/dashboard/tickets") || pathname.startsWith("/dashboard/soporte")) {
+      return [
+        { label: "Mi cuenta", href: "/dashboard" },
+        { label: "Soporte", href: "#" },
+      ];
+    }
+    return [{ label: "Mi cuenta", href: "#" }];
+  }, [pathname]);
+
   return (
     <>
-      {/* Breadcrumb superior */}
-      <BreadcrumbBar items={[{ label: 'Mi cuenta', href: '#' }]} />
+      <BreadcrumbBar items={breadcrumbItems} />
 
-      {/* Contenido principal con layout grid */}
-      <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
-        <div className="max-w-7xl mx-auto px-4 py-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {/* Sidebar - desktop only */}
-            <div className="hidden md:block">
-              <DashboardSidebar />
+      <div className="min-h-[100dvh] overflow-x-hidden bg-gradient-to-b from-blue-50 to-white">
+        <div className="mx-auto max-w-7xl px-4 py-4 sm:py-6 lg:py-8">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-6">
+            <div className="min-w-0">
+              <DashboardNav currentPath={pathname} />
             </div>
 
-            {/* Contenido principal */}
-            <div className="md:col-span-3">
+            <div className="min-w-0 max-w-full">
               {children}
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Mobile sidebar - mostrar como accordion/modal si es necesario */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-2">
-        <div className="flex justify-around text-xs">
-          <a href="/dashboard" className="py-2 px-2 rounded text-blue-600 font-medium">
-            👤 Mi cuenta
-          </a>
-          <a href="/dashboard/purchases" className="py-2 px-2 rounded text-slate-600 hover:text-blue-600">
-            🎟️ Compras
-          </a>
-          <a href="/sell" className="py-2 px-2 rounded text-slate-600 hover:text-blue-600">
-            📤 Vender
-          </a>
-          <a href="/events" className="py-2 px-2 rounded text-slate-600 hover:text-blue-600">
-            🎫 Eventos
-          </a>
         </div>
       </div>
     </>

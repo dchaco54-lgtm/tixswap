@@ -205,7 +205,7 @@ export default function AdminPage() {
 
   if (checkingAdmin) {
     return (
-      <main className="min-h-screen bg-gray-50">
+      <main className="min-h-[100dvh] bg-gray-50">
         <div className="mx-auto max-w-6xl px-4 py-10">
           <p className="text-sm text-gray-500">Validando permisos admin...</p>
         </div>
@@ -216,9 +216,9 @@ export default function AdminPage() {
   if (!isAdmin) return null;
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="mx-auto max-w-6xl px-4 py-10 space-y-6">
-        <div className="flex items-center justify-between">
+    <main className="min-h-[100dvh] overflow-x-hidden bg-gray-50">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:py-8 lg:py-10 space-y-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Panel Admin</h1>
             <p className="text-sm text-gray-500">
@@ -229,7 +229,7 @@ export default function AdminPage() {
           <button
             type="button"
             onClick={() => router.push("/dashboard")}
-            className="text-sm text-gray-500 hover:text-gray-700"
+            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-gray-500 hover:text-gray-700 sm:w-auto"
           >
             ← Volver a mi cuenta
           </button>
@@ -244,7 +244,7 @@ export default function AdminPage() {
           >
             <h3 className="text-lg font-semibold text-gray-900">Usuarios</h3>
             <p className="text-sm text-gray-500 mt-1">Editar roles, bloquear cuentas</p>
-            <button className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+            <button className="mt-4 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto">
               Ir a Usuarios →
             </button>
           </div>
@@ -256,7 +256,7 @@ export default function AdminPage() {
           >
             <h3 className="text-lg font-semibold text-gray-900">Eventos</h3>
             <p className="text-sm text-gray-500 mt-1">Crear y gestionar eventos</p>
-            <button className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+            <button className="mt-4 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto">
               Ir a Eventos →
             </button>
           </div>

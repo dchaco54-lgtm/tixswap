@@ -67,7 +67,7 @@ export default function AvatarUploadSection({ currentAvatarUrl, onSuccess }) {
   return (
     <>
       {/* Avatar Section - Always Visible */}
-      <div className="flex items-center gap-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
         {/* Avatar Clickeable */}
         <button
           type="button"
@@ -95,7 +95,7 @@ export default function AvatarUploadSection({ currentAvatarUrl, onSuccess }) {
         </button>
 
         {/* Info Section */}
-        <div>
+        <div className="min-w-0">
           <h3 className="text-sm font-bold text-slate-900">Foto de perfil</h3>
           <p className="text-xs text-slate-600 mt-1">
             Haz clic en tu foto para cambiarla
@@ -103,7 +103,7 @@ export default function AvatarUploadSection({ currentAvatarUrl, onSuccess }) {
           <button
             type="button"
             onClick={() => setShowModal(true)}
-            className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition"
+            className="mt-3 w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 sm:w-auto"
             disabled={uploading || deleting}
           >
             {uploading ? 'Subiendo...' : 'Cambiar foto'}

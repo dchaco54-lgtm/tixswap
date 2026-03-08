@@ -252,11 +252,11 @@ export default function SellFilePage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-[100dvh] overflow-x-hidden bg-slate-50">
       <div className="mx-auto max-w-5xl px-4 py-10">
         <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
           <div className="rounded-2xl bg-gradient-to-r from-blue-500 to-purple-500 px-6 py-6 text-white">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 overflow-x-auto pb-2">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 font-semibold">
                   1

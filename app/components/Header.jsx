@@ -112,7 +112,7 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur">
-      <div className="tix-container py-3 flex items-center justify-between gap-4">
+      <div className="tix-container flex items-center justify-between gap-3 py-3">
         {/* Logo */}
         <div className="flex items-center gap-2">
           <Link href="/" className="flex items-center gap-2">
@@ -150,7 +150,7 @@ export default function Header() {
 
         {/* Auth */}
         {!loadingUser && (
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <>
               {user ? (
                 <>
@@ -160,7 +160,7 @@ export default function Header() {
 
                   <NotificationBell userId={user?.id} />
 
-                  <Link href="/dashboard" className="tix-btn-secondary">
+                  <Link href="/dashboard" className="tix-btn-secondary hidden md:inline-flex">
                     Ver mi cuenta
                   </Link>
 

@@ -352,9 +352,9 @@ export default function PublicationDetailPage() {
   };
 
   return (
-    <div className="flex min-h-screen bg-[#f4f7ff]">
-      <main className="flex-1 tix-container py-10">
-        <div className="mb-6 flex items-center justify-between">
+    <div className="flex min-h-[100dvh] overflow-x-hidden bg-[#f4f7ff]">
+      <main className="flex-1 min-w-0 tix-container py-6 sm:py-8 lg:py-10">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <Link
               href="/dashboard/publicaciones"

@@ -449,16 +449,16 @@ export default function MyTicketsPage() {
 
   if (boot) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-50">
+      <main className="min-h-[100dvh] flex items-center justify-center bg-slate-50">
         <p className="text-sm text-slate-500">Cargando…</p>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="max-w-7xl mx-auto px-4 py-10">
-        <div className="flex items-start justify-between gap-3 mb-6">
+    <main className="min-h-[100dvh] overflow-x-hidden bg-slate-50">
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:py-8 lg:py-10">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold text-slate-900">
               Mis tickets
@@ -468,19 +468,19 @@ export default function MyTicketsPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
             <button
               onClick={() => {
                 setShowNewTicket(true);
                 setCreateError("");
               }}
-              className="text-sm px-4 py-2 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700"
+              className="min-h-[44px] w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
             >
               Nuevo ticket
             </button>
             <button
               onClick={() => router.push("/dashboard")}
-              className="text-sm px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50"
+              className="min-h-[44px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50 sm:w-auto"
             >
               Volver al panel
             </button>
@@ -495,7 +495,7 @@ export default function MyTicketsPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
           {/* LISTA */}
-          <div className="bg-white border border-slate-100 rounded-2xl p-4">
+          <div className="min-w-0 rounded-2xl border border-slate-100 bg-white p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="font-semibold text-slate-900">Tickets</h2>
               <button
@@ -533,7 +533,7 @@ export default function MyTicketsPage() {
               </select>
             </div>
 
-            <div className="mt-4 space-y-2 max-h-[70vh] overflow-auto pr-1">
+            <div className="mt-4 max-h-[40dvh] space-y-2 overflow-auto pr-1 lg:max-h-[70vh]">
               {loadingList ? (
                 <p className="text-sm text-slate-500">Cargando…</p>
               ) : safeFiltered.length === 0 ? (
@@ -566,7 +566,7 @@ export default function MyTicketsPage() {
           </div>
 
           {/* DETALLE */}
-          <div className="bg-white border border-slate-100 rounded-2xl p-4">
+          <div className="min-w-0 rounded-2xl border border-slate-100 bg-white p-4">
             {!selected ? (
               <p className="text-sm text-slate-500">
                 Selecciona un ticket para verlo.
@@ -576,9 +576,9 @@ export default function MyTicketsPage() {
             ) : (
               <>
                 <div>
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
                         <h2 className="text-xl font-bold text-slate-900">
                           {selected.code || `TS-${selected.ticket_number}`}
                         </h2>
@@ -595,7 +595,7 @@ export default function MyTicketsPage() {
                     </div>
                     <button
                       onClick={() => router.push("/dashboard/tickets")}
-                      className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50"
+                      className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs hover:bg-slate-50 sm:w-auto"
                     >
                       ← Volver
                     </button>
@@ -776,7 +776,7 @@ export default function MyTicketsPage() {
                             className={`flex ${mine ? "justify-end" : "justify-start"}`}
                           >
                             <div
-                              className={`max-w-[85%] rounded-2xl border px-4 py-3 ${
+                              className={`max-w-[92%] break-words rounded-2xl border px-4 py-3 sm:max-w-[85%] ${
                                 mine
                                   ? "bg-blue-50 border-blue-200"
                                   : "bg-white border-slate-200 shadow-sm"
@@ -947,14 +947,14 @@ export default function MyTicketsPage() {
                           className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                         />
 
-                        <div className="mt-3 flex items-center justify-between gap-3">
+                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="text-xs text-slate-500">
                             {draft.trim().length > 0 && `${draft.trim().length} caracteres`}
                           </div>
                           <button
                             onClick={sendMessage}
                             disabled={sending || (!draft.trim() && pendingUploads.length === 0)}
-                            className="px-5 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center gap-2"
+                            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                           >
                             {sending ? (
                               <>
@@ -1063,11 +1063,11 @@ export default function MyTicketsPage() {
               ) : null}
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-2">
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
               <button
                 type="button"
                 onClick={() => setShowNewTicket(false)}
-                className="px-4 py-2 rounded-xl border border-slate-200 text-sm"
+                className="min-h-[44px] w-full rounded-xl border border-slate-200 px-4 py-2 text-sm sm:w-auto"
                 disabled={creating}
               >
                 Cancelar
@@ -1075,7 +1075,7 @@ export default function MyTicketsPage() {
               <button
                 type="button"
                 onClick={handleCreateTicket}
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-60"
+                className="min-h-[44px] w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60 sm:w-auto"
                 disabled={creating}
               >
                 {creating ? "Creando..." : "Crear ticket"}

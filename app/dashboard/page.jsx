@@ -375,7 +375,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
 
   if (profileLoading || !user) {
     return (
-      <div className="min-h-screen bg-[#f4f7ff]">
+      <div className="min-h-[100dvh] overflow-x-hidden bg-[#f4f7ff]">
         <div className="tix-container py-10">
           <div className="tix-card p-6">
             <p className="text-slate-600">Cargando dashboard…</p>
@@ -387,7 +387,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
 
   if (profileError) {
     return (
-      <div className="min-h-screen bg-[#f4f7ff]">
+      <div className="min-h-[100dvh] overflow-x-hidden bg-[#f4f7ff]">
         <div className="tix-container py-10">
           <div className="tix-card p-6 bg-red-50 border-red-200">
             <p className="text-red-600">Error cargando perfil: {profileError}</p>
@@ -465,7 +465,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                   </div>
                 )}
 
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h1 className="text-2xl font-extrabold text-slate-900">Mi perfil</h1>
                     <p className="text-slate-600 mt-1">
@@ -474,19 +474,19 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                   </div>
 
                   {!editing ? (
-                    <button onClick={startEdit} className="tix-btn-primary">
+                    <button onClick={startEdit} className="tix-btn-primary w-full sm:w-auto">
                       Editar
                     </button>
                   ) : (
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                       <button
                         onClick={saveProfile}
                         disabled={saving}
-                        className="tix-btn-primary"
+                        className="tix-btn-primary w-full sm:w-auto"
                       >
                         {saving ? "Guardando…" : "Guardar"}
                       </button>
-                      <button onClick={cancelEdit} className="tix-btn-ghost">
+                      <button onClick={cancelEdit} className="tix-btn-ghost w-full sm:w-auto">
                         Cancelar
                       </button>
                     </div>
@@ -507,13 +507,13 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                     </div>
 
                     {/* Nombre */}
-                    <div className="px-5 py-4 flex items-start justify-between gap-4">
+                    <div className="px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="w-full">
                         <div className="text-xs font-bold text-slate-500">
                           Nombre completo
                         </div>
 
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div className="text-sm font-extrabold text-slate-900 mt-1">
                             {profile?.full_name || "Sin nombre (completa tu perfil)"}
                           </div>
@@ -529,11 +529,11 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                     </div>
 
                     {/* Email */}
-                    <div className="px-5 py-4 flex items-start justify-between gap-4">
+                    <div className="px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="w-full">
                         <div className="text-xs font-bold text-slate-500">Correo</div>
 
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div className="text-sm font-extrabold text-slate-900 mt-1">
                             {profile?.email || user?.email || "—"}
                           </div>
@@ -549,13 +549,13 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                     </div>
 
                     {/* RUT */}
-                    <div className="px-5 py-4 flex items-start justify-between gap-4">
+                    <div className="px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="w-full">
                         <div className="text-xs font-bold text-slate-500">
                           RUT
                         </div>
 
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                           <div className="text-sm font-extrabold text-slate-900 mt-1">
                             {profile?.rut ? formatRutForDisplay(profile.rut) : "—"}
                           </div>
@@ -571,7 +571,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                     </div>
 
                     {/* Teléfono */}
-                    <div className="px-5 py-4 flex items-start justify-between gap-4">
+                    <div className="px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="w-full">
                         <div className="text-xs font-bold text-slate-500">
                           Teléfono
@@ -738,20 +738,20 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
               </div>
             </div>
 
-            <div className="mt-5 flex items-center justify-between gap-3">
-              <button className="tix-btn-ghost" onClick={() => setOpenSale(null)}>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button className="tix-btn-ghost w-full sm:w-auto" onClick={() => setOpenSale(null)}>
                 Listo
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                 <button
-                  className="tix-btn-secondary"
+                  className="tix-btn-secondary w-full sm:w-auto"
                   onClick={() => requestSaleHelp(openSale)}
                 >
                   Pedir ayuda a soporte
                 </button>
                 <button
-                  className="tix-btn-primary"
+                  className="tix-btn-primary w-full sm:w-auto"
                   onClick={() => {
                     // por ahora: te llevo a Soporte con ticket prellenado,
                     // el chat comprador↔vendedor lo armamos después cuando exista.
@@ -776,7 +776,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
 
 export default function DashboardPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Cargando...</div>}>
+    <Suspense fallback={<div className="flex min-h-[100dvh] items-center justify-center">Cargando...</div>}>
       <DashboardContent />
     </Suspense>
   );
