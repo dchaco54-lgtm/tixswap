@@ -1,46 +1,37 @@
-import { ImageResponse } from "next/og";
-import {
-  ShareImage,
-  getNoStoreImageHeaders,
-  getShareImageSize,
-  loadRemoteImageDataUrl,
-} from "@/lib/share/image";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createShareFallbackResponse, createShareImageResponse } from "@/lib/share/storyImage";
 import { getEventDisplayName, getEventImageUrl } from "@/lib/share";
-import { getEventById } from "@/lib/share/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
-  const event = await getEventById(params.id);
+  try {
+    void new URL(request.url).searchParams.get("v");
+    const admin = supabaseAdmin();
+    const { data: event, error } = await admin
+      .from("events")
+      .select("id,title,starts_at,venue,city,image_url")
+      .eq("id", params.id)
+      .maybeSingle();
 
-  if (!event) {
-    return new Response("Not found", { status: 404 });
+    if (error) throw error;
+    if (!event) return createShareFallbackResponse("og", "event", "Evento");
+
+    return createShareImageResponse({
+      variant: "og",
+      kind: "event",
+      title: getEventDisplayName(event),
+      eventDate: event?.starts_at || null,
+      venue: event?.venue || null,
+      city: event?.city || null,
+      imageUrl: getEventImageUrl(event) || null,
+    });
+  } catch (error) {
+    console.error("[share/og:event] render error", {
+      requestId: params.id,
+      error: error instanceof Error ? error.stack || error.message : String(error),
+    });
+    return createShareFallbackResponse("og", "event", "Evento");
   }
-
-  const url = new URL(request.url);
-  const version = url.searchParams.get("v");
-  const size = getShareImageSize("og");
-  const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(event));
-
-  return new ImageResponse(
-    (
-      <ShareImage
-        kind="event"
-        variant="og"
-        eventName={getEventDisplayName(event)}
-        eventDate={event?.starts_at || null}
-        venue={event?.venue || null}
-        city={event?.city || null}
-        ticket={null}
-        backgroundSrc={backgroundSrc}
-        debugLabel={version ? `v=${version}` : "v2"}
-      />
-    ),
-    {
-      ...size,
-      headers: getNoStoreImageHeaders(),
-    }
-  );
 }

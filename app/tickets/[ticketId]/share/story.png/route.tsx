@@ -1,75 +1,59 @@
-import { ImageResponse } from "next/og";
-import {
-  ShareFallbackImage,
-  ShareImage,
-  getNoStoreImageHeaders,
-  getShareImageSize,
-  loadRemoteImageDataUrl,
-} from "@/lib/share/image";
-import { getEventDisplayName, getEventImageUrl } from "@/lib/share";
-import { getShareableTicket } from "@/lib/share/server";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { createShareFallbackResponse, createShareImageResponse } from "@/lib/share/storyImage";
+import { buildTicketSeatLabel, getEventDisplayName, getEventImageUrl } from "@/lib/share";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 export async function GET(request: Request, { params }: { params: { ticketId: string } }) {
-  const ticket = await getShareableTicket(params.ticketId);
-
-  if (!ticket?.event) {
-    return new Response("Not found", { status: 404 });
-  }
-
-  const url = new URL(request.url);
-  const version = url.searchParams.get("v");
-  const debugLabel = version ? `v=${version}` : "v2";
-  const size = getShareImageSize("story");
-  const eventName = getEventDisplayName(ticket.event);
-
   try {
-    const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(ticket.event));
+    void new URL(request.url).searchParams.get("v");
+    const admin = supabaseAdmin();
+    const { data: ticket, error } = await admin
+      .from("tickets")
+      .select("id,event_id,price,sector,row_label,seat_label,status")
+      .eq("id", params.ticketId)
+      .maybeSingle();
 
-    return new ImageResponse(
-      (
-        <ShareImage
-          kind="ticket"
-          variant="story"
-          eventName={eventName}
-          eventDate={ticket.event?.starts_at || null}
-          venue={ticket.event?.venue || null}
-          city={ticket.event?.city || null}
-          ticket={ticket}
-          backgroundSrc={backgroundSrc}
-          debugLabel={debugLabel}
-        />
-      ),
-      {
-        ...size,
-        headers: getNoStoreImageHeaders(),
-      }
-    );
+    if (error) {
+      throw error;
+    }
+
+    if (!ticket?.event_id) {
+      return createShareFallbackResponse("story", "ticket", "Entrada");
+    }
+
+    const { data: event, error: eventError } = await admin
+      .from("events")
+      .select("id,title,starts_at,venue,city,image_url")
+      .eq("id", ticket.event_id)
+      .maybeSingle();
+
+    if (eventError) {
+      throw eventError;
+    }
+
+    const status = String(ticket?.status || "").toLowerCase();
+    if (!event || (status && !["active", "available"].includes(status))) {
+      return createShareFallbackResponse("story", "ticket", "Entrada");
+    }
+
+    return createShareImageResponse({
+      variant: "story",
+      kind: "ticket",
+      title: getEventDisplayName(event),
+      eventDate: event?.starts_at || null,
+      venue: event?.venue || null,
+      city: event?.city || null,
+      imageUrl: getEventImageUrl(event) || null,
+      price: Number(ticket?.price ?? null),
+      seatLabel: buildTicketSeatLabel(ticket),
+    });
   } catch (error) {
     console.error("[share/story:ticket] render error", {
       requestId: params.ticketId,
       error: error instanceof Error ? error.stack || error.message : String(error),
     });
-
-    return new ImageResponse(
-      (
-        <ShareFallbackImage
-          kind="ticket"
-          eventName={eventName}
-          eventDate={ticket.event?.starts_at || null}
-          venue={ticket.event?.venue || null}
-          city={ticket.event?.city || null}
-          ticket={ticket}
-          debugLabel={debugLabel}
-        />
-      ),
-      {
-        ...size,
-        headers: getNoStoreImageHeaders(),
-      }
-    );
+    return createShareFallbackResponse("story", "ticket", "Entrada");
   }
 }
