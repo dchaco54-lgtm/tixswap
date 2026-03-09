@@ -105,6 +105,304 @@ function resolveTitleSize(variant: ShareVariant, title: string) {
   return config.base;
 }
 
+function renderStoryLayout({
+  kind,
+  title,
+  eventDate,
+  venue,
+  city,
+  imageUrl,
+  price,
+  seatLabel,
+}: ShareImageProps) {
+  const safeTitle = truncate(title || (kind === "ticket" ? "Entrada" : "Evento"), 40);
+  const titleSize = Math.max(Math.min(resolveTitleSize("story", safeTitle) - 24, 56), 44);
+  const dateText = [formatEventDateLabel(eventDate), formatEventTimeLabel(eventDate)]
+    .filter(Boolean)
+    .join(" · ");
+  const locationText = truncate(buildEventLocationLine(venue, city), 56);
+  const priceText = kind === "ticket" ? formatCLP(getTicketPrice({ price })) : "";
+  const seatText = kind === "ticket" ? truncate(seatLabel || "", 48) : "";
+  const absoluteImage = imageUrl ? ensureAbsoluteUrl(imageUrl) : null;
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        position: "relative",
+        display: "flex",
+        overflow: "hidden",
+        background: "linear-gradient(180deg, #1E40AF 0%, #2563EB 54%, #0F172A 100%)",
+        color: "white",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: 92,
+          left: -24,
+          display: "flex",
+          fontSize: 210,
+          fontWeight: 800,
+          letterSpacing: -8,
+          color: "rgba(255,255,255,0.09)",
+        }}
+      >
+        ENTRADAS
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
+          top: 1030,
+          right: -36,
+          display: "flex",
+          fontSize: 208,
+          fontWeight: 800,
+          letterSpacing: -8,
+          color: "rgba(255,255,255,0.08)",
+        }}
+      >
+        ENTRADAS
+      </div>
+
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          height: "100%",
+          padding: 64,
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <div
+            style={{
+              display: "flex",
+              fontSize: 34,
+              fontWeight: 800,
+              letterSpacing: -0.8,
+              color: "rgba(255,255,255,0.96)",
+            }}
+          >
+            TixSwap
+          </div>
+          <div
+            style={{
+              display: "flex",
+              marginTop: 8,
+              fontSize: 18,
+              color: "rgba(255,255,255,0.88)",
+            }}
+          >
+            Reventa segura
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 110,
+            width: "100%",
+            display: "flex",
+            justifyContent: "center",
+          }}
+        >
+          <div
+            style={{
+              width: 792,
+              height: 980,
+              position: "relative",
+              display: "flex",
+              overflow: "hidden",
+              borderRadius: 26,
+              boxShadow: "0 28px 72px rgba(2, 6, 23, 0.36)",
+              background: "rgba(9, 16, 36, 0.48)",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            {absoluteImage ? (
+              <img
+                src={absoluteImage}
+                alt=""
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "flex-end",
+                  background:
+                    "linear-gradient(180deg, rgba(15,23,42,0.72) 0%, rgba(15,23,42,0.92) 100%)",
+                  padding: 48,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    fontSize: 22,
+                    letterSpacing: 2.6,
+                    textTransform: "uppercase",
+                    color: "rgba(255,255,255,0.66)",
+                  }}
+                >
+                  Evento
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    marginTop: 18,
+                    fontSize: 68,
+                    lineHeight: 1.02,
+                    fontWeight: 800,
+                    letterSpacing: -2.2,
+                  }}
+                >
+                  {safeTitle}
+                </div>
+                {locationText ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      marginTop: 18,
+                      fontSize: 30,
+                      color: "rgba(255,255,255,0.82)",
+                    }}
+                  >
+                    {locationText}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: "auto",
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+          }}
+        >
+          {kind === "ticket" && priceText ? (
+            <div style={{ display: "flex", flexDirection: "column", marginBottom: 18 }}>
+              <div
+                style={{
+                  display: "flex",
+                  fontSize: 24,
+                  textTransform: "uppercase",
+                  letterSpacing: 1.6,
+                  color: "rgba(255,255,255,0.72)",
+                }}
+              >
+                Precio publicado
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  marginTop: 10,
+                  fontSize: 82,
+                  fontWeight: 800,
+                  lineHeight: 1,
+                  letterSpacing: -2.4,
+                }}
+              >
+                {priceText}
+              </div>
+            </div>
+          ) : null}
+
+          <div
+            style={{
+              display: "flex",
+              fontSize: titleSize,
+              fontWeight: 700,
+              lineHeight: 1.04,
+              letterSpacing: -1.4,
+              color: "rgba(255,255,255,0.97)",
+              maxWidth: 860,
+            }}
+          >
+            {safeTitle}
+          </div>
+
+          {dateText ? (
+            <div
+              style={{
+                display: "flex",
+                marginTop: 18,
+                fontSize: 32,
+                fontWeight: 600,
+                color: "rgba(255,255,255,0.92)",
+              }}
+            >
+              {dateText}
+            </div>
+          ) : null}
+
+          {locationText ? (
+            <div
+              style={{
+                display: "flex",
+                marginTop: 10,
+                fontSize: 30,
+                color: "rgba(255,255,255,0.84)",
+              }}
+            >
+              {locationText}
+            </div>
+          ) : null}
+
+          {kind === "ticket" && seatText ? (
+            <div
+              style={{
+                display: "flex",
+                marginTop: 12,
+                fontSize: 24,
+                color: "rgba(255,255,255,0.74)",
+              }}
+            >
+              {seatText}
+            </div>
+          ) : null}
+
+          <div
+            style={{
+              display: "flex",
+              marginTop: 20,
+              fontSize: 30,
+              color: "rgba(255,255,255,0.96)",
+            }}
+          >
+            www.tixswap.cl
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              marginTop: 12,
+              fontSize: 22,
+              color: "rgba(255,255,255,0.72)",
+            }}
+          >
+            Compra protegida · Disputas con evidencia
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ShareImageLayout({
   variant,
   kind,
@@ -116,6 +414,20 @@ function ShareImageLayout({
   price,
   seatLabel,
 }: ShareImageProps) {
+  if (variant === "story") {
+    return renderStoryLayout({
+      variant,
+      kind,
+      title,
+      eventDate,
+      venue,
+      city,
+      imageUrl,
+      price,
+      seatLabel,
+    });
+  }
+
   const config = VARIANTS[variant];
   const safeTitle = truncate(title || (kind === "ticket" ? "Entrada" : "Evento"), config.maxTitle);
   const titleSize = resolveTitleSize(variant, safeTitle);
@@ -126,9 +438,8 @@ function ShareImageLayout({
   const priceText = kind === "ticket" ? formatCLP(getTicketPrice({ price })) : "";
   const seatText = kind === "ticket" ? truncate(seatLabel || "", config.maxSeat) : "";
   const absoluteImage = imageUrl ? ensureAbsoluteUrl(imageUrl) : null;
-  const footerPrimary =
-    variant === "story" ? "Link en sticker" : "Compra protegida · Disputas con evidencia";
-  const footerSecondary = variant === "story" ? "Compra protegida · Disputas con evidencia" : "";
+  const footerPrimary = "Compra protegida · Disputas con evidencia";
+  const footerSecondary = "";
 
   return (
     <div
