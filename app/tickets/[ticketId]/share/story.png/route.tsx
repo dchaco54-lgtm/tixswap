@@ -7,7 +7,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, { params }: { params: { ticketId: string } }) {
   try {
-    void new URL(request.url).searchParams.get("v");
+    const url = new URL(request.url);
+    void url.searchParams.get("v");
+    const pos = url.searchParams.get("pos");
+    const posterPosition = pos === "top" || pos === "mid" || pos === "bot" ? pos : null;
     const admin = supabaseAdmin();
     const { data: ticket, error } = await admin
       .from("tickets")
@@ -48,6 +51,7 @@ export async function GET(request: Request, { params }: { params: { ticketId: st
       imageUrl: getEventImageUrl(event) || null,
       price: Number(ticket?.price ?? null),
       seatLabel: buildTicketSeatLabel(ticket),
+      posterPosition,
     });
   } catch (error) {
     console.error("[share/story:ticket] render error", {

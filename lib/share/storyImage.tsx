@@ -21,6 +21,7 @@ type ShareImageProps = {
   imageUrl?: string | null;
   price?: number | null;
   seatLabel?: string | null;
+  posterPosition?: "top" | "mid" | "bot" | null;
 };
 
 const VARIANTS = {
@@ -105,6 +106,16 @@ function resolveTitleSize(variant: ShareVariant, title: string) {
   return config.base;
 }
 
+function resolveStoryPosterPosition(
+  kind: ShareKind,
+  posterPosition?: ShareImageProps["posterPosition"]
+) {
+  if (posterPosition === "top") return "50% 15%";
+  if (posterPosition === "mid") return "50% 50%";
+  if (posterPosition === "bot") return "50% 85%";
+  return kind === "ticket" ? "50% 15%" : "50% 25%";
+}
+
 function renderStoryLayout({
   kind,
   title,
@@ -114,6 +125,7 @@ function renderStoryLayout({
   imageUrl,
   price,
   seatLabel,
+  posterPosition,
 }: ShareImageProps) {
   const safeTitle = truncate(title || (kind === "ticket" ? "Entrada" : "Evento"), 40);
   const titleSize = Math.max(Math.min(resolveTitleSize("story", safeTitle) - 24, 56), 44);
@@ -124,6 +136,7 @@ function renderStoryLayout({
   const priceText = kind === "ticket" ? formatCLP(getTicketPrice({ price })) : "";
   const seatText = kind === "ticket" ? truncate(seatLabel || "", 48) : "";
   const absoluteImage = imageUrl ? ensureAbsoluteUrl(imageUrl) : null;
+  const posterObjectPosition = resolveStoryPosterPosition(kind, posterPosition);
 
   return (
     <div
@@ -223,15 +236,29 @@ function renderStoryLayout({
             }}
           >
             {absoluteImage ? (
-              <img
-                src={absoluteImage}
-                alt=""
+              <div
                 style={{
                   width: "100%",
                   height: "100%",
-                  objectFit: "cover",
+                  display: "flex",
+                  overflow: "hidden",
+                  transform: "scale(0.97)",
+                  transformOrigin: "center center",
                 }}
-              />
+              >
+                <img
+                  src={absoluteImage}
+                  alt=""
+                  style={{
+                    width: "104%",
+                    height: "104%",
+                    objectFit: "cover",
+                    objectPosition: posterObjectPosition,
+                    marginLeft: "-2%",
+                    marginTop: "-2%",
+                  }}
+                />
+              </div>
             ) : (
               <div
                 style={{
@@ -413,6 +440,7 @@ function ShareImageLayout({
   imageUrl,
   price,
   seatLabel,
+  posterPosition,
 }: ShareImageProps) {
   if (variant === "story") {
     return renderStoryLayout({
@@ -425,6 +453,7 @@ function ShareImageLayout({
       imageUrl,
       price,
       seatLabel,
+      posterPosition,
     });
   }
 
