@@ -159,22 +159,16 @@ export default function SellFilePage() {
         accessToken = data?.session?.access_token ?? null;
       } catch {}
 
-      // sacar user id si existe sesión (opcional, el backend lo puede derivar)
-      let sellerId = null;
-      try {
-        const { data } = await supabase.auth.getUser();
-        sellerId = data?.user?.id ?? null;
-      } catch {}
-
       const fd = new FormData();
       fd.append("file", file);
       fd.append("isNominada", String(isNominada));
       fd.append("qr_payload", qr || ''); // Enviar string vacío si no hay QR
-      if (sellerId) fd.append("sellerId", sellerId);
+      if (draft?.event_id) fd.append("eventId", String(draft.event_id));
 
       console.log('[Upload] Enviando al backend:', { 
         fileName: file.name, 
         fileSize: file.size, 
+        eventId: draft?.event_id || null,
         hasQR: !!(qr && qr.length > 0),
         qrLength: qr?.length || 0 
       });
@@ -217,7 +211,9 @@ export default function SellFilePage() {
           uploaded: true,
           isNominada,
           ticketUploadId: data?.ticketUploadId || null,
+          uploadId: data?.uploadId || data?.ticketUploadId || null,
           sha256: data?.sha256 || null,
+          storagePath: data?.storagePath || data?.filePath || null,
           filePath: data?.filePath || null,
           viewUrl: data?.viewUrl || null,
           createdAt: data?.createdAt || null,

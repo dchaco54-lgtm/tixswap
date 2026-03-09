@@ -280,7 +280,9 @@ export default function SellConfirmPage() {
           },
           step2: {
             ticketUploadId: draft?.ticketUpload?.ticketUploadId ?? null,
+            uploadId: draft?.ticketUpload?.uploadId ?? draft?.ticketUpload?.ticketUploadId ?? null,
             sha256: draft?.ticketUpload?.sha256 ?? null,
+            storagePath: draft?.ticketUpload?.storagePath ?? draft?.ticketUpload?.filePath ?? null,
             viewUrl: draft?.ticketUpload?.viewUrl ?? null,
             filePath: draft?.ticketUpload?.filePath ?? null,
             isNominada: !!draft?.ticketUpload?.isNominada,

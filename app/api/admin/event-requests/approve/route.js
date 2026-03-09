@@ -5,6 +5,7 @@ import { detectEventColumns, detectTicketColumns } from "@/lib/db/ticketSchema";
 import { sendEmail } from "@/lib/email/resend";
 import { templateTicketPublished } from "@/lib/email/templates";
 import { createNotification } from "@/lib/notifications";
+import { finalizeTicketUpload, getTicketUploadOwnerId } from "@/lib/ticketUploads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,7 +119,7 @@ export async function POST(req) {
     const { data: upload, error: uploadErr } = await admin
       .from("ticket_uploads")
       .select(
-        "id,seller_id,is_nominated,is_nominada,storage_bucket,storage_path,validation_status,validation_reason,status"
+        "id,user_id,seller_id,event_id,ticket_id,is_nominated,is_nominada,storage_bucket,storage_path,storage_path_staging,storage_path_final,validation_status,validation_reason,status,sha256,file_hash"
       )
       .eq("id", ticketUploadId)
       .maybeSingle();
@@ -127,11 +128,11 @@ export async function POST(req) {
       return NextResponse.json({ error: uploadErr.message }, { status: 500 });
     }
 
-    if (!upload || upload.seller_id !== sellerId) {
+    if (!upload || getTicketUploadOwnerId(upload) !== sellerId) {
       return NextResponse.json({ error: "ticketUploadId inválido" }, { status: 400 });
     }
 
-    const validStatuses = new Set(["uploaded", "validated", "approved", "valid"]);
+    const validStatuses = new Set(["staging", "uploaded", "validated", "approved", "valid"]);
     if (upload.status && !validStatuses.has(upload.status)) {
       return NextResponse.json(
         { error: "ticketUploadId inválido", details: "Estado de upload no válido" },
@@ -248,6 +249,43 @@ export async function POST(req) {
 
     if (insertErr) {
       return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    }
+
+    const finalizeRes = await finalizeTicketUpload({
+      supabase: admin,
+      upload,
+      ticketId: createdTicket.id,
+      eventId,
+      userId: sellerId,
+    });
+
+    if (finalizeRes.updateError) {
+      console.error("[event-requests/approve] error finalizando ticket_upload:", finalizeRes.updateError);
+    }
+
+    if (finalizeRes.moveError) {
+      console.error("[event-requests/approve] error moviendo PDF a final:", finalizeRes.moveError);
+    }
+
+    const ticketPatch = {};
+    const nextUploadPath = finalizeRes.effectivePath || upload.storage_path || null;
+    const nextUploadBucket = upload.storage_bucket ?? null;
+
+    if (ticketColumns?.has("upload_bucket")) ticketPatch.upload_bucket = nextUploadBucket;
+    if (ticketColumns?.has("upload_path")) ticketPatch.upload_path = nextUploadPath;
+
+    if (Object.keys(ticketPatch).length) {
+      const { error: patchErr } = await admin
+        .from("tickets")
+        .update(ticketPatch)
+        .eq("id", createdTicket.id);
+
+      if (patchErr) {
+        console.error("[event-requests/approve] error sincronizando upload_path:", patchErr);
+      } else {
+        createdTicket.upload_bucket = nextUploadBucket;
+        createdTicket.upload_path = nextUploadPath;
+      }
     }
 
     const notesRaw = typeof body?.adminNotes === "string" ? body.adminNotes.trim() : null;

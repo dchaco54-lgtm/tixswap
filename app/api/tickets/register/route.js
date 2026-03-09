@@ -1,5 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import crypto from "crypto";
+import {
+  buildTicketUploadStagingPath,
+  createTicketUploadSignedUrl,
+  getTicketUploadEffectivePath,
+} from "@/lib/ticketUploads";
 
 export const runtime = "nodejs"; // necesario para crypto + Buffer
 
@@ -15,14 +20,6 @@ function getEnv(name) {
   return v && String(v).trim().length ? String(v).trim() : null;
 }
 
-function safeFileName(name) {
-  // deja letras/números/._- y reemplaza espacios
-  return String(name || "ticket.pdf")
-    .replace(/\s+/g, "_")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .slice(0, 180);
-}
-
 export async function POST(req) {
   try {
     const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL");
@@ -35,12 +32,21 @@ export async function POST(req) {
       auth: { persistSession: false },
     });
 
+    const authHeader = req.headers.get("authorization") || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    if (!token) return json({ error: "No autorizado" }, 401);
+
+    const { data: authData, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    if (authErr || !authData?.user) {
+      return json({ error: "No autorizado" }, 401);
+    }
+
+    const authUser = authData.user;
     const form = await req.formData();
     const file = form.get("file");
-
-    // OJO: esto es el “seller” (quien sube el ticket)
-    const sellerId = (form.get("sellerId") || "").toString() || null;
-    const userId = (form.get("userId") || "").toString() || null;
+    const sellerId = authUser.id;
+    const userId = authUser.id;
+    const eventId = (form.get("eventId") || "").toString().trim() || null;
 
     // vienen con distintos nombres según pantallas
     const isNominated =
@@ -80,7 +86,9 @@ export async function POST(req) {
     // 1) Duplicado en DB
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("ticket_uploads")
-      .select("id, file_hash, storage_bucket, storage_path, created_at")
+      .select(
+        "id,file_hash,sha256,storage_bucket,storage_path,storage_path_staging,storage_path_final,created_at"
+      )
       .eq("file_hash", sha256)
       .maybeSingle();
 
@@ -91,16 +99,18 @@ export async function POST(req) {
       );
     }
 
-    const bucket = "ticket-pdfs"; // ✅ tu bucket real
-    const ts = Date.now();
-    const cleanName = safeFileName(file.name || "ticket.pdf");
-    const storagePath = `tickets/${sha256}/${ts}_${cleanName}`; // ✅ tu formato real
+    const bucket = "ticket-pdfs";
+    const uploadId = crypto.randomUUID();
+    const storagePath = buildTicketUploadStagingPath({
+      eventId,
+      userId,
+      uploadId,
+      sha256,
+    });
 
     if (existing) {
-      // signed url para verlo
-      const { data: signed, error: signedErr } = await supabaseAdmin.storage
-        .from(bucket)
-        .createSignedUrl(existing.storage_path, 60 * 30);
+      const signedUrl = await createTicketUploadSignedUrl(supabaseAdmin, existing, 60 * 30);
+      const effectivePath = getTicketUploadEffectivePath(existing);
 
       return json(
         {
@@ -108,8 +118,11 @@ export async function POST(req) {
           message: "Entrada ya subida en Tixswap",
           sha256,
           ticketUploadId: existing.id,
-          filePath: existing.storage_path,
-          viewUrl: signedErr ? null : signed?.signedUrl || null,
+          uploadId: existing.id,
+          storagePath: effectivePath,
+          signedUrl,
+          filePath: effectivePath,
+          viewUrl: signedUrl,
           createdAt: existing.created_at,
         },
         409
@@ -132,18 +145,24 @@ export async function POST(req) {
     // 3) Insert DB (ALINEADO A TU ESQUEMA REAL)
     const insertPayload = {
       user_id: userId || null,
+      event_id: eventId,
+      ticket_id: null,
       file_hash: sha256,
       sha256: sha256, // existe en tu tabla, aunque antes lo dejabas null
       storage_bucket: bucket,
       storage_path: storagePath,
+      storage_path_staging: storagePath,
+      storage_path_final: null,
       original_name: file.name || null,
       original_filename: null, // lo mantienes null en tu ejemplo
+      filename_original: file.name || null,
       file_size: file.size,
+      size_bytes: file.size,
       mime_type: file.type,
       is_nominated: isNominated,
       is_nominada: isNominated,
       seller_id: sellerId || null,
-      status: "uploaded",
+      status: "staging",
       qr_payload: qrPayload || "",
       // buyer_* NO existe => usamos attendee_*
       attendee_name: buyerName,
@@ -163,7 +182,9 @@ export async function POST(req) {
     const { data: inserted, error: insertErr } = await supabaseAdmin
       .from("ticket_uploads")
       .insert(insertPayload)
-      .select("id, created_at, storage_path")
+      .select(
+        "id,created_at,storage_bucket,storage_path,storage_path_staging,storage_path_final"
+      )
       .single();
 
     if (insertErr) {
@@ -176,19 +197,28 @@ export async function POST(req) {
     }
 
     // 4) Signed URL para ver/descargar
-    const { data: signed, error: signedErr } = await supabaseAdmin.storage
-      .from(bucket)
-      .createSignedUrl(storagePath, 60 * 30);
+    const signedUrl = await createTicketUploadSignedUrl(
+      supabaseAdmin,
+      {
+        ...inserted,
+        storage_bucket: bucket,
+      },
+      60 * 30
+    );
 
     return json({
       ok: true,
       ticketUploadId: inserted.id,
+      uploadId: inserted.id,
       sha256,
+      storagePath,
+      signedUrl,
       filePath: storagePath,
-      viewUrl: signedErr ? null : signed?.signedUrl || null,
+      viewUrl: signedUrl,
       createdAt: inserted.created_at,
       summary: {
         bucket,
+        eventId,
         isNominated,
       },
       parsed: null, // si después quieres parsear QR en backend, lo agregamos aquí sin romper nada
@@ -197,4 +227,3 @@ export async function POST(req) {
     return json({ error: "Unexpected error", details: e?.message || String(e) }, 500);
   }
 }
-

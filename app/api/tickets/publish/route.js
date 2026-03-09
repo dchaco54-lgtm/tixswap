@@ -7,6 +7,7 @@ import { detectTicketColumns } from '@/lib/db/ticketSchema';
 import { sendEmail } from '@/lib/email/resend';
 import { templateTicketPublished, templateEventNewTicketAlert } from '@/lib/email/templates';
 import { createNotification } from '@/lib/notifications';
+import { finalizeTicketUpload, getTicketUploadOwnerId } from '@/lib/ticketUploads';
 
 export async function POST(request) {
   try {
@@ -64,12 +65,13 @@ export async function POST(request) {
       isFreeOrAdmin: userRole === 'free' || userRole === 'admin'
     });
 
+    const columns = await detectTicketColumns(supabase);
     let upload = null;
     if (ticketUploadId) {
       const { data: uploadRow, error: uploadErr } = await supabase
         .from('ticket_uploads')
         .select(
-          'id,seller_id,is_nominated,is_nominada,storage_bucket,storage_path,original_name,mime_type,file_size,validation_status,validation_reason,provider,status'
+          'id,user_id,seller_id,event_id,ticket_id,is_nominated,is_nominada,storage_bucket,storage_path,storage_path_staging,storage_path_final,original_name,filename_original,mime_type,file_size,size_bytes,validation_status,validation_reason,provider,status,sha256,file_hash'
         )
         .eq('id', ticketUploadId)
         .maybeSingle();
@@ -78,11 +80,13 @@ export async function POST(request) {
         return NextResponse.json({ error: uploadErr.message }, { status: 500 });
       }
 
-      if (!uploadRow || uploadRow.seller_id !== sellerId) {
+      const uploadOwnerId = getTicketUploadOwnerId(uploadRow);
+
+      if (!uploadRow || uploadOwnerId !== sellerId) {
         return NextResponse.json({ error: 'ticketUploadId inválido' }, { status: 400 });
       }
 
-      const validStatuses = new Set(['uploaded', 'validated', 'approved', 'valid']);
+      const validStatuses = new Set(['staging', 'uploaded', 'validated', 'approved', 'valid']);
       if (uploadRow.status && !validStatuses.has(uploadRow.status)) {
         return NextResponse.json(
           { error: 'ticketUploadId inválido', details: 'Estado de upload no válido' },
@@ -117,8 +121,6 @@ export async function POST(request) {
     };
 
     if (upload) {
-      const columns = await detectTicketColumns(supabase);
-
       if (columns.has('ticket_upload_id')) insertPayload.ticket_upload_id = ticketUploadId;
       if (columns.has('upload_bucket')) insertPayload.upload_bucket = upload.storage_bucket ?? null;
       if (columns.has('upload_path')) insertPayload.upload_path = upload.storage_path ?? null;
@@ -136,6 +138,51 @@ export async function POST(request) {
 
     if (insertErr) {
       return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    }
+
+    let finalizedUpload = null;
+    if (upload) {
+      const finalizeRes = await finalizeTicketUpload({
+        supabase,
+        upload,
+        ticketId: created.id,
+        eventId,
+        userId: sellerId,
+      });
+
+      if (finalizeRes.updateError) {
+        console.error('[Publish] Error finalizando ticket_upload:', finalizeRes.updateError);
+      } else {
+        finalizedUpload = finalizeRes.updatedUpload || null;
+      }
+
+      if (finalizeRes.moveError) {
+        console.error('[Publish] Error moviendo PDF a final:', {
+          uploadId: upload.id,
+          moveError: finalizeRes.moveError,
+        });
+      }
+
+      const nextUploadPath = finalizeRes.effectivePath || upload.storage_path || null;
+      const nextUploadBucket = upload.storage_bucket ?? null;
+      const ticketPatch = {};
+
+      if (columns.has('upload_bucket')) ticketPatch.upload_bucket = nextUploadBucket;
+      if (columns.has('upload_path')) ticketPatch.upload_path = nextUploadPath;
+
+      if (Object.keys(ticketPatch).length) {
+        const { error: patchErr } = await supabase
+          .from('tickets')
+          .update(ticketPatch)
+          .eq('id', created.id);
+
+        if (patchErr) {
+          console.error('[Publish] Error sincronizando upload_path del ticket:', patchErr);
+        } else {
+          created.upload_bucket = nextUploadBucket;
+          created.upload_path = nextUploadPath;
+        }
+      }
     }
 
     // ✅ Revalidar la página del evento usando On-Demand Revalidation
@@ -281,7 +328,7 @@ export async function POST(request) {
       console.warn('[Publish] Error notificando suscriptores:', alertErr);
     }
 
-    return NextResponse.json({ ok: true, ticket: created });
+    return NextResponse.json({ ok: true, ticket: created, ticketUpload: finalizedUpload });
   } catch (e) {
     return NextResponse.json({ error: e?.message || 'Error inesperado' }, { status: 500 });
   }
