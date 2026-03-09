@@ -270,7 +270,16 @@ export default function ShareModal({
   };
 
   const onDownload = (downloadUrl, label) => {
-    const ok = openExternal(downloadUrl);
+    let nextUrl = downloadUrl;
+    try {
+      const url = new URL(downloadUrl);
+      url.searchParams.set("v", String(Date.now()));
+      nextUrl = url.toString();
+    } catch (error) {
+      console.error("[ShareModal] versioned download url error:", error);
+    }
+
+    const ok = openExternal(nextUrl);
     if (!ok) {
       showToast("err", `No pudimos abrir ${label.toLowerCase()}.`);
     }

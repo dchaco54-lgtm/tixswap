@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { ShareImage, getShareImageSize } from "@/lib/share/image";
+import { ShareImage, getNoStoreImageHeaders, getShareImageSize } from "@/lib/share/image";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,8 +18,12 @@ export async function GET() {
         venue="Reventa segura"
         city="Chile"
         ticket={null}
+        debugLabel="v2"
       />
     ),
-    size
+    {
+      ...size,
+      headers: getNoStoreImageHeaders(),
+    }
   );
 }

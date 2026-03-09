@@ -1,5 +1,10 @@
 import { ImageResponse } from "next/og";
-import { ShareImage, getShareImageSize, loadRemoteImageDataUrl } from "@/lib/share/image";
+import {
+  ShareImage,
+  getNoStoreImageHeaders,
+  getShareImageSize,
+  loadRemoteImageDataUrl,
+} from "@/lib/share/image";
 import { getEventDisplayName, getEventImageUrl } from "@/lib/share";
 import { getShareableTicket } from "@/lib/share/server";
 
@@ -7,13 +12,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET(_request: Request, { params }: { params: { ticketId: string } }) {
+export async function GET(request: Request, { params }: { params: { ticketId: string } }) {
   const ticket = await getShareableTicket(params.ticketId);
 
   if (!ticket?.event) {
     return new Response("Not found", { status: 404 });
   }
 
+  const url = new URL(request.url);
+  const version = url.searchParams.get("v");
   const size = getShareImageSize("story");
   const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(ticket.event));
 
@@ -28,8 +35,12 @@ export async function GET(_request: Request, { params }: { params: { ticketId: s
         city={ticket.event?.city || null}
         ticket={ticket}
         backgroundSrc={backgroundSrc}
+        debugLabel={version ? `v=${version}` : "v2"}
       />
     ),
-    size
+    {
+      ...size,
+      headers: getNoStoreImageHeaders(),
+    }
   );
 }

@@ -20,6 +20,7 @@ type ShareImageProps = {
   city?: string | null;
   ticket?: Record<string, unknown> | null;
   backgroundSrc?: string | null;
+  debugLabel?: string | null;
 };
 
 type VariantConfig = {
@@ -94,6 +95,14 @@ export function getShareImageSize(variant: ShareVariant) {
   return { width: config.width, height: config.height };
 }
 
+export function getNoStoreImageHeaders() {
+  return {
+    "Cache-Control": "no-store, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Vercel-CDN-Cache-Control": "no-store",
+  };
+}
+
 function truncateText(value: string, maxChars: number) {
   const normalized = String(value || "").trim().replace(/\s+/g, " ");
   if (normalized.length <= maxChars) return normalized;
@@ -138,26 +147,6 @@ export async function loadRemoteImageDataUrl(imageUrl?: string | null) {
     console.error("[share/image] poster fetch error:", error);
     return null;
   }
-}
-
-function FooterBadge({ text, size }: { text: string; size: number }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        borderRadius: 999,
-        border: "1px solid rgba(255,255,255,0.22)",
-        background: "rgba(15, 23, 42, 0.28)",
-        padding: `${Math.max(10, size * 0.38)}px ${Math.max(16, size * 0.82)}px`,
-        fontSize: size,
-        fontWeight: 600,
-        color: "rgba(255,255,255,0.96)",
-      }}
-    >
-      {text}
-    </div>
-  );
 }
 
 function PosterBackdrop({
@@ -302,6 +291,7 @@ export function ShareImage({
   city,
   ticket,
   backgroundSrc = null,
+  debugLabel = null,
 }: ShareImageProps) {
   const config = VARIANT_CONFIG[variant];
   const isTicket = kind === "ticket";
@@ -313,7 +303,10 @@ export function ShareImage({
   const locationLabel = truncateText(buildEventLocationLine(venue, city), variant === "og" ? 54 : 64);
   const seatLabel = truncateText(buildTicketSeatLabel(ticket || {}), variant === "og" ? 48 : 58);
   const priceLabel = formatCLP(getTicketPrice(ticket || {}));
-  const footerText = variant === "story" ? "Link en sticker" : "Compra protegida";
+  const footerText =
+    variant === "story"
+      ? "Link en sticker"
+      : "Compra protegida · Disputas con evidencia";
 
   return (
     <div
@@ -411,10 +404,9 @@ export function ShareImage({
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: 16,
+              flexDirection: "column",
+              alignItems: "flex-start",
+              gap: 10,
               marginTop: variant === "og" ? 6 : 12,
             }}
           >
@@ -427,9 +419,33 @@ export function ShareImage({
             >
               {footerText}
             </div>
-            <FooterBadge text="Compra protegida" size={config.footerSize} />
+            {variant === "story" ? (
+              <div
+                style={{
+                  fontSize: config.footerSize,
+                  color: "rgba(255,255,255,0.72)",
+                }}
+              >
+                Compra protegida · Disputas con evidencia
+              </div>
+            ) : null}
           </div>
         </div>
+
+        {debugLabel ? (
+          <div
+            style={{
+              position: "absolute",
+              right: config.paddingX,
+              bottom: Math.max(28, config.paddingBottom - 6),
+              fontSize: Math.max(16, config.footerSize - 4),
+              color: "rgba(255,255,255,0.68)",
+              letterSpacing: 1,
+            }}
+          >
+            {debugLabel}
+          </div>
+        ) : null}
       </div>
     </div>
   );
