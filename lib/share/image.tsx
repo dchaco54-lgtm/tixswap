@@ -129,10 +129,7 @@ export async function loadRemoteImageDataUrl(imageUrl?: string | null) {
 
   try {
     const absoluteUrl = ensureAbsoluteUrl(imageUrl);
-    const response = await fetch(absoluteUrl, {
-      cache: "no-store",
-      next: { revalidate: 0 },
-    });
+    const response = await fetch(absoluteUrl, { cache: "no-store" });
 
     if (!response.ok) {
       console.error("[share/image] poster fetch failed:", absoluteUrl, response.status);
@@ -147,6 +144,30 @@ export async function loadRemoteImageDataUrl(imageUrl?: string | null) {
     console.error("[share/image] poster fetch error:", error);
     return null;
   }
+}
+
+export function ShareFallbackImage({
+  kind,
+  eventName,
+  eventDate,
+  venue,
+  city,
+  ticket,
+  debugLabel = null,
+}: Omit<ShareImageProps, "variant" | "backgroundSrc">) {
+  return (
+    <ShareImage
+      kind={kind}
+      variant="story"
+      eventName={eventName}
+      eventDate={eventDate}
+      venue={venue}
+      city={city}
+      ticket={ticket}
+      backgroundSrc={null}
+      debugLabel={debugLabel}
+    />
+  );
 }
 
 function PosterBackdrop({

@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import {
+  ShareFallbackImage,
   ShareImage,
   getNoStoreImageHeaders,
   getShareImageSize,
@@ -21,26 +22,54 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   const url = new URL(request.url);
   const version = url.searchParams.get("v");
+  const debugLabel = version ? `v=${version}` : "v2";
   const size = getShareImageSize("story");
-  const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(event));
+  const eventName = getEventDisplayName(event);
 
-  return new ImageResponse(
-    (
-      <ShareImage
-        kind="event"
-        variant="story"
-        eventName={getEventDisplayName(event)}
-        eventDate={event?.starts_at || null}
-        venue={event?.venue || null}
-        city={event?.city || null}
-        ticket={null}
-        backgroundSrc={backgroundSrc}
-        debugLabel={version ? `v=${version}` : "v2"}
-      />
-    ),
-    {
-      ...size,
-      headers: getNoStoreImageHeaders(),
-    }
-  );
+  try {
+    const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(event));
+
+    return new ImageResponse(
+      (
+        <ShareImage
+          kind="event"
+          variant="story"
+          eventName={eventName}
+          eventDate={event?.starts_at || null}
+          venue={event?.venue || null}
+          city={event?.city || null}
+          ticket={null}
+          backgroundSrc={backgroundSrc}
+          debugLabel={debugLabel}
+        />
+      ),
+      {
+        ...size,
+        headers: getNoStoreImageHeaders(),
+      }
+    );
+  } catch (error) {
+    console.error("[share/story:event] render error", {
+      requestId: params.id,
+      error: error instanceof Error ? error.stack || error.message : String(error),
+    });
+
+    return new ImageResponse(
+      (
+        <ShareFallbackImage
+          kind="event"
+          eventName={eventName}
+          eventDate={event?.starts_at || null}
+          venue={event?.venue || null}
+          city={event?.city || null}
+          ticket={null}
+          debugLabel={debugLabel}
+        />
+      ),
+      {
+        ...size,
+        headers: getNoStoreImageHeaders(),
+      }
+    );
+  }
 }

@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og";
 import {
+  ShareFallbackImage,
   ShareImage,
   getNoStoreImageHeaders,
   getShareImageSize,
@@ -21,26 +22,54 @@ export async function GET(request: Request, { params }: { params: { ticketId: st
 
   const url = new URL(request.url);
   const version = url.searchParams.get("v");
+  const debugLabel = version ? `v=${version}` : "v2";
   const size = getShareImageSize("story");
-  const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(ticket.event));
+  const eventName = getEventDisplayName(ticket.event);
 
-  return new ImageResponse(
-    (
-      <ShareImage
-        kind="ticket"
-        variant="story"
-        eventName={getEventDisplayName(ticket.event)}
-        eventDate={ticket.event?.starts_at || null}
-        venue={ticket.event?.venue || null}
-        city={ticket.event?.city || null}
-        ticket={ticket}
-        backgroundSrc={backgroundSrc}
-        debugLabel={version ? `v=${version}` : "v2"}
-      />
-    ),
-    {
-      ...size,
-      headers: getNoStoreImageHeaders(),
-    }
-  );
+  try {
+    const backgroundSrc = await loadRemoteImageDataUrl(getEventImageUrl(ticket.event));
+
+    return new ImageResponse(
+      (
+        <ShareImage
+          kind="ticket"
+          variant="story"
+          eventName={eventName}
+          eventDate={ticket.event?.starts_at || null}
+          venue={ticket.event?.venue || null}
+          city={ticket.event?.city || null}
+          ticket={ticket}
+          backgroundSrc={backgroundSrc}
+          debugLabel={debugLabel}
+        />
+      ),
+      {
+        ...size,
+        headers: getNoStoreImageHeaders(),
+      }
+    );
+  } catch (error) {
+    console.error("[share/story:ticket] render error", {
+      requestId: params.ticketId,
+      error: error instanceof Error ? error.stack || error.message : String(error),
+    });
+
+    return new ImageResponse(
+      (
+        <ShareFallbackImage
+          kind="ticket"
+          eventName={eventName}
+          eventDate={ticket.event?.starts_at || null}
+          venue={ticket.event?.venue || null}
+          city={ticket.event?.city || null}
+          ticket={ticket}
+          debugLabel={debugLabel}
+        />
+      ),
+      {
+        ...size,
+        headers: getNoStoreImageHeaders(),
+      }
+    );
+  }
 }
