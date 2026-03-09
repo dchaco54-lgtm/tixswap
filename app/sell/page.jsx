@@ -6,6 +6,11 @@ import { supabase } from "@/lib/supabaseClient";
 import BreadcrumbBar from "@/app/components/BreadcrumbBar";
 import { calculateSellerFee, calculateSellerPayout, formatPrice } from "@/lib/fees";
 
+function isHiddenEventStatus(value) {
+  const normalized = String(value || "").toLowerCase().trim();
+  return normalized === "draft" || normalized === "pending" || normalized === "hidden";
+}
+
 const DRAFT_KEY = "tixswap_sell_draft_v1"; // ✅ agregado (solo lógica)
 
 function formatEventDate(starts_at) {
@@ -136,7 +141,9 @@ export default function SellPage() {
         return;
       }
 
-      const normalized = (data || []).map(normalizeEventRow);
+      const normalized = (data || [])
+        .filter((row) => !isHiddenEventStatus(row?.status))
+        .map(normalizeEventRow);
 
       // Ordenamos en JS (no dependemos de starts_at en SQL)
       normalized.sort((a, b) => {

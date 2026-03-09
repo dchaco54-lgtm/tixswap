@@ -5,6 +5,7 @@ import {
   createTicketUploadSignedUrl,
   getTicketUploadEffectivePath,
 } from "@/lib/ticketUploads";
+import { ensureRequestPlaceholderEvent } from "@/lib/requestEventPlaceholders";
 
 export const runtime = "nodejs"; // necesario para crypto + Buffer
 
@@ -46,7 +47,8 @@ export async function POST(req) {
     const file = form.get("file");
     const sellerId = authUser.id;
     const userId = authUser.id;
-    const eventId = (form.get("eventId") || "").toString().trim() || null;
+    const requestedEventName = (form.get("requestedEventName") || "").toString().trim() || null;
+    let eventId = (form.get("eventId") || "").toString().trim() || null;
 
     // vienen con distintos nombres según pantallas
     const isNominated =
@@ -87,7 +89,7 @@ export async function POST(req) {
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("ticket_uploads")
       .select(
-        "id,file_hash,sha256,storage_bucket,storage_path,storage_path_staging,storage_path_final,created_at"
+        "id,event_id,file_hash,sha256,storage_bucket,storage_path,storage_path_staging,storage_path_final,created_at"
       )
       .eq("file_hash", sha256)
       .maybeSingle();
@@ -119,6 +121,7 @@ export async function POST(req) {
           sha256,
           ticketUploadId: existing.id,
           uploadId: existing.id,
+          eventId: existing.event_id || eventId || null,
           storagePath: effectivePath,
           signedUrl,
           filePath: effectivePath,
@@ -127,6 +130,18 @@ export async function POST(req) {
         },
         409
       );
+    }
+
+    if (!eventId && requestedEventName) {
+      const placeholderEvent = await ensureRequestPlaceholderEvent(supabaseAdmin, {
+        eventId: null,
+        requestedEventName,
+      });
+      eventId = placeholderEvent.id;
+    }
+
+    if (!eventId) {
+      return json({ error: "Falta eventId" }, 400);
     }
 
     // 2) Subir a Storage
@@ -221,6 +236,8 @@ export async function POST(req) {
         eventId,
         isNominated,
       },
+      eventId,
+      eventName: requestedEventName || null,
       parsed: null, // si después quieres parsear QR en backend, lo agregamos aquí sin romper nada
     });
   } catch (e) {

@@ -1,5 +1,14 @@
 BEGIN;
 
+ALTER TABLE public.events
+  ADD COLUMN IF NOT EXISTS status text;
+
+UPDATE public.events
+SET status = COALESCE(status, 'published');
+
+ALTER TABLE public.events
+  ALTER COLUMN status SET DEFAULT 'published';
+
 ALTER TABLE public.ticket_uploads
   ADD COLUMN IF NOT EXISTS event_id uuid REFERENCES public.events(id),
   ADD COLUMN IF NOT EXISTS ticket_id uuid REFERENCES public.tickets(id),
@@ -23,6 +32,7 @@ END $$;
 
 UPDATE public.ticket_uploads
 SET
+  user_id = COALESCE(user_id, seller_id),
   filename_original = COALESCE(filename_original, original_name, original_filename),
   size_bytes = COALESCE(size_bytes, file_size),
   storage_path_staging = COALESCE(storage_path_staging, storage_path),
@@ -71,6 +81,39 @@ SET
     WHEN lower(COALESCE(status, '')) = 'orphaned' THEN 'orphaned'
     ELSE 'staging'
   END;
+
+INSERT INTO public.events (title, starts_at, venue, city, image_url, category, status)
+SELECT
+  '[SYS] Uploads huerfanos historicos',
+  now(),
+  'Sistema',
+  null,
+  null,
+  'system',
+  'draft'
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM public.events
+  WHERE title = '[SYS] Uploads huerfanos historicos'
+    AND venue = 'Sistema'
+);
+
+UPDATE public.ticket_uploads
+SET event_id = (
+  SELECT e.id
+  FROM public.events e
+  WHERE e.title = '[SYS] Uploads huerfanos historicos'
+    AND e.venue = 'Sistema'
+  ORDER BY e.created_at NULLS LAST, e.id
+  LIMIT 1
+)
+WHERE event_id IS NULL;
+
+ALTER TABLE public.ticket_uploads
+  ALTER COLUMN event_id SET NOT NULL;
+
+ALTER TABLE public.ticket_uploads
+  ALTER COLUMN storage_path_staging SET NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_uploads_storage_path_staging_unique
   ON public.ticket_uploads(storage_path_staging)

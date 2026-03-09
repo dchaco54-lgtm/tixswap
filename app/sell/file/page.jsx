@@ -164,6 +164,9 @@ export default function SellFilePage() {
       fd.append("isNominada", String(isNominada));
       fd.append("qr_payload", qr || ''); // Enviar string vacío si no hay QR
       if (draft?.event_id) fd.append("eventId", String(draft.event_id));
+      if (draft?.requestEvent && draft?.requestedEventName) {
+        fd.append("requestedEventName", String(draft.requestedEventName));
+      }
 
       console.log('[Upload] Enviando al backend:', { 
         fileName: file.name, 
@@ -207,6 +210,10 @@ export default function SellFilePage() {
 
       const nextDraft = {
         ...(draft || {}),
+        event_id: data?.eventId || draft?.event_id || null,
+        event_title: draft?.requestEvent
+          ? (draft?.requestedEventName || data?.eventName || "Evento pendiente")
+          : draft?.event_title || null,
         ticketUpload: {
           uploaded: true,
           isNominada,

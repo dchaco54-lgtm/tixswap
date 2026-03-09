@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email/resend";
 import { templateTicketPublished } from "@/lib/email/templates";
 import { createNotification } from "@/lib/notifications";
 import { finalizeTicketUpload, getTicketUploadOwnerId } from "@/lib/ticketUploads";
+import { publishOrUpdatePlaceholderEvent } from "@/lib/requestEventPlaceholders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -148,7 +149,7 @@ export async function POST(req) {
 
     const eventColumns = await detectEventColumns(admin);
 
-    let eventId = body?.eventId || null;
+    let eventId = body?.eventId || base?.eventId || base?.event_id || null;
     if (typeof eventId === "string") {
       eventId = eventId.trim() || null;
     }
@@ -194,22 +195,19 @@ export async function POST(req) {
         return NextResponse.json({ error: "Faltan datos del evento" }, { status: 400 });
       }
 
-      if (eventColumns?.has("status")) {
-        eventPayload.status = "published";
+      try {
+        const publishedEvent = await publishOrUpdatePlaceholderEvent(admin, {
+          eventId,
+          event: eventPayload,
+        });
+        eventId = publishedEvent.id;
+        eventTitle = publishedEvent.title || null;
+      } catch (eventWriteErr) {
+        return NextResponse.json(
+          { error: eventWriteErr?.message || "No se pudo crear/publicar el evento" },
+          { status: 500 }
+        );
       }
-
-      const { data: createdEvent, error: createErr } = await admin
-        .from("events")
-        .insert(eventPayload)
-        .select("id,title")
-        .single();
-
-      if (createErr) {
-        return NextResponse.json({ error: createErr.message }, { status: 500 });
-      }
-
-      eventId = createdEvent.id;
-      eventTitle = createdEvent.title || null;
     }
 
     const ticketColumns = await detectTicketColumns(admin);

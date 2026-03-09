@@ -70,6 +70,11 @@ export async function POST(req) {
     }
 
     const base = reqRow.payload && typeof reqRow.payload === "object" ? reqRow.payload : {};
+    const step2 =
+      base.step2 && typeof base.step2 === "object"
+        ? base.step2
+        : (base.ticketUpload && typeof base.ticketUpload === "object" ? base.ticketUpload : {});
+    const uploadId = step2?.ticketUploadId || base?.ticketUploadId || null;
     const nextPayload = { ...base, resolution: { rejectedAt: new Date().toISOString() } };
 
     const { error: updErr } = await admin
@@ -83,6 +88,17 @@ export async function POST(req) {
 
     if (updErr) {
       return NextResponse.json({ error: updErr.message }, { status: 500 });
+    }
+
+    if (uploadId) {
+      const { error: uploadStatusErr } = await admin
+        .from("ticket_uploads")
+        .update({ status: "orphaned" })
+        .eq("id", uploadId);
+
+      if (uploadStatusErr) {
+        console.error("[event-requests/reject] error marcando upload orphaned:", uploadStatusErr);
+      }
     }
 
     try {

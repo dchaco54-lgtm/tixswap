@@ -264,6 +264,8 @@ export default function SellConfirmPage() {
 
         const payload = {
           requestEvent: true,
+          eventId: draft?.event_id || null,
+          event_id: draft?.event_id || null,
           requestedEventName: requestedName,
           requestedEventExtra: String(draft?.requestedEventExtra || "").trim() || null,
           userId: user.id,
