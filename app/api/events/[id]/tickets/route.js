@@ -6,6 +6,24 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export const revalidate = 0;
 
+async function getSellerValidadoMap(admin, tickets) {
+  const sellerIds = [
+    ...new Set((tickets || []).map((ticket) => ticket?.seller_id).filter(Boolean)),
+  ];
+
+  if (sellerIds.length === 0) return new Map();
+
+  const { data, error } = await admin
+    .from("profiles")
+    .select("id, validado")
+    .in("id", sellerIds);
+
+  if (error || !Array.isArray(data)) {
+    return new Map();
+  }
+
+  return new Map(data.map((profile) => [profile.id, profile.validado === true]));
+}
 
 function normalizePublicTicket(t) {
   return {
@@ -13,6 +31,7 @@ function normalizePublicTicket(t) {
     event_id: t.event_id || null,
     seller_id: t.seller_id || null,
     seller_name: t.seller_name || null,
+    seller_validado: t.seller_validado === true,
     price: t.price ?? null,
     currency: t.currency || "CLP",
     section: t.section_label || t.sector || t.section || null,
@@ -55,8 +74,15 @@ export async function GET(req, { params }) {
       .order("created_at", { ascending: false });
 
     if (!publicErr) {
+      const sellerValidadoMap = await getSellerValidadoMap(admin, publicTickets || []);
+
       return NextResponse.json({
-        tickets: (publicTickets || []).map((t) => normalizePublicTicket(t)),
+        tickets: (publicTickets || []).map((t) =>
+          normalizePublicTicket({
+            ...t,
+            seller_validado: sellerValidadoMap.get(t.seller_id) ?? false,
+          })
+        ),
       });
     }
 
@@ -80,7 +106,13 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: errTickets.message }, { status: 500 });
     }
 
-    const normalized = (tickets || []).map((t) => normalizeTicket(t));
+    const sellerValidadoMap = await getSellerValidadoMap(admin, tickets || []);
+    const normalized = (tickets || []).map((t) => ({
+      ...normalizeTicket(t),
+      seller_id: t.seller_id || null,
+      seller_name: t.seller_name || null,
+      seller_validado: sellerValidadoMap.get(t.seller_id) ?? false,
+    }));
     return NextResponse.json({ tickets: normalized });
   } catch (e) {
     return NextResponse.json({ error: e?.message || "Error" }, { status: 500 });

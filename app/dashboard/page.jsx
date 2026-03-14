@@ -10,6 +10,7 @@ import MisPublicaciones from "./MisPublicaciones";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
 import AvatarUploadSection from "@/components/AvatarUploadSection";
 import OnboardingWelcomeModal from "@/components/OnboardingWelcomeModal";
+import ValidatedBadge from "@/components/ValidatedBadge";
 import { updateProfile, findOpenChangeTicket } from "@/lib/profileActions";
 import { formatRutForDisplay } from "@/lib/formatUtils";
 import { TIERS, tierLabel, normalizeTier } from "@/lib/tiers";
@@ -514,8 +515,15 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                         </div>
 
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="text-sm font-extrabold text-slate-900 mt-1">
-                            {profile?.full_name || "Sin nombre (completa tu perfil)"}
+                          <div className="mt-1">
+                            <div className="text-sm font-extrabold text-slate-900">
+                              {profile?.full_name || "Sin nombre (completa tu perfil)"}
+                            </div>
+                            {profile?.validado ? (
+                              <div className="mt-2">
+                                <ValidatedBadge verified={profile.validado} />
+                              </div>
+                            ) : null}
                           </div>
                           <button
                             onClick={() => setShowChangeModal('name')}

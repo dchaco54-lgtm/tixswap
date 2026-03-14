@@ -34,6 +34,7 @@ export default function AdminUsersPage() {
     phone: "",
     user_type: USER_TYPES.STANDARD,
     is_blocked: false,
+    validado: false,
   });
   const [saving, setSaving] = useState(false);
 
@@ -87,7 +88,7 @@ export default function AdminUsersPage() {
 
     const { data: allUsers, error: usersError } = await supabase
       .from("profiles")
-      .select("id, email, phone, full_name, rut, user_type, is_blocked")
+      .select("id, email, phone, full_name, rut, user_type, is_blocked, validado")
       .order("email", { ascending: true });
 
     if (usersError) {
@@ -122,6 +123,7 @@ export default function AdminUsersPage() {
       phone: u.phone || "",
       user_type: normalizeRole(u.user_type || USER_TYPES.STANDARD),
       is_blocked: !!u.is_blocked,
+      validado: !!u.validado,
     });
     setIsModalOpen(true);
   };
@@ -137,6 +139,7 @@ export default function AdminUsersPage() {
       phone: "",
       user_type: USER_TYPES.STANDARD,
       is_blocked: false,
+      validado: false,
     });
   };
 
@@ -159,6 +162,7 @@ export default function AdminUsersPage() {
         phone: String(editForm.phone || "").trim(),
         user_type: normalizeRole(editForm.user_type || USER_TYPES.STANDARD),
         is_blocked: !!editForm.is_blocked,
+        validado: !!editForm.validado,
       };
 
       const { error } = await supabase
@@ -256,6 +260,7 @@ export default function AdminUsersPage() {
                 <th className="py-3 px-4 text-left font-medium">Nombre</th>
                 <th className="py-3 px-4 text-left font-medium">RUT</th>
                 <th className="py-3 px-4 text-left font-medium">Tipo</th>
+                <th className="py-3 px-4 text-left font-medium">Validado</th>
                 <th className="py-3 px-4 text-left font-medium">Estado</th>
                 <th className="py-3 px-4 text-left font-medium">Acciones</th>
               </tr>
@@ -264,13 +269,13 @@ export default function AdminUsersPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="py-6 px-4 text-slate-600" colSpan={7}>
+                  <td className="py-6 px-4 text-slate-600" colSpan={8}>
                     Cargando usuarios…
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td className="py-6 px-4 text-slate-600" colSpan={7}>
+                  <td className="py-6 px-4 text-slate-600" colSpan={8}>
                     No encontramos usuarios para tu búsqueda.
                   </td>
                 </tr>
@@ -295,6 +300,18 @@ export default function AdminUsersPage() {
 
                     <td className="py-2.5 px-4 text-slate-700">
                       {roleLabel(u.user_type || USER_TYPES.STANDARD)}
+                    </td>
+
+                    <td className="py-2.5 px-4">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                          u.validado
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : "bg-slate-100 text-slate-600 border border-slate-200"
+                        }`}
+                      >
+                        {u.validado ? "Validado" : "No validado"}
+                      </span>
                     </td>
 
                     <td className="py-2.5 px-4">
@@ -440,6 +457,28 @@ export default function AdminUsersPage() {
                     type="checkbox"
                     checked={editForm.is_blocked}
                     onChange={handleFormChange("is_blocked")}
+                    disabled={saving}
+                    className="h-4 w-4"
+                  />
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">Validación manual</p>
+                  <p className="text-xs text-slate-500">
+                    Marcar sólo cuando el RUT y nombre ya fueron revisados por admin.
+                  </p>
+                </div>
+
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <span className="text-slate-700">
+                    {editForm.validado ? "Validado" : "No validado"}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={editForm.validado}
+                    onChange={handleFormChange("validado")}
                     disabled={saving}
                     className="h-4 w-4"
                   />

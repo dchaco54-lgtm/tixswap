@@ -4,6 +4,7 @@ import Link from "next/link";
 import TrustBadges from "@/components/TrustBadges";
 import StarRating from "@/components/StarRating";
 import ShareButton from "@/components/ShareButton";
+import ValidatedBadge from "@/components/ValidatedBadge";
 
 function formatCLP(value: number | null) {
   const n = Number(value);
@@ -31,6 +32,7 @@ type TicketLike = {
   asiento?: string | null;
   seller_id?: string | null;
   seller_name?: string | null;
+  seller_validado?: boolean | null;
 };
 
 type SellerLike = {
@@ -119,6 +121,11 @@ export default function TicketCard({
             {[row && `Fila ${row}`, seat && `Asiento ${seat}`].filter(Boolean).join(" · ")}
           </div>
           <div className="text-gray-600 mt-2">Vende: {sellerName}</div>
+          {ticket.seller_validado ? (
+            <div className="mt-2">
+              <ValidatedBadge verified={ticket.seller_validado} />
+            </div>
+          ) : null}
           
           {/* Trust badges del vendedor */}
           {trustSignals && (
