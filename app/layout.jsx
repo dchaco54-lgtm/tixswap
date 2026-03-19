@@ -1,5 +1,6 @@
 import "./globals.css";
 import Header from "./components/Header";
+import WhatsAppFloatingButton from "@/components/WhatsAppFloatingButton";
 
 export const metadata = {
   title: "TixSwap",
@@ -12,6 +13,7 @@ export default function RootLayout({ children }) {
       <body className="min-h-[100dvh] overflow-x-hidden antialiased">
         <Header />
         {children}
+        <WhatsAppFloatingButton />
       </body>
     </html>
   );
