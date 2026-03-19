@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { getFees } from "@/lib/fees";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  buildProfileIncompleteResponse,
+  syncProfileFromAuthUser,
+} from "@/lib/profileCompletionServer";
+import { isProfileReadyForSensitiveActions } from "@/lib/profileCompletion";
 
 function parseCLP(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -33,6 +39,15 @@ export async function POST(req) {
     const supabase = createRouteHandlerClient({ cookies });
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+
+    const admin = supabaseAdmin();
+    const buyerProfile = await syncProfileFromAuthUser(admin, user);
+    if (!isProfileReadyForSensitiveActions(buyerProfile)) {
+      return NextResponse.json(
+        buildProfileIncompleteResponse(buyerProfile, "buy"),
+        { status: 403 }
+      );
+    }
 
     const { data: ticket } = await supabase
       .from("tickets")
@@ -72,5 +87,4 @@ export async function POST(req) {
     return NextResponse.json({ error: "Error creando sesión Banco de Chile" }, { status: 500 });
   }
 }
-
 

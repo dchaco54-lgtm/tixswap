@@ -8,6 +8,11 @@ import { sendEmail } from '@/lib/email/resend';
 import { templateTicketPublished, templateEventNewTicketAlert } from '@/lib/email/templates';
 import { createNotification } from '@/lib/notifications';
 import { finalizeTicketUpload, getTicketUploadOwnerId } from '@/lib/ticketUploads';
+import {
+  buildProfileIncompleteResponse,
+  syncProfileFromAuthUser,
+} from '@/lib/profileCompletionServer';
+import { isProfileReadyForSensitiveActions } from '@/lib/profileCompletion';
 
 export async function POST(request) {
   try {
@@ -39,15 +44,13 @@ export async function POST(request) {
 
     console.log('[Publish] Payload recibido:', { eventId, price, sector, fila, asiento, sellerId });
 
-    // Obtener perfil del usuario con su rol
-    const { data: profile, error: profErr } = await supabase
-      .from('profiles')
-      .select('full_name, email, user_type, seller_tier')
-      .eq('id', sellerId)
-      .maybeSingle();
+    const profile = await syncProfileFromAuthUser(supabase, user);
 
-    if (profErr) {
-      return NextResponse.json({ error: profErr.message }, { status: 500 });
+    if (!isProfileReadyForSensitiveActions(profile)) {
+      return NextResponse.json(
+        buildProfileIncompleteResponse(profile, 'publish'),
+        { status: 403 }
+      );
     }
 
     const userRole = profile?.user_type || 'standard'; // default: standard

@@ -5,6 +5,11 @@ import { templateOrderChatMessage } from '@/lib/email/templates';
 import { sanitizeUserText } from '@/lib/security/sanitize';
 import { rateLimitByRequest } from '@/lib/security/rateLimit';
 import { createNotification } from '@/lib/notifications';
+import {
+  buildProfileIncompleteResponse,
+  syncProfileFromAuthUser,
+} from '@/lib/profileCompletionServer';
+import { isProfileReadyForSensitiveActions } from '@/lib/profileCompletion';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +41,14 @@ export async function GET(req, { params }) {
     }
 
     const admin = supabaseAdmin();
+    const profile = await syncProfileFromAuthUser(admin, user);
+
+    if (!isProfileReadyForSensitiveActions(profile)) {
+      return NextResponse.json(
+        buildProfileIncompleteResponse(profile, 'join_chat'),
+        { status: 403 }
+      );
+    }
 
 
     // Verificar que el usuario sea parte de la orden y obtener buyer/seller info
@@ -176,6 +189,14 @@ export async function POST(req, { params }) {
     }
 
     const admin = supabaseAdmin();
+    const profile = await syncProfileFromAuthUser(admin, user);
+
+    if (!isProfileReadyForSensitiveActions(profile)) {
+      return NextResponse.json(
+        buildProfileIncompleteResponse(profile, 'send_message'),
+        { status: 403 }
+      );
+    }
 
     // Verificar acceso a la orden
     const { data: order, error: orderError } = await admin

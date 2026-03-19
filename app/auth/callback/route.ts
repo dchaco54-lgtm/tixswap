@@ -2,6 +2,9 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { syncProfileFromAuthUser } from '@/lib/profileCompletionServer';
+
 /**
  * Auth Callback Route Handler (PKCE)
  * 
@@ -141,40 +144,9 @@ export async function GET(request: NextRequest) {
     // ============================================
     // Si el usuario no tiene profile, crear uno automáticamente
     try {
-      const { data: existingProfile, error: fetchError } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', user.id)
-        .single();
-
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        // PGRST116 = no rows found (es normal)
-        console.error('[AuthCallback] Error verificando profile:', fetchError);
-      }
-
-      if (!existingProfile) {
-        // Profile no existe, crear uno
-        const { error: createError } = await supabase.from('profiles').insert([
-          {
-            id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Usuario',
-            rut: user.user_metadata?.rut || null,
-            phone: user.user_metadata?.phone || null,
-            user_type: user.user_metadata?.user_type || 'user',
-            seller_tier: user.user_metadata?.seller_tier || 'free',
-            email_confirmed: true,
-            onboarding_completed: false,
-          },
-        ]);
-
-        if (createError) {
-          console.error('[AuthCallback] Error creando profile:', createError);
-          // No es fatal, seguimos adelante
-        } else {
-          console.log('[AuthCallback] ✓ Profile creado automáticamente');
-        }
-      }
+      const admin = supabaseAdmin();
+      await syncProfileFromAuthUser(admin, user);
+      console.log('[AuthCallback] ✓ Perfil sincronizado');
     } catch (err) {
       console.error('[AuthCallback] Error en profile setup:', err);
       // No es fatal, no bloqueamos el redirect

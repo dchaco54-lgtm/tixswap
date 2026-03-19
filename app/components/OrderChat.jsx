@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+
+import ProfileCompletionModal from "@/components/ProfileCompletionModal";
+import { useSensitiveActionGuard } from "@/hooks/useSensitiveActionGuard";
 import { supabase } from "@/lib/supabaseClient";
 
 function formatTime(iso) {
@@ -23,6 +26,17 @@ export default function OrderChat({ orderId, onClose }) {
   const [newMessage, setNewMessage] = useState("");
   const [error, setError] = useState("");
   const messagesEndRef = useRef(null);
+  const {
+    user,
+    profile,
+    modalState,
+    ensureAccess,
+    openGuard,
+    closeGuard,
+    handleCompleted,
+  } = useSensitiveActionGuard({
+    defaultRedirectTo: `/dashboard/chat/${orderId}`,
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -48,6 +62,10 @@ export default function OrderChat({ orderId, onClose }) {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (json?.error === "PROFILE_INCOMPLETE") {
+          openGuard("entrar al chat");
+          return;
+        }
         throw new Error(json?.error || "No se pudieron cargar los mensajes");
       }
 
@@ -61,11 +79,7 @@ export default function OrderChat({ orderId, onClose }) {
     }
   }
 
-  async function handleSend(e) {
-    e.preventDefault();
-
-    if (!newMessage.trim() || sending) return;
-
+  async function sendMessage() {
     try {
       setSending(true);
       setError("");
@@ -88,6 +102,10 @@ export default function OrderChat({ orderId, onClose }) {
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
+        if (json?.error === "PROFILE_INCOMPLETE") {
+          openGuard("enviar mensajes");
+          return;
+        }
         throw new Error(json?.error || "No se pudo enviar el mensaje");
       }
 
@@ -101,8 +119,26 @@ export default function OrderChat({ orderId, onClose }) {
     }
   }
 
+  async function handleSend(e) {
+    e.preventDefault();
+
+    if (!newMessage.trim() || sending) return;
+
+    await ensureAccess({
+      actionLabel: "enviar mensajes",
+      onAllowed: sendMessage,
+      redirectTo: `/dashboard/chat/${orderId}`,
+    });
+  }
+
   useEffect(() => {
-    if (orderId) loadMessages();
+    if (orderId) {
+      ensureAccess({
+        actionLabel: "entrar al chat",
+        onAllowed: loadMessages,
+        redirectTo: `/dashboard/chat/${orderId}`,
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
@@ -203,6 +239,17 @@ export default function OrderChat({ orderId, onClose }) {
           </p>
         </form>
       </div>
+
+      {modalState.open ? (
+        <ProfileCompletionModal
+          actionLabel={modalState.actionLabel}
+          allowClose={modalState.allowClose}
+          onClose={closeGuard}
+          profile={profile}
+          user={user}
+          onCompleted={handleCompleted}
+        />
+      ) : null}
     </div>
   );
 }

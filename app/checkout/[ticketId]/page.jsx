@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+
+import ProfileCompletionModal from '@/components/ProfileCompletionModal';
+import { useSensitiveActionGuard } from '@/hooks/useSensitiveActionGuard';
 import { supabase } from '@/lib/supabaseClient';
 import { formatPrice } from '@/lib/fees';
 
@@ -31,6 +34,16 @@ export default function CheckoutPage() {
   const [error, setError] = useState(null);
   const [preview, setPreview] = useState(null);
   const [showSellerComments, setShowSellerComments] = useState(false);
+  const checkoutPath =
+    typeof ticketId === "string" ? `/checkout/${ticketId}` : "/checkout";
+  const {
+    user,
+    profile,
+    modalState,
+    ensureAccess,
+    closeGuard,
+    handleCompleted,
+  } = useSensitiveActionGuard({ defaultRedirectTo: checkoutPath });
 
   const ticket = preview?.ticket;
   const event = preview?.event;
@@ -85,7 +98,7 @@ export default function CheckoutPage() {
     };
   }, [ticketId, router]);
 
-  async function startWebpayPayment() {
+  async function runWebpayPayment() {
     setPaying(true);
     setError(null);
 
@@ -134,6 +147,14 @@ export default function CheckoutPage() {
       setError(e.message || 'Error interno');
       setPaying(false);
     }
+  }
+
+  async function startWebpayPayment() {
+    await ensureAccess({
+      actionLabel: 'comprar esta entrada',
+      onAllowed: runWebpayPayment,
+      redirectTo: checkoutPath,
+    });
   }
 
   if (loading) {
@@ -320,10 +341,20 @@ export default function CheckoutPage() {
           </div>
         </div>
       )}
+
+      {modalState.open ? (
+        <ProfileCompletionModal
+          actionLabel={modalState.actionLabel}
+          allowClose={modalState.allowClose}
+          onClose={closeGuard}
+          profile={profile}
+          user={user}
+          onCompleted={handleCompleted}
+        />
+      ) : null}
     </div>
   );
 }
-
 
 
 

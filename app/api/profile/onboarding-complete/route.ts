@@ -2,6 +2,8 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
+import { getMissingRequiredProfileFields } from '@/lib/profileCompletion';
+
 /**
  * Endpoint para marcar onboarding como completado (permanente)
  */
@@ -24,11 +26,33 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, full_name, rut, phone')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileError) {
+      return NextResponse.json({ error: profileError.message }, { status: 500 });
+    }
+
+    const missingFields = getMissingRequiredProfileFields(profile);
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'PROFILE_INCOMPLETE',
+          missing_fields: missingFields,
+        },
+        { status: 400 }
+      );
+    }
+
     // Actualizar onboarding como completado
     const { error } = await supabase
       .from('profiles')
       .update({
         onboarding_completed: true,
+        onboarding_done: true,
         onboarding_completed_at: new Date().toISOString(),
       })
       .eq('id', userId);

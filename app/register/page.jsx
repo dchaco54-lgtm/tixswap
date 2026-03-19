@@ -1,173 +1,73 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import {
-  normalizeRut,
-  isValidRut,
-  isSuspiciousRut,
-  isValidEmail,
-  isValidPhoneCL,
-  normalizePhoneCL,
-  normalizeFormData,
-  validateRegisterForm,
-  validatePasswordStrength,
-} from "@/lib/validations";
+import { useEffect, useState } from "react";
+
 import PasswordField from "@/components/PasswordField";
+import SocialAuthButtons from "@/components/auth/SocialAuthButtons";
 import { PASSWORD_POLICY } from "@/lib/security/passwordPolicy";
+import { createClient } from "@/lib/supabase/client";
+import { isValidEmail, validatePasswordStrength } from "@/lib/validations";
+
+const DEFAULT_USER_TYPE = "standard";
+const DEFAULT_SELLER_TIER = "basic";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const [redirectTo, setRedirectTo] = useState("/dashboard");
 
-  const [fullName, setFullName] = useState("");
-  const [rut, setRut] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
   const [errors, setErrors] = useState({});
-  const [touched, setTouched] = useState({});
-  const [passwordChecks, setPasswordChecks] = useState(() => validatePasswordStrength("").checks);
+  const [socialError, setSocialError] = useState("");
 
-  const DEFAULT_USER_TYPE = "standard";
-  const DEFAULT_SELLER_TIER = "basic";
-
-  const PASSWORD_CHECK_ITEMS = [
-    { key: "minLen", label: `Mínimo ${PASSWORD_POLICY.MIN_LEN} caracteres` },
-    { key: "maxLen", label: "Máximo 72 caracteres" },
-    { key: "hasUpper", label: "Al menos una mayúscula" },
-    { key: "hasLower", label: "Al menos una minúscula" },
-    { key: "hasNumber", label: "Al menos un número" },
-    { key: "hasSpecial", label: "Al menos un caracter especial" },
-    { key: "noSpaces", label: "Sin espacios" },
-    { key: "notCommon", label: "No es una contraseña común" },
-    { key: "notBrand", label: "No contiene 'tixswap'" },
-  ];
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setRedirectTo(params.get("redirectTo") || "/dashboard");
+  }, []);
 
   const passwordValidation = validatePasswordStrength(password);
   const canSubmit =
+    !loading &&
     acceptedTerms &&
-    passwordValidation.valid &&
-    Boolean(confirmPassword) &&
-    confirmPassword === password &&
-    !loading;
+    isValidEmail(email) &&
+    passwordValidation.valid;
 
-  // ============================================
-  // VALIDACIÓN EN TIEMPO REAL (onBlur)
-  // ============================================
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setErrors({});
+    setSocialError("");
 
-  const validateField = (fieldName, value) => {
-    const newErrors = { ...errors };
+    const nextErrors = {};
+    const normalizedEmail = String(email || "").trim().toLowerCase();
 
-    switch (fieldName) {
-      case "fullName":
-        if (!value.trim()) {
-          newErrors.fullName = "Debes ingresar tu nombre";
-        } else {
-          delete newErrors.fullName;
-        }
-        break;
-
-      case "rut":
-        if (!value.trim()) {
-          newErrors.rut = "Debes ingresar tu RUT";
-        } else if (!isValidRut(value)) {
-          newErrors.rut = "RUT inválido. Revisa el formato y dígito verificador";
-        } else if (isSuspiciousRut(normalizeRut(value))) {
-          newErrors.rut = "RUT no válido por razones de seguridad";
-        } else {
-          delete newErrors.rut;
-        }
-        break;
-
-      case "email":
-        if (!value.trim()) {
-          newErrors.email = "Debes ingresar un correo";
-        } else if (!isValidEmail(value)) {
-          newErrors.email = "Correo inválido. Ej: nombre@dominio.cl";
-        } else {
-          delete newErrors.email;
-        }
-        break;
-
-      case "phone":
-        if (!value.trim()) {
-          newErrors.phone = "Debes ingresar un teléfono";
-        } else if (!isValidPhoneCL(value)) {
-          newErrors.phone = "Teléfono inválido. Debe ser: +56 9XXXXXXXX";
-        } else {
-          delete newErrors.phone;
-        }
-        break;
-
-      case "password": {
-        const result = validatePasswordStrength(value);
-        setPasswordChecks(result.checks);
-
-        if (!value) {
-          newErrors.password = "Debes ingresar una contraseña";
-        } else if (!result.valid) {
-          newErrors.password = result.message;
-        } else {
-          delete newErrors.password;
-        }
-        break;
-      }
-
-      case "confirmPassword":
-        if (!value) {
-          newErrors.confirmPassword = "Debes confirmar la contraseña";
-        } else if (value !== password) {
-          newErrors.confirmPassword = "Las contraseñas no coinciden";
-        } else {
-          delete newErrors.confirmPassword;
-        }
-        break;
-
-      default:
-        break;
+    if (!normalizedEmail) {
+      nextErrors.email = "Debes ingresar tu correo.";
+    } else if (!isValidEmail(normalizedEmail)) {
+      nextErrors.email = "Correo inválido. Revisa el formato.";
     }
 
-    setErrors(newErrors);
-  };
+    if (!password) {
+      nextErrors.password = "Debes ingresar una contraseña.";
+    } else if (!passwordValidation.valid) {
+      nextErrors.password = passwordValidation.message;
+    }
 
-  const handleBlur = (fieldName, value) => {
-    setTouched({ ...touched, [fieldName]: true });
-    validateField(fieldName, value);
-  };
+    if (!acceptedTerms) {
+      nextErrors.terms = "Debes aceptar los Términos y Condiciones.";
+    }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setMessage("");
-
-    // Validar todos los campos
-    const validation = validateRegisterForm({
-      fullName,
-      rut,
-      email,
-      phone,
-      password,
-      confirmPassword,
-      acceptedTerms,
-    });
-
-    if (!validation.valid) {
-      setErrors(validation.errors);
-      setPasswordChecks(validatePasswordStrength(password).checks);
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
       return;
     }
 
-    // Si llegó aquí, todos los campos son válidos
-    const normalized = normalizeFormData({ fullName, rut, email, phone });
-
     try {
       setLoading(true);
-      setErrors({});
 
       const policyRes = await fetch("/api/auth/password-policy", {
         method: "POST",
@@ -177,361 +77,242 @@ export default function RegisterPage() {
       const policyJson = await policyRes.json().catch(() => ({}));
 
       if (!policyRes.ok || !policyJson?.valid) {
-        setErrors((prev) => ({
-          ...prev,
+        setErrors({
           password:
             policyJson?.message ||
             "La contraseña no cumple la política de seguridad.",
-        }));
-        if (policyJson?.checks) {
-          setPasswordChecks(policyJson.checks);
-        }
-        return;
-      }
-
-      const supabase = createClient();
-
-      // Validar RUT duplicado en backend
-      const rutCheckRes = await fetch("/api/auth/check-rut", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rut: normalized.rut }),
-      });
-
-      const rutCheck = await rutCheckRes.json();
-
-      if (!rutCheckRes.ok) {
-        throw new Error(rutCheck?.error || "No se pudo validar el RUT.");
-      }
-
-      if (rutCheck?.exists) {
-        setErrors({
-          rut: "RUT ya registrado. Si necesitas ayuda, contáctanos por soporte.",
         });
         return;
       }
 
-      // Crear cuenta con PKCE
-      const origin = typeof window !== "undefined" ? window.location.origin : "https://www.tixswap.cl";
-      const callbackUrl = `${origin}/auth/callback?redirectTo=${encodeURIComponent('/dashboard')}`;
+      const origin =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "https://www.tixswap.cl";
+      const callbackUrl = `${origin}/auth/callback?redirectTo=${encodeURIComponent(
+        redirectTo
+      )}`;
 
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: normalized.email,
+      const supabase = createClient();
+      const { data, error } = await supabase.auth.signUp({
+        email: normalizedEmail,
         password,
         options: {
           data: {
-            full_name: normalized.fullName,
-            rut: normalized.rut,
-            phone: normalized.phone,
             user_type: DEFAULT_USER_TYPE,
             seller_tier: DEFAULT_SELLER_TIER,
           },
-          emailRedirectTo: callbackUrl, // PKCE callback
+          emailRedirectTo: callbackUrl,
         },
       });
 
-      console.log("[Register] SignUp response:", {
-        user: data?.user?.id,
-        error: signUpError,
-      });
-
-      if (signUpError) {
-        console.error("[Register] SignUp error:", signUpError);
-        throw signUpError;
+      if (error) {
+        throw error;
       }
 
-      // SaaS flow: user creado pero sin sesión => email confirm
       if (data?.user && !data?.session) {
-        router.push(
-          `/verify-email?email=${encodeURIComponent(normalized.email)}`
-        );
+        router.push(`/verify-email?email=${encodeURIComponent(normalizedEmail)}`);
         return;
       }
 
-      setMessage("¡Cuenta creada y sesión iniciada!");
-      setFullName("");
-      setRut("");
-      setEmail("");
-      setPhone("");
-      setPassword("");
-      setConfirmPassword("");
-      setAcceptedTerms(false);
-      setTouched({});
-    } catch (err) {
+      router.push(redirectTo);
+    } catch (error) {
       setErrors({
-        submit: err?.message || "Ocurrió un error al crear la cuenta.",
+        submit: error?.message || "No se pudo crear la cuenta.",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#f4f7ff] px-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-md p-8">
-        <h1 className="text-2xl font-bold text-center mb-2">Crear cuenta</h1>
-        <p className="text-center text-gray-500 mb-6 text-sm">
-          Completa todos los campos. Validaremos tu RUT (incluyendo dígito verificador).
-        </p>
+    <main className="min-h-screen bg-[#f4f7ff] px-4 py-8">
+      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl items-center justify-center">
+        <div className="grid w-full overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_32px_90px_rgba(15,23,42,0.12)] lg:grid-cols-[1.05fr_0.95fr]">
+          <section className="hidden bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.18),_transparent_34%),linear-gradient(160deg,#0f172a_0%,#172554_55%,#1d4ed8_100%)] px-10 py-12 text-white lg:block">
+            <Link
+              href="/"
+              className="inline-flex items-center rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-white/90 transition hover:bg-white/10"
+            >
+              Volver al inicio
+            </Link>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Nombre */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Nombre</label>
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              onBlur={() => handleBlur("fullName", fullName)}
-              placeholder="Juan Perez"
-              className={`w-full rounded-xl px-4 py-3 outline-none transition ${
-                touched.fullName && errors.fullName
-                  ? "bg-red-50 border border-red-300"
-                  : "bg-[#eaf2ff]"
-              }`}
-              required
-              disabled={loading}
-            />
-            {touched.fullName && errors.fullName && (
-              <p className="text-red-600 text-xs mt-1">{errors.fullName}</p>
-            )}
-          </div>
+            <div className="mt-12 max-w-md">
+              <div className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
+                Registro simple
+              </div>
 
-          {/* RUT */}
-          <div>
-            <label className="block text-sm font-medium mb-1">RUT</label>
-            <input
-              type="text"
-              value={rut}
-              onChange={(e) => {
-                const val = e.target.value.toUpperCase();
-                setRut(val);
-              }}
-              onBlur={() => handleBlur("rut", rut)}
-              placeholder="12.345.678-9"
-              className={`w-full rounded-xl px-4 py-3 outline-none transition ${
-                touched.rut && errors.rut
-                  ? "bg-red-50 border border-red-300"
-                  : "bg-[#eaf2ff]"
-              }`}
-              required
-              disabled={loading}
-            />
-            {touched.rut && errors.rut && (
-              <p className="text-red-600 text-xs mt-1">{errors.rut}</p>
-            )}
-            {!errors.rut && rut && isValidRut(rut) && touched.rut && (
-              <p className="text-green-600 text-xs mt-1">✓ RUT válido</p>
-            )}
-          </div>
+              <h1 className="mt-5 text-4xl font-black leading-tight">
+                Entra rápido. Verifica tus datos solo cuando realmente importe.
+              </h1>
 
-          {/* Email */}
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Correo electrónico
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onBlur={() => handleBlur("email", email)}
-              placeholder="correo@ejemplo.com"
-              className={`w-full rounded-xl px-4 py-3 outline-none transition ${
-                touched.email && errors.email
-                  ? "bg-red-50 border border-red-300"
-                  : "bg-[#eaf2ff]"
-              }`}
-              required
-              disabled={loading}
-            />
-            {touched.email && errors.email && (
-              <p className="text-red-600 text-xs mt-1">{errors.email}</p>
-            )}
-          </div>
-
-          {/* Teléfono */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Teléfono</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => {
-                const val = e.target.value;
-                // Permitir que el usuario escriba libremente, normalizar al blur
-                setPhone(val);
-              }}
-              onFocus={() => {
-                // Si está vacío, prellenar +56 9
-                if (!phone) {
-                  setPhone("+56 9");
-                }
-              }}
-              onBlur={() => {
-                // Normalizar teléfono al blur
-                let phoneToValidate = phone;
-                if (phone) {
-                  const normalized = normalizePhoneCL(phone);
-                  if (normalized) {
-                    // Guardar sin espacios en el state (E.164: +569XXXXXXXX)
-                    setPhone(normalized);
-                    phoneToValidate = normalized;
-                  }
-                }
-                handleBlur("phone", phoneToValidate);
-              }}
-              placeholder="+56 912345678"
-              className={`w-full rounded-xl px-4 py-3 outline-none transition ${
-                touched.phone && errors.phone
-                  ? "bg-red-50 border border-red-300"
-                  : "bg-[#eaf2ff]"
-              }`}
-              required
-              disabled={loading}
-            />
-            {touched.phone && errors.phone && (
-              <p className="text-red-600 text-xs mt-1">{errors.phone}</p>
-            )}
-            <p className="text-gray-400 text-xs mt-1">
-              Ej: 963528995 o +56 9 63528995
-            </p>
-          </div>
-
-          {/* Contraseña */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Contraseña</label>
-            <PasswordField
-              value={password}
-              onChange={(e) => {
-                const value = e.target.value;
-                setPassword(value);
-                setPasswordChecks(validatePasswordStrength(value).checks);
-              }}
-              onBlur={(e) => handleBlur("password", e.target.value)}
-              placeholder="Ej: MiClave!2026"
-              inputClassName={`w-full rounded-xl px-4 py-3 outline-none transition ${
-                touched.password && errors.password
-                  ? "bg-red-50 border border-red-300"
-                  : "bg-white border border-gray-200"
-              }`}
-              required
-              disabled={loading}
-              autoComplete="new-password"
-              name="password"
-              id="password"
-              ariaInvalid={touched.password && errors.password ? "true" : undefined}
-            />
-            {touched.password && errors.password && (
-              <p className="text-red-600 text-xs mt-1">{errors.password}</p>
-            )}
-            <ul className="mt-2 space-y-1 text-xs">
-              {PASSWORD_CHECK_ITEMS.map((item) => {
-                const passed = Boolean(passwordChecks[item.key]);
-                return (
-                  <li
-                    key={item.key}
-                    className={passed ? "text-green-700" : "text-gray-500"}
-                  >
-                    {passed ? "✅" : "❌"} {item.label}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-
-          {/* Repetir Contraseña */}
-          <div>
-            <label className="block text-sm font-medium mb-1">
-              Repetir contraseña
-            </label>
-            <PasswordField
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              onBlur={(e) => handleBlur("confirmPassword", e.target.value)}
-              inputClassName={`w-full rounded-xl px-4 py-3 outline-none transition ${
-                touched.confirmPassword && errors.confirmPassword
-                  ? "bg-red-50 border border-red-300"
-                  : "bg-white border border-gray-200"
-              }`}
-              required
-              disabled={loading}
-              autoComplete="new-password"
-              name="confirmPassword"
-              id="confirmPassword"
-              ariaInvalid={
-                touched.confirmPassword && errors.confirmPassword ? "true" : undefined
-              }
-            />
-            {touched.confirmPassword && errors.confirmPassword && (
-              <p className="text-red-600 text-xs mt-1">
-                {errors.confirmPassword}
+              <p className="mt-4 text-base leading-7 text-blue-100">
+                Crea tu cuenta con correo o acceso social. Nombre, RUT y teléfono
+                quedan para el momento de comprar, vender o usar funciones de confianza.
               </p>
-            )}
-          </div>
 
-          {/* Términos */}
-          <div className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={acceptedTerms}
-              onChange={(e) => {
-                setAcceptedTerms(e.target.checked);
-                if (e.target.checked) {
-                  setErrors({ ...errors });
-                  delete errors.terms;
-                }
-              }}
-              className="mt-1"
-              required
-              disabled={loading}
-            />
-            <div className="text-sm">
-              <p>
-                He leído y acepto los{" "}
-                <a href="/legal/terms" className="text-blue-600 hover:underline">
-                  Términos y Condiciones
-                </a>{" "}
-                de TixSwap.
-              </p>
-              <p className="text-gray-400">
-                Si no aceptas los Términos, no podrás crear tu cuenta.
+              <div className="mt-8 space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4">
+                  <div className="text-sm font-semibold">Menos fricción al entrar</div>
+                  <div className="mt-1 text-sm text-blue-100">
+                    Solo te pedimos lo esencial para activar tu cuenta.
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4">
+                  <div className="text-sm font-semibold">Seguridad donde corresponde</div>
+                  <div className="mt-1 text-sm text-blue-100">
+                    Validamos identidad antes de transacciones, publicaciones y chat.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="px-6 py-8 sm:px-8 lg:px-10 lg:py-10">
+            <div className="mb-8 flex items-center justify-between lg:hidden">
+              <Link
+                href="/"
+                className="text-sm font-medium text-slate-500 transition hover:text-slate-800"
+              >
+                ← Volver
+              </Link>
+              <span className="text-sm font-semibold text-blue-700">TixSwap</span>
+            </div>
+
+            <div className="mx-auto w-full max-w-md">
+              <div className="mb-6">
+                <div className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  Cuenta nueva
+                </div>
+                <h2 className="mt-4 text-3xl font-black text-slate-900">
+                  Crear cuenta
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-500">
+                  Empieza en segundos. Los datos de verificación te los pediremos
+                  solo antes de acciones sensibles.
+                </p>
+              </div>
+
+              <div>
+                <div className="mb-3 text-sm font-semibold text-slate-700">
+                  Iniciar sesión con
+                </div>
+                <SocialAuthButtons
+                  redirectTo={redirectTo}
+                  onError={(message) => setSocialError(message)}
+                />
+                {socialError ? (
+                  <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {socialError}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="my-6 flex items-center gap-3">
+                <div className="h-px flex-1 bg-slate-200" />
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  o crea tu cuenta con correo
+                </span>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Correo electrónico
+                  </label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="tu@correo.cl"
+                    className="tix-input"
+                    autoComplete="email"
+                    disabled={loading}
+                  />
+                  {errors.email ? (
+                    <p className="mt-1 text-xs text-rose-600">{errors.email}</p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Contraseña
+                  </label>
+                  <PasswordField
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Crea una contraseña segura"
+                    inputClassName="tix-input"
+                    required
+                    disabled={loading}
+                    autoComplete="new-password"
+                    name="password"
+                    id="password"
+                  />
+                  {errors.password ? (
+                    <p className="mt-1 text-xs text-rose-600">{errors.password}</p>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-400">
+                      Mínimo {PASSWORD_POLICY.MIN_LEN} caracteres, con mayúscula,
+                      minúscula, número y símbolo.
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <label className="flex items-start gap-3 text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={acceptedTerms}
+                      onChange={(event) => setAcceptedTerms(event.target.checked)}
+                      className="mt-1"
+                      disabled={loading}
+                    />
+                    <span>
+                      Acepto los{" "}
+                      <Link href="/legal/terms" className="font-semibold text-blue-700 hover:underline">
+                        Términos y Condiciones
+                      </Link>{" "}
+                      de TixSwap.
+                    </span>
+                  </label>
+                  {errors.terms ? (
+                    <p className="mt-2 text-xs text-rose-600">{errors.terms}</p>
+                  ) : null}
+                </div>
+
+                {errors.submit ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {errors.submit}
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className="inline-flex w-full items-center justify-center rounded-full bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? "Creando cuenta..." : "Crear cuenta"}
+                </button>
+              </form>
+
+              <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                No te pediremos nombre, RUT ni teléfono al inicio. Eso aparece solo
+                antes de comprar, vender o usar el chat.
+              </div>
+
+              <p className="mt-6 text-center text-sm text-slate-500">
+                ¿Ya tienes cuenta?{" "}
+                <Link href={`/login?redirectTo=${encodeURIComponent(redirectTo)}`} className="font-semibold text-blue-700 hover:underline">
+                  Iniciar sesión
+                </Link>
               </p>
             </div>
-          </div>
-          {errors.terms && (
-            <p className="text-red-600 text-xs">{errors.terms}</p>
-          )}
-
-          {/* Botón Submit */}
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="w-full rounded-xl py-3 font-semibold text-white bg-[#2563eb] hover:bg-[#1d4ed8] transition disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {loading ? "Creando..." : "Crear cuenta"}
-          </button>
-
-          {/* Errores Generales */}
-          {errors.submit && (
-            <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">
-              {errors.submit}
-            </div>
-          )}
-
-          {/* Mensaje de Éxito */}
-          {message && (
-            <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm">
-              {message}
-            </div>
-          )}
-        </form>
-
-        <p className="text-center text-sm text-gray-500 mt-6">
-          ¿Ya tienes cuenta?{" "}
-          <a href="/login" className="text-blue-600 hover:underline">
-            Iniciar sesión
-          </a>
-        </p>
+          </section>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }

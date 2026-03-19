@@ -4,6 +4,11 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getWebpayTransaction } from '@/lib/webpay';
 import { normalizeTier, TIERS, getTierCommissionPercent } from '@/lib/tiers';
+import {
+  buildProfileIncompleteResponse,
+  syncProfileFromAuthUser,
+} from '@/lib/profileCompletionServer';
+import { isProfileReadyForSensitiveActions } from '@/lib/profileCompletion';
 // NOTA: Evitamos depender de helpers externos (ej: getFees) porque en prod puede quedar
 // desfasado con el repo (y explota con "... is not a function"). Calculamos el fee acá.
 
@@ -120,6 +125,14 @@ export async function POST(req) {
     }
 
     console.log('[Webpay] Usuario autenticado:', user.id);
+
+    const buyerProfile = await syncProfileFromAuthUser(admin, user);
+    if (!isProfileReadyForSensitiveActions(buyerProfile)) {
+      return NextResponse.json(
+        buildProfileIncompleteResponse(buyerProfile, 'buy'),
+        { status: 403 }
+      );
+    }
 
     // Ticket
     console.log('[Webpay] Buscando ticket:', ticketId);

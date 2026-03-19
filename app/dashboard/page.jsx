@@ -4,16 +4,16 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { useProfile } from "@/hooks/useProfile";
-import { useOnboardingLogic } from "@/hooks/useOnboardingLogic";
 import WalletSection from "./WalletSection";
 import MisPublicaciones from "./MisPublicaciones";
 import ProfileChangeModal from "@/components/ProfileChangeModal";
 import AvatarUploadSection from "@/components/AvatarUploadSection";
-import OnboardingWelcomeModal from "@/components/OnboardingWelcomeModal";
 import ValidatedBadge from "@/components/ValidatedBadge";
+import ProfileCompletionModal from "@/components/ProfileCompletionModal";
 import { updateProfile, findOpenChangeTicket } from "@/lib/profileActions";
 import { formatRutForDisplay } from "@/lib/formatUtils";
 import { TIERS, tierLabel, normalizeTier } from "@/lib/tiers";
+import { isProfileReadyForSensitiveActions } from "@/lib/profileCompletion";
 
 /* =========================
    Helpers
@@ -167,9 +167,7 @@ function DashboardContent() {
   // cambios de email/rut
   const [showChangeModal, setShowChangeModal] = useState(null); // null | 'email' | 'rut'
   const [openChangeTicket, setOpenChangeTicket] = useState(null);
-
-  // Lógica de onboarding mejorada con rate limit
-  const { shouldShow: shouldShowOnboarding, loading: onboardingLoading, handleDismiss: dismissOnboarding, handleComplete: completeOnboarding } = useOnboardingLogic(profile);
+  const [showProfileCompletionModal, setShowProfileCompletionModal] = useState(false);
 
   // ventas
   const [, setSalesLoading] = useState(false);
@@ -406,6 +404,7 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
     profile?.seller_tier_locked !== undefined
       ? profile?.seller_tier_locked
       : profile?.tier_locked;
+  const profileNeedsCompletion = !isProfileReadyForSensitiveActions(profile);
 
   return (
     <>
@@ -443,14 +442,25 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
                 )}
 
                 {/* Onboarding pendiente */}
-                {shouldShowOnboarding && !onboardingLoading && (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 mb-6">
-                    <div className="text-sm font-bold text-amber-800">
+                {profileNeedsCompletion && (
+                  <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-sm font-bold text-amber-800">
                       ⚠️ Perfil incompleto
+                        </div>
+                        <p className="mt-1 text-xs text-amber-700">
+                          Completa nombre, RUT y teléfono antes de comprar, vender o usar el chat.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowProfileCompletionModal(true)}
+                        className="inline-flex items-center justify-center rounded-full bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700"
+                      >
+                        Completar datos
+                      </button>
                     </div>
-                    <p className="text-xs text-amber-700 mt-1">
-                      Completa tu perfil para comenzar a usar TixSwap.
-                    </p>
                   </div>
                 )}
 
@@ -670,17 +680,20 @@ Fecha: ${formatDateTime(sale?.paid_at || sale?.created_at)}
       {/* =======================
           MODAL ONBOARDING
       ======================= */}
-      {shouldShowOnboarding && !onboardingLoading && (
-        <OnboardingWelcomeModal
+      {showProfileCompletionModal ? (
+        <ProfileCompletionModal
+          actionLabel="usar funciones sensibles"
+          allowClose={true}
+          onClose={() => setShowProfileCompletionModal(false)}
           profile={profile}
-          onClose={() => {
-            dismissOnboarding();
-          }}
-          onComplete={() => {
-            completeOnboarding();
+          user={user}
+          onCompleted={async () => {
+            await refetchProfile();
+            setShowProfileCompletionModal(false);
+            setMsg("Datos de seguridad actualizados ✅");
           }}
         />
-      )}
+      ) : null}
 
       {/* =======================
           MODAL DETALLE VENTA

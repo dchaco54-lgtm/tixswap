@@ -14,7 +14,7 @@ export function useProfile() {
   const [error, setError] = useState(null);
 
   // Función para cargar perfil
-  const fetchProfile = async (userId) => {
+  const fetchProfile = async (user) => {
     try {
       setLoading(true);
       setError(null);
@@ -22,13 +22,38 @@ export function useProfile() {
       const { data, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
-        .single();
+        .eq('id', user.id)
+        .maybeSingle();
 
-      if (fetchError) throw fetchError;
+      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
-      setProfile(data);
-      return data;
+      if (data) {
+        setProfile(data);
+        return data;
+      }
+
+      const ensureRes = await fetch('/api/profile/ensure', { method: 'POST' });
+      const ensureJson = await ensureRes.json().catch(() => ({}));
+
+      if (ensureRes.ok && ensureJson?.profile) {
+        setProfile(ensureJson.profile);
+        return ensureJson.profile;
+      }
+
+      const fallbackProfile = {
+        id: user.id,
+        email: user.email || null,
+        full_name:
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          null,
+        rut: user.user_metadata?.rut || null,
+        phone: user.user_metadata?.phone || null,
+        onboarding_completed: false,
+      };
+
+      setProfile(fallbackProfile);
+      return fallbackProfile;
     } catch (err) {
       console.error('[useProfile] Error fetching:', err);
       setError(err.message);
@@ -42,7 +67,7 @@ export function useProfile() {
   const refetch = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      return await fetchProfile(user.id);
+      return await fetchProfile(user);
     }
   };
 
@@ -63,7 +88,7 @@ export function useProfile() {
       userId = user.id;
 
       // 2. Cargar perfil inicial
-      await fetchProfile(userId);
+      await fetchProfile(user);
 
       // 3. Suscribirse a cambios en tiempo real
       subscription = supabase

@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import ProfileCompletionModal from "@/components/ProfileCompletionModal";
+import { useSensitiveActionGuard } from "@/hooks/useSensitiveActionGuard";
 import { supabase } from "@/lib/supabaseClient";
 import { calculateSellerFee, calculateSellerPayout, formatPrice } from "@/lib/fees";
 
@@ -51,6 +54,14 @@ export default function SellConfirmPage() {
   const [requestSuccess, setRequestSuccess] = useState(false);
   const [requestId, setRequestId] = useState(null);
   const [userRole, setUserRole] = useState("basic"); // Rol del usuario
+  const {
+    user,
+    profile,
+    modalState,
+    ensureAccess,
+    closeGuard,
+    handleCompleted,
+  } = useSensitiveActionGuard({ defaultRedirectTo: "/sell/confirm" });
 
   // cerrar dropdown al click afuera
   useEffect(() => {
@@ -231,7 +242,7 @@ export default function SellConfirmPage() {
     return hasName && hasUpload && Number.isFinite(p) && p > 0 && !publishing;
   }, [draft?.requestedEventName, draft?.ticketUpload?.uploaded, price, publishing]);
 
-  async function handlePublish() {
+  async function runPublishFlow() {
     setError("");
     if (!draft) return;
     if (isRequest) {
@@ -395,6 +406,14 @@ export default function SellConfirmPage() {
     } finally {
       setPublishing(false);
     }
+  }
+
+  async function handlePublish() {
+    await ensureAccess({
+      actionLabel: isRequest ? "enviar tu solicitud de venta" : "publicar tu entrada",
+      onAllowed: runPublishFlow,
+      redirectTo: "/sell/confirm",
+    });
   }
 
   function handleBack() {
@@ -728,6 +747,17 @@ export default function SellConfirmPage() {
           </div>
         </div>
       </div>
+
+      {modalState.open ? (
+        <ProfileCompletionModal
+          actionLabel={modalState.actionLabel}
+          allowClose={modalState.allowClose}
+          onClose={closeGuard}
+          profile={profile}
+          user={user}
+          onCompleted={handleCompleted}
+        />
+      ) : null}
     </div>
   );
 }

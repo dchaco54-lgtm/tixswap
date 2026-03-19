@@ -17,7 +17,7 @@ export async function middleware(req) {
 
   const { data: { session } } = await supabase.auth.getSession();
 
-  const protectedPaths = ['/dashboard', '/sell', '/admin'];
+  const protectedPaths = ['/dashboard', '/sell', '/checkout', '/admin'];
   const isProtected = protectedPaths.some((path) => req.nextUrl.pathname.startsWith(path));
 
   if (isProtected && !session) {
@@ -65,4 +65,3 @@ export async function middleware(req) {
 export const config = {
   matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
 };
-
