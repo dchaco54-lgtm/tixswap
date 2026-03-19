@@ -62,43 +62,24 @@ export default function WhatsAppFloatingButton() {
   }
 
   return (
-    <>
-      <a
-        href={WHATSAPP_URL}
-        aria-label="Escríbenos por WhatsApp"
-        title="¿Tienes dudas? Escríbenos por WhatsApp"
-        onClick={handleClick}
-        className="group fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-4 z-[90] inline-flex items-center gap-3 rounded-full border border-emerald-400/30 bg-white/95 px-3 py-3 shadow-[0_14px_35px_rgba(15,23,42,0.18)] backdrop-blur transition-transform duration-200 hover:scale-[1.03] sm:right-5 sm:bottom-[calc(env(safe-area-inset-bottom)+1.25rem)]"
-      >
-        <span className="pointer-events-none hidden rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all duration-200 group-hover:-translate-x-1 group-hover:opacity-100 md:inline-flex md:opacity-0">
-          ¿Tienes dudas? Escríbenos por WhatsApp
+    <a
+      href={WHATSAPP_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Dudas o consultas, escríbenos por WhatsApp"
+      onClick={handleClick}
+      className="group fixed bottom-5 right-5 z-[90] inline-flex cursor-pointer items-center gap-3 rounded-full border border-emerald-200 bg-white px-3 py-3 shadow-lg transition-all duration-200 hover:scale-105 hover:shadow-2xl"
+    >
+      <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[#25D366] text-white shadow-md">
+        <WhatsAppIcon />
+      </span>
+
+      <span className="pr-1 text-sm font-semibold leading-none text-slate-800">
+        <span className="sm:hidden">Escríbenos</span>
+        <span className="hidden sm:inline">
+          Dudas o consultas, escríbenos 😉
         </span>
-
-        <span className="relative inline-flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-[0_12px_24px_rgba(37,211,102,0.35)]">
-          <span className="absolute inset-0 rounded-full bg-[#25D366]/30 whatsapp-pulse" />
-          <span className="relative flex h-full w-full items-center justify-center">
-            <WhatsAppIcon />
-          </span>
-        </span>
-      </a>
-
-      <style jsx>{`
-        .whatsapp-pulse {
-          animation: whatsappPulse 2.8s ease-in-out infinite;
-        }
-
-        @keyframes whatsappPulse {
-          0%,
-          100% {
-            transform: scale(1);
-            opacity: 0.35;
-          }
-          50% {
-            transform: scale(1.12);
-            opacity: 0;
-          }
-        }
-      `}</style>
-    </>
+      </span>
+    </a>
   );
 }
