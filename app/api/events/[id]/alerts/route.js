@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
+
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
@@ -11,21 +14,51 @@ function isUuid(value) {
   );
 }
 
+function buildChannelsResponse(subscribed) {
+  return {
+    subscribed,
+    channels: {
+      email: true,
+      inApp: true,
+    },
+  };
+}
+
 async function getAuthUser(request) {
   const authHeader = request.headers.get("authorization") || "";
-  const token = authHeader.startsWith("Bearer ")
-    ? authHeader.slice(7).trim()
-    : "";
+  if (authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7).trim();
 
-  if (!token) return { user: null };
-
-  const admin = supabaseAdmin();
-  const { data, error } = await admin.auth.getUser(token);
-  if (error || !data?.user) {
-    return { user: null };
+    if (token) {
+      try {
+        const admin = supabaseAdmin();
+        const { data, error } = await admin.auth.getUser(token);
+        if (!error && data?.user) {
+          return { user: data.user };
+        }
+      } catch {
+        // fallback a cookies
+      }
+    }
   }
 
-  return { user: data.user };
+  const supabase = createRouteHandlerClient({ cookies });
+  const { data } = await supabase.auth.getUser();
+  return { user: data?.user || null };
+}
+
+async function ensureEventExists(admin, eventId) {
+  const { data, error } = await admin
+    .from("events")
+    .select("id")
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || "No pudimos validar el evento.");
+  }
+
+  return Boolean(data?.id);
 }
 
 export async function GET(request, { params }) {
@@ -41,6 +74,11 @@ export async function GET(request, { params }) {
     }
 
     const admin = supabaseAdmin();
+    const eventExists = await ensureEventExists(admin, eventId);
+    if (!eventExists) {
+      return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
+    }
+
     const { data, error } = await admin
       .from("event_alert_subscriptions")
       .select("id")
@@ -52,7 +90,7 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ subscribed: Boolean(data) });
+    return NextResponse.json(buildChannelsResponse(Boolean(data)));
   } catch (err) {
     return NextResponse.json(
       { error: err?.message || "Error inesperado" },
@@ -74,17 +112,29 @@ export async function POST(request, { params }) {
     }
 
     const admin = supabaseAdmin();
-    const payload = { user_id: user.id, event_id: eventId };
+    const eventExists = await ensureEventExists(admin, eventId);
+    if (!eventExists) {
+      return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
+    }
 
     const { error } = await admin
       .from("event_alert_subscriptions")
-      .upsert(payload, { onConflict: "user_id,event_id" });
+      .upsert(
+        {
+          user_id: user.id,
+          event_id: eventId,
+        },
+        { onConflict: "user_id,event_id" }
+      );
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ subscribed: true });
+    return NextResponse.json({
+      success: true,
+      ...buildChannelsResponse(true),
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err?.message || "Error inesperado" },
@@ -106,6 +156,11 @@ export async function DELETE(request, { params }) {
     }
 
     const admin = supabaseAdmin();
+    const eventExists = await ensureEventExists(admin, eventId);
+    if (!eventExists) {
+      return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
+    }
+
     const { error } = await admin
       .from("event_alert_subscriptions")
       .delete()
@@ -116,7 +171,10 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ subscribed: false });
+    return NextResponse.json({
+      success: true,
+      ...buildChannelsResponse(false),
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err?.message || "Error inesperado" },

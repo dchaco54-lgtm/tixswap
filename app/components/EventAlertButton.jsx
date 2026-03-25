@@ -1,138 +1,242 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 const TOAST_TTL = 3000;
+const ALERT_INTENT_PARAM = "subscribeToAlerts";
+
+function normalizeChannels(payload) {
+  return {
+    email: payload?.channels?.email !== false,
+    inApp: payload?.channels?.inApp !== false,
+  };
+}
 
 export default function EventAlertButton({ eventId, eventName = null }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const supabase = useMemo(() => createClient(), []);
 
-  const [user, setUser] = useState(null);
+  const toastTimerRef = useRef(null);
+  const autoSubscriptionRef = useRef(false);
+
+  const [authState, setAuthState] = useState("loading");
   const [loading, setLoading] = useState(true);
   const [subscribed, setSubscribed] = useState(false);
+  const [channels, setChannels] = useState({ email: true, inApp: true });
   const [working, setWorking] = useState(false);
-  const [toast, setToast] = useState(null); // { type, msg }
+  const [helperMessage, setHelperMessage] = useState("");
+  const [toast, setToast] = useState(null);
 
-  const isLoggedIn = !!user;
+  const isLoggedIn = authState === "authenticated";
+  const hasPendingIntent = searchParams?.get(ALERT_INTENT_PARAM) === "1";
 
-  const showToast = (type, msg) => {
+  const showToast = useCallback((type, msg) => {
     setToast({ type, msg });
-    window.clearTimeout(showToast._t);
-    showToast._t = window.setTimeout(() => setToast(null), TOAST_TTL);
-  };
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), TOAST_TTL);
+  }, []);
 
-  const buildRedirectUrl = () => {
-    const qs = searchParams?.toString();
-    const current = `${pathname || "/events"}${qs ? `?${qs}` : ""}`;
-    const redirect = encodeURIComponent(current);
-    const subscribeEvent = encodeURIComponent(String(eventId || ""));
-    return `/login?redirectTo=${redirect}&subscribeEvent=${subscribeEvent}`;
-  };
+  const buildCurrentUrl = useCallback((withIntent = false) => {
+    const params = new URLSearchParams(searchParams?.toString() || "");
+
+    if (withIntent) {
+      params.set(ALERT_INTENT_PARAM, "1");
+    } else {
+      params.delete(ALERT_INTENT_PARAM);
+    }
+
+    const nextPath = pathname || (eventId ? `/events/${eventId}` : "/events");
+    const query = params.toString();
+    return `${nextPath}${query ? `?${query}` : ""}`;
+  }, [eventId, pathname, searchParams]);
+
+  const buildLoginRedirectUrl = useCallback((withIntent = false) => {
+    return `/login?redirectTo=${encodeURIComponent(buildCurrentUrl(withIntent))}`;
+  }, [buildCurrentUrl]);
+
+  const clearPendingIntent = useCallback(() => {
+    if (!hasPendingIntent) return;
+    router.replace(buildCurrentUrl(false), { scroll: false });
+  }, [buildCurrentUrl, hasPendingIntent, router]);
+
+  const syncStatus = useCallback(async () => {
+    if (!eventId) {
+      setLoading(false);
+      setAuthState("anonymous");
+      setSubscribed(false);
+      return;
+    }
+
+    setLoading(true);
+    setHelperMessage("");
+
+    try {
+      const res = await fetch(`/api/events/${eventId}/alerts`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (res.status === 401) {
+        setAuthState("anonymous");
+        setSubscribed(false);
+        setChannels({ email: true, inApp: true });
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(json?.error || "No pudimos cargar el estado de la alerta.");
+      }
+
+      setAuthState("authenticated");
+      setSubscribed(Boolean(json?.subscribed));
+      setChannels(normalizeChannels(json));
+    } catch (err) {
+      console.warn("[EventAlert] status error:", err);
+      setAuthState("unknown");
+      setSubscribed(false);
+      setChannels({ email: true, inApp: true });
+      setHelperMessage(err?.message || "No pudimos cargar el estado de la alerta.");
+    } finally {
+      setLoading(false);
+    }
+  }, [eventId]);
+
+  const updateSubscription = useCallback(async ({
+    method,
+    successMessage,
+    errorMessage,
+    redirectWithIntent = false,
+    clearIntentOnFinish = false,
+  }) => {
+    if (!eventId) return;
+
+    setWorking(true);
+    setHelperMessage("");
+
+    try {
+      const res = await fetch(`/api/events/${eventId}/alerts`, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (res.status === 401) {
+        setAuthState("anonymous");
+        router.push(buildLoginRedirectUrl(redirectWithIntent));
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(json?.error || errorMessage);
+      }
+
+      setAuthState("authenticated");
+      setSubscribed(Boolean(json?.subscribed));
+      setChannels(normalizeChannels(json));
+      showToast("ok", successMessage);
+
+      if (clearIntentOnFinish) {
+        clearPendingIntent();
+      }
+    } catch (err) {
+      console.warn("[EventAlert] update error:", err);
+      const message = err?.message || errorMessage;
+      setHelperMessage(message);
+      showToast("err", message);
+
+      if (clearIntentOnFinish) {
+        clearPendingIntent();
+      }
+    } finally {
+      setWorking(false);
+    }
+  }, [buildLoginRedirectUrl, clearPendingIntent, eventId, router, showToast]);
 
   useEffect(() => {
-    let mounted = true;
+    syncStatus();
+  }, [syncStatus]);
 
-    const load = async () => {
-      if (!eventId) return;
-      setLoading(true);
-      try {
-        const { data } = await supabase.auth.getUser();
-        const nextUser = data?.user || null;
-        if (!mounted) return;
-        setUser(nextUser);
-
-        if (!nextUser) {
-          setSubscribed(false);
-          return;
-        }
-
-        const { data: row, error } = await supabase
-          .from("event_alert_subscriptions")
-          .select("id")
-          .eq("event_id", eventId)
-          .eq("user_id", nextUser.id)
-          .maybeSingle();
-
-        if (error) {
-          console.warn("[EventAlert] load error:", error);
-          setSubscribed(false);
-          return;
-        }
-
-        setSubscribed(Boolean(row));
-      } catch (err) {
-        console.warn("[EventAlert] load error:", err);
-        setSubscribed(false);
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    load();
-
+  useEffect(() => {
     return () => {
-      mounted = false;
+      window.clearTimeout(toastTimerRef.current);
     };
-  }, [eventId, supabase]);
+  }, []);
+
+  useEffect(() => {
+    autoSubscriptionRef.current = false;
+  }, [eventId, hasPendingIntent]);
+
+  useEffect(() => {
+    if (!hasPendingIntent || loading || working) return;
+    if (authState !== "authenticated") return;
+    if (autoSubscriptionRef.current) return;
+
+    autoSubscriptionRef.current = true;
+
+    if (subscribed) {
+      showToast("ok", "La alerta ya estaba activada para este evento.");
+      clearPendingIntent();
+      return;
+    }
+
+    void updateSubscription({
+      method: "POST",
+      successMessage: "Alerta activada. Te avisaremos por correo y dentro de TixSwap.",
+      errorMessage: "No pudimos activar la alerta automáticamente.",
+      redirectWithIntent: true,
+      clearIntentOnFinish: true,
+    });
+  }, [
+    authState,
+    clearPendingIntent,
+    eventId,
+    hasPendingIntent,
+    loading,
+    showToast,
+    subscribed,
+    updateSubscription,
+    working,
+  ]);
 
   const handleClick = async () => {
     if (!eventId) return;
 
-    if (!isLoggedIn) {
-      router.push(buildRedirectUrl());
+    if (!isLoggedIn && authState !== "unknown") {
+      router.push(buildLoginRedirectUrl(true));
       return;
     }
 
-    setWorking(true);
-    try {
-      if (subscribed) {
-        const { error } = await supabase
-          .from("event_alert_subscriptions")
-          .delete()
-          .eq("event_id", eventId)
-          .eq("user_id", user.id);
-
-        if (error) throw error;
-
-        setSubscribed(false);
-        showToast("ok", "Alerta desactivada.");
-      } else {
-        const { error } = await supabase
-          .from("event_alert_subscriptions")
-          .upsert(
-            { user_id: user.id, event_id: eventId },
-            { onConflict: "user_id,event_id" }
-          );
-
-        if (error) throw error;
-
-        setSubscribed(true);
-        showToast("ok", "Alerta activada. Te avisaremos por correo.");
-      }
-    } catch (err) {
-      console.warn("[EventAlert] toggle error:", err);
-      showToast(
-        "err",
-        subscribed
-          ? "No pudimos desactivar la alerta. Intenta nuevamente."
-          : "No pudimos activar la alerta. Intenta nuevamente."
-      );
-    } finally {
-      setWorking(false);
+    if (subscribed) {
+      await updateSubscription({
+        method: "DELETE",
+        successMessage: "Dejaste de recibir alertas para este evento.",
+        errorMessage: "No pudimos desactivar la alerta. Intenta nuevamente.",
+      });
+      return;
     }
+
+    await updateSubscription({
+      method: "POST",
+      successMessage: "Alerta activada. Te avisaremos por correo y dentro de TixSwap.",
+      errorMessage: "No pudimos activar la alerta. Intenta nuevamente.",
+      redirectWithIntent: true,
+    });
   };
 
   const label = loading
     ? "Cargando..."
-    : !isLoggedIn
-    ? "Inicia sesión para activar alerta"
+    : working
+    ? subscribed
+      ? "Desactivando..."
+      : "Activando..."
     : subscribed
-    ? "Alerta activada ✓"
+    ? "Dejar de recibir alertas"
     : "Alerta por nuevas entradas";
 
   const buttonClass = !isLoggedIn
@@ -141,12 +245,25 @@ export default function EventAlertButton({ eventId, eventName = null }) {
     ? "tix-btn-secondary"
     : "tix-btn-primary";
 
-  const ariaLabel = eventName
-    ? `${label} para ${eventName}`
-    : label;
+  const ariaLabel = eventName ? `${label} para ${eventName}` : label;
+
+  const channelSummary = [
+    channels.email ? "correo" : null,
+    channels.inApp ? "notificaciones dentro de TixSwap" : null,
+  ]
+    .filter(Boolean)
+    .join(" y ");
+
+  const defaultHelperMessage = helperMessage
+    ? helperMessage
+    : isLoggedIn && subscribed
+    ? `Recibirás alertas por ${channelSummary || "correo y notificaciones dentro de TixSwap"}.`
+    : isLoggedIn
+    ? "Te avisamos por correo y dentro de TixSwap."
+    : "Inicia sesión para suscribirte por correo y dentro de TixSwap.";
 
   return (
-    <div className="flex flex-col items-start md:items-end gap-1.5">
+    <div className="flex flex-col items-start gap-1.5 md:items-end">
       <button
         type="button"
         className={`${buttonClass} w-full md:w-auto`}
@@ -158,11 +275,7 @@ export default function EventAlertButton({ eventId, eventName = null }) {
       >
         {label}
       </button>
-      {isLoggedIn && (
-        <div className="text-xs text-gray-500">
-          Te avisamos por correo y notificaciones.
-        </div>
-      )}
+      <div className="text-xs text-gray-500">{defaultHelperMessage}</div>
       {toast && (
         <div
           className={

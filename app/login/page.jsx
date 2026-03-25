@@ -231,7 +231,7 @@ function LoginContent() {
             <p>
               ¿Todavía no tienes cuenta?{" "}
               <Link
-                href="/register"
+                href={`/register?redirectTo=${encodeURIComponent(redirectTo)}`}
                 className="text-blue-600 hover:text-blue-700 font-medium"
               >
                 Crear cuenta
