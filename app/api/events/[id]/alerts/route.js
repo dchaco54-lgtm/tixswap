@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 
+import { sendEmail } from "@/lib/email/resend";
+import { templateEventAlertSubscribed } from "@/lib/email/templates";
+import { createNotification } from "@/lib/notifications";
+import { syncProfileFromAuthUser } from "@/lib/profileCompletionServer";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +54,7 @@ async function getAuthUser(request) {
 async function ensureEventExists(admin, eventId) {
   const { data, error } = await admin
     .from("events")
-    .select("id")
+    .select("id,title,venue,city")
     .eq("id", eventId)
     .maybeSingle();
 
@@ -58,7 +62,63 @@ async function ensureEventExists(admin, eventId) {
     throw new Error(error.message || "No pudimos validar el evento.");
   }
 
-  return Boolean(data?.id);
+  return data || null;
+}
+
+async function notifySubscriptionCreated({ admin, user, eventRow }) {
+  try {
+    const profile = await syncProfileFromAuthUser(admin, user).catch(() => null);
+    const eventName = eventRow?.title || "este evento";
+    const eventLink = `/events/${eventRow.id}`;
+
+    await createNotification({
+      userId: user.id,
+      type: "event_alert_subscribed",
+      title: "Alerta activada",
+      body: `Te avisaremos cuando haya nuevas entradas para ${eventName}.`,
+      link: eventLink,
+      metadata: { eventId: eventRow.id },
+    });
+
+    const recipientEmail = profile?.email || user.email || null;
+    if (!recipientEmail) {
+      console.warn("[event-alerts] confirm email skipped:", {
+        eventId: eventRow.id,
+        userId: user.id,
+        reason: "missing_recipient_email",
+      });
+      return;
+    }
+
+    const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || "https://tixswap.cl").replace(/\/+$/, "");
+    const { subject, html } = templateEventAlertSubscribed({
+      recipientName: profile?.full_name || null,
+      eventName: eventRow?.title || null,
+      link: `${baseUrl}${eventLink}`,
+      venue: eventRow?.venue || null,
+      city: eventRow?.city || null,
+    });
+
+    const mailRes = await sendEmail({ to: recipientEmail, subject, html });
+    if (mailRes.ok) return;
+
+    if (mailRes.skipped) {
+      console.warn("[event-alerts] confirm email skipped:", {
+        eventId: eventRow.id,
+        userId: user.id,
+        reason: mailRes.reason || "unknown",
+      });
+      return;
+    }
+
+    console.warn("[event-alerts] confirm email error:", {
+      eventId: eventRow.id,
+      userId: user.id,
+      error: mailRes.error || "unknown",
+    });
+  } catch (err) {
+    console.warn("[event-alerts] confirm notification error:", err);
+  }
 }
 
 export async function GET(request, { params }) {
@@ -74,8 +134,8 @@ export async function GET(request, { params }) {
     }
 
     const admin = supabaseAdmin();
-    const eventExists = await ensureEventExists(admin, eventId);
-    if (!eventExists) {
+    const eventRow = await ensureEventExists(admin, eventId);
+    if (!eventRow) {
       return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
     }
 
@@ -112,9 +172,20 @@ export async function POST(request, { params }) {
     }
 
     const admin = supabaseAdmin();
-    const eventExists = await ensureEventExists(admin, eventId);
-    if (!eventExists) {
+    const eventRow = await ensureEventExists(admin, eventId);
+    if (!eventRow) {
       return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
+    }
+
+    const { data: existingSub, error: existingErr } = await admin
+      .from("event_alert_subscriptions")
+      .select("id")
+      .eq("event_id", eventId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (existingErr) {
+      return NextResponse.json({ error: existingErr.message }, { status: 500 });
     }
 
     const { error } = await admin
@@ -129,6 +200,10 @@ export async function POST(request, { params }) {
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    if (!existingSub?.id) {
+      await notifySubscriptionCreated({ admin, user, eventRow });
     }
 
     return NextResponse.json({
@@ -156,8 +231,8 @@ export async function DELETE(request, { params }) {
     }
 
     const admin = supabaseAdmin();
-    const eventExists = await ensureEventExists(admin, eventId);
-    if (!eventExists) {
+    const eventRow = await ensureEventExists(admin, eventId);
+    if (!eventRow) {
       return NextResponse.json({ error: "Evento no encontrado" }, { status: 404 });
     }
 

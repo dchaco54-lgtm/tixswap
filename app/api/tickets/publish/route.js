@@ -14,6 +14,76 @@ import {
 } from '@/lib/profileCompletionServer';
 import { isProfileReadyForSensitiveActions } from '@/lib/profileCompletion';
 
+async function loadSubscriberContacts(admin, subscriberIds) {
+  if (!subscriberIds.length) return new Map();
+
+  const { data: profiles, error: profErr } = await admin
+    .from('profiles')
+    .select('id,full_name,email')
+    .in('id', subscriberIds);
+
+  if (profErr) {
+    console.warn('[Publish] Error cargando perfiles suscriptores:', profErr);
+  }
+
+  const byId = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  const missingEmailIds = subscriberIds.filter((userId) => !byId.get(userId)?.email);
+
+  await Promise.all(
+    missingEmailIds.map(async (userId) => {
+      try {
+        const { data, error } = await admin.auth.admin.getUserById(userId);
+        if (error || !data?.user) {
+          if (error) {
+            console.warn('[Publish] Error cargando auth user del suscriptor:', {
+              userId,
+              message: error.message,
+            });
+          }
+          return;
+        }
+
+        const authUser = data.user;
+        const current = byId.get(userId) || { id: userId, full_name: null, email: null };
+        const nextEmail = current.email || authUser.email || null;
+        const nextFullName =
+          current.full_name ||
+          authUser.user_metadata?.full_name ||
+          authUser.user_metadata?.name ||
+          null;
+
+        byId.set(userId, {
+          id: userId,
+          full_name: nextFullName,
+          email: nextEmail,
+        });
+
+        if (!current.email && nextEmail) {
+          await admin
+            .from('profiles')
+            .update({ email: nextEmail })
+            .eq('id', userId);
+        }
+      } catch (err) {
+        console.warn('[Publish] Error resolviendo email del suscriptor:', {
+          userId,
+          err,
+        });
+      }
+    })
+  );
+
+  return byId;
+}
+
+function logSkippedEmail(context, meta, mailRes) {
+  if (!mailRes?.skipped) return;
+  console.warn(`${context} skipped:`, {
+    ...meta,
+    reason: mailRes.reason || 'unknown',
+  });
+}
+
 export async function POST(request) {
   try {
     // Obtener token del header (nunca confiar en userId del body)
@@ -274,16 +344,7 @@ export async function POST(request) {
             .filter((uid) => uid !== sellerId);
 
           if (subscriberIds.length) {
-            const { data: profiles, error: profErr } = await supabase
-              .from('profiles')
-              .select('id,full_name,email')
-              .in('id', subscriberIds);
-
-            if (profErr) {
-              console.warn('[Publish] Error cargando perfiles suscriptores:', profErr);
-            }
-
-            const byId = new Map((profiles || []).map((p) => [p.id, p]));
+            const byId = await loadSubscriberContacts(supabase, subscriberIds);
             const baseUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://tixswap.cl').replace(/\/+$/, '');
             const eventLink = `${baseUrl}/events/${eventId}`;
             const notifBody = eventName
@@ -292,7 +353,7 @@ export async function POST(request) {
 
             await Promise.all(
               subscriberIds.map(async (userId) => {
-                await createNotification({
+                const notificationRes = await createNotification({
                   userId,
                   type: 'event_new_ticket',
                   title: 'Nueva entrada publicada',
@@ -301,26 +362,63 @@ export async function POST(request) {
                   metadata: { eventId, ticketId: created.id },
                 });
 
+                let delivered = Boolean(notificationRes?.ok);
+
                 const prof = byId.get(userId);
                 const email = prof?.email || null;
-                if (!email) return;
+                if (!email) {
+                  console.warn('[Publish] Suscriptor sin email, se omite alerta mail:', {
+                    userId,
+                    eventId,
+                    ticketId: created.id,
+                  });
+                } else {
+                  const { subject, html } = templateEventNewTicketAlert({
+                    recipientName: prof?.full_name || null,
+                    eventName,
+                    price: created.price,
+                    link: eventLink,
+                    sector: created.sector || sector || null,
+                    sectionLabel: created.section_label || null,
+                    rowLabel: created.row_label || fila || null,
+                    seatLabel: created.seat_label || asiento || null,
+                    venue: eventVenue,
+                    city: eventCity,
+                  });
 
-                const { subject, html } = templateEventNewTicketAlert({
-                  recipientName: prof?.full_name || null,
-                  eventName,
-                  price: created.price,
-                  link: eventLink,
-                  sector: created.sector || sector || null,
-                  sectionLabel: created.section_label || null,
-                  rowLabel: created.row_label || fila || null,
-                  seatLabel: created.seat_label || asiento || null,
-                  venue: eventVenue,
-                  city: eventCity,
-                });
+                  const mailRes = await sendEmail({ to: email, subject, html });
+                  if (mailRes.ok) {
+                    delivered = true;
+                  } else if (!mailRes.skipped) {
+                    console.warn('[Publish] Error enviando alerta mail:', {
+                      userId,
+                      eventId,
+                      ticketId: created.id,
+                      error: mailRes.error,
+                    });
+                  } else {
+                    logSkippedEmail('[Publish] Alerta mail', {
+                      userId,
+                      eventId,
+                      ticketId: created.id,
+                    }, mailRes);
+                  }
+                }
 
-                const mailRes = await sendEmail({ to: email, subject, html });
-                if (!mailRes.ok && !mailRes.skipped) {
-                  console.warn('[Publish] Error enviando alerta mail:', mailRes.error);
+                if (delivered) {
+                  const { error: updateSubErr } = await supabase
+                    .from('event_alert_subscriptions')
+                    .update({ last_notified_at: new Date().toISOString() })
+                    .eq('event_id', eventId)
+                    .eq('user_id', userId);
+
+                  if (updateSubErr) {
+                    console.warn('[Publish] Error actualizando last_notified_at:', {
+                      userId,
+                      eventId,
+                      message: updateSubErr.message,
+                    });
+                  }
                 }
               })
             );
