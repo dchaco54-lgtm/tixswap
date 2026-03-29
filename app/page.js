@@ -90,15 +90,21 @@ export default function HomePage() {
   useEffect(() => {
     const loadEvents = async () => {
       setEventsLoading(true);
-      const { data, error } = await supabase
-        .from("events")
-        .select("*")
-        .order("starts_at", { ascending: true, nullsFirst: false });
+      try {
+        const res = await fetch("/api/events", { cache: "no-store" });
+        const json = await res.json().catch(() => ({}));
 
-      if (!error) {
-        const sorted = sortEventsByProximity(Array.isArray(data) ? data : []);
+        if (!res.ok) {
+          throw new Error(json?.details || json?.error || "No se pudieron cargar los eventos.");
+        }
+
+        const sorted = sortEventsByProximity(Array.isArray(json?.events) ? json.events : []);
         setEvents(sorted);
+      } catch (error) {
+        console.error("[Home] loadEvents error:", error);
+        setEvents([]);
       }
+
       setEventsLoading(false);
     };
 

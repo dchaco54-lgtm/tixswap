@@ -1,5 +1,7 @@
 // app/components/EventCard.jsx
 import Link from "next/link";
+import EventAlertButton from "./EventAlertButton";
+import { formatCLP } from "@/lib/format";
 
 function formatEventDate(iso) {
   if (!iso) return "";
@@ -23,6 +25,20 @@ export default function EventCard({ event }) {
   const venue = event?.venue || event?.location || "";
   const city = event?.city || "";
   const imageUrl = (event?.image_url || "").trim();
+  const availableTickets = Number.isFinite(Number(event?.availableTickets))
+    ? Number(event.availableTickets)
+    : Number.isFinite(Number(event?.availableListings))
+    ? Number(event.availableListings)
+    : 0;
+  const minTicketPrice = Number.isFinite(Number(event?.minTicketPrice))
+    ? Number(event.minTicketPrice)
+    : null;
+  const hasTickets = availableTickets > 0;
+  const availabilityLabel = hasTickets
+    ? availableTickets === 1
+      ? "1 entrada disponible"
+      : `${availableTickets} entradas disponibles`
+    : "Sin entradas por ahora";
 
   return (
     <div className="bg-white rounded-xl border shadow-sm p-6 flex flex-col justify-between">
@@ -61,14 +77,34 @@ export default function EventCard({ event }) {
             </p>
           )}
         </div>
+
+        <div className="mt-5">
+          <p className={hasTickets ? "text-sm font-medium text-blue-700" : "text-sm text-gray-500"}>
+            {hasTickets && minTicketPrice != null
+              ? `Desde ${formatCLP(minTicketPrice)} · ${availabilityLabel}`
+              : availabilityLabel}
+          </p>
+        </div>
       </div>
 
-      <Link
-        href={`/events/${event.id}`}
-        className="mt-6 text-blue-600 font-medium hover:underline"
-      >
-        Ver entradas disponibles →
-      </Link>
+      <div className="mt-6">
+        {hasTickets ? (
+          <Link
+            href={`/events/${event.id}`}
+            className="text-blue-600 font-medium hover:underline"
+          >
+            Ver entradas disponibles →
+          </Link>
+        ) : (
+          <EventAlertButton
+            eventId={event?.id}
+            eventName={title}
+            compact
+            hideHelper
+            allowUnsubscribe={false}
+          />
+        )}
+      </div>
     </div>
   );
 }

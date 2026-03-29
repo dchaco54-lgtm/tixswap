@@ -25,6 +25,34 @@ async function columnExists(supabase, table, column) {
   return !error;
 }
 
+function buildAvailabilityMap(tickets = []) {
+  const byEvent = new Map();
+
+  for (const ticket of tickets) {
+    const eventId = ticket?.event_id;
+    if (!eventId) continue;
+
+    const current = byEvent.get(eventId) || {
+      availableTickets: 0,
+      minTicketPrice: null,
+    };
+    const parsedPrice = Number(ticket?.price);
+    const price = Number.isFinite(parsedPrice) ? parsedPrice : null;
+
+    current.availableTickets += 1;
+    if (price != null) {
+      current.minTicketPrice =
+        current.minTicketPrice == null
+          ? price
+          : Math.min(current.minTicketPrice, price);
+    }
+
+    byEvent.set(eventId, current);
+  }
+
+  return byEvent;
+}
+
 export async function GET() {
   try {
     const supabase = getSupabaseAdmin();
@@ -53,8 +81,39 @@ export async function GET() {
       );
     }
 
+    const events = Array.isArray(data) ? data : [];
+    const eventIds = events.map((event) => event?.id).filter(Boolean);
+
+    let availabilityMap = new Map();
+    if (eventIds.length > 0) {
+      const { data: tickets, error: ticketsError } = await supabase
+        .from("tickets")
+        .select("event_id, price")
+        .in("event_id", eventIds)
+        .in("status", ["active", "available"]);
+
+      if (ticketsError) {
+        console.error("[api/events] availability error:", ticketsError);
+      } else {
+        availabilityMap = buildAvailabilityMap(tickets);
+      }
+    }
+
+    const eventsWithAvailability = events.map((event) => {
+      const availability = availabilityMap.get(event.id) || {
+        availableTickets: 0,
+        minTicketPrice: null,
+      };
+
+      return {
+        ...event,
+        availableTickets: availability.availableTickets,
+        minTicketPrice: availability.minTicketPrice,
+      };
+    });
+
     return NextResponse.json(
-      { events: data ?? [] },
+      { events: eventsWithAvailability },
       {
         headers: {
           "Cache-Control": "no-store, must-revalidate, max-age=0",

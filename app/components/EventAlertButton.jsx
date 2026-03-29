@@ -13,7 +13,13 @@ function normalizeChannels(payload) {
   };
 }
 
-export default function EventAlertButton({ eventId, eventName = null }) {
+export default function EventAlertButton({
+  eventId,
+  eventName = null,
+  compact = false,
+  hideHelper = false,
+  allowUnsubscribe = true,
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -213,6 +219,8 @@ export default function EventAlertButton({ eventId, eventName = null }) {
     }
 
     if (subscribed) {
+      if (!allowUnsubscribe) return;
+
       await updateSubscription({
         method: "DELETE",
         successMessage: "Dejaste de recibir alertas para este evento.",
@@ -229,7 +237,15 @@ export default function EventAlertButton({ eventId, eventName = null }) {
     });
   };
 
-  const label = loading
+  const label = compact
+    ? loading
+      ? "Cargando..."
+      : working
+      ? "Guardando..."
+      : subscribed
+      ? "Alerta activada"
+      : "Activar alerta"
+    : loading
     ? "Cargando..."
     : working
     ? subscribed
@@ -239,7 +255,11 @@ export default function EventAlertButton({ eventId, eventName = null }) {
     ? "Dejar de recibir alertas"
     : "Alerta por nuevas entradas";
 
-  const buttonClass = !isLoggedIn
+  const buttonClass = compact
+    ? subscribed && !allowUnsubscribe
+      ? "inline-flex items-center text-sm font-medium text-slate-500 cursor-default"
+      : "inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline underline-offset-4 disabled:opacity-60 disabled:cursor-not-allowed"
+    : !isLoggedIn
     ? "tix-btn-secondary"
     : subscribed
     ? "tix-btn-secondary"
@@ -262,21 +282,25 @@ export default function EventAlertButton({ eventId, eventName = null }) {
     ? "Te avisamos por correo y dentro de TixSwap."
     : "Inicia sesión para suscribirte por correo y dentro de TixSwap.";
 
+  const showHelper = !hideHelper && defaultHelperMessage;
+  const shouldShowToast = !compact && toast;
+  const isDisabled = loading || working || (compact && subscribed && !allowUnsubscribe);
+
   return (
-    <div className="flex flex-col items-start gap-1.5 md:items-end">
+    <div className={compact ? "flex flex-col items-start gap-1" : "flex flex-col items-start gap-1.5 md:items-end"}>
       <button
         type="button"
-        className={`${buttonClass} w-full md:w-auto`}
+        className={`${buttonClass}${compact ? "" : " w-full md:w-auto"}`}
         onClick={handleClick}
-        disabled={loading || working}
+        disabled={isDisabled}
         aria-label={ariaLabel}
         aria-pressed={subscribed}
         aria-busy={loading || working}
       >
         {label}
       </button>
-      <div className="text-xs text-gray-500">{defaultHelperMessage}</div>
-      {toast && (
+      {showHelper ? <div className="text-xs text-gray-500">{defaultHelperMessage}</div> : null}
+      {shouldShowToast && (
         <div
           className={
             toast.type === "err"
@@ -287,6 +311,9 @@ export default function EventAlertButton({ eventId, eventName = null }) {
           {toast.msg}
         </div>
       )}
+      {compact && helperMessage ? (
+        <div className="text-xs text-red-600">{helperMessage}</div>
+      ) : null}
     </div>
   );
 }
