@@ -19,6 +19,23 @@ function formatEventDate(iso) {
   }
 }
 
+function getAvailabilityLabel({ availableTickets, minTicketPrice }) {
+  if (availableTickets <= 0) return "Sin entradas por ahora";
+
+  const quantityLabel =
+    availableTickets === 1
+      ? "1 entrada disponible"
+      : `${availableTickets} entradas disponibles`;
+
+  return minTicketPrice != null
+    ? `Desde ${formatCLP(minTicketPrice)} · ${quantityLabel}`
+    : quantityLabel;
+}
+
+function getPrimaryCtaLabel(availableTickets) {
+  return availableTickets > 0 ? "Ver entradas disponibles →" : "Ver evento →";
+}
+
 export default function EventCard({ event }) {
   const title = event?.title || event?.name || "Evento";
   const dateLabel = formatEventDate(event?.starts_at || event?.date);
@@ -34,15 +51,13 @@ export default function EventCard({ event }) {
     ? Number(event.minTicketPrice)
     : null;
   const hasTickets = availableTickets > 0;
-  const availabilityLabel = hasTickets
-    ? availableTickets === 1
-      ? "1 entrada disponible"
-      : `${availableTickets} entradas disponibles`
-    : "Sin entradas por ahora";
+  const eventHref = `/events/${event.id}`;
+  const availabilityLabel = getAvailabilityLabel({ availableTickets, minTicketPrice });
+  const primaryCtaLabel = getPrimaryCtaLabel(availableTickets);
 
   return (
     <div className="bg-white rounded-xl border shadow-sm p-6 flex flex-col justify-between">
-      <div>
+      <Link href={eventHref} className="block">
         {/* ✅ Imagen (solo se agrega, no rompe el diseño) */}
         <div className="w-full h-40 rounded-xl bg-gray-100 overflow-hidden flex items-center justify-center mb-4">
           {imageUrl ? (
@@ -80,22 +95,16 @@ export default function EventCard({ event }) {
 
         <div className="mt-5">
           <p className={hasTickets ? "text-sm font-medium text-blue-700" : "text-sm text-gray-500"}>
-            {hasTickets && minTicketPrice != null
-              ? `Desde ${formatCLP(minTicketPrice)} · ${availabilityLabel}`
-              : availabilityLabel}
+            {availabilityLabel}
           </p>
         </div>
-      </div>
+      </Link>
 
-      <div className="mt-6">
-        {hasTickets ? (
-          <Link
-            href={`/events/${event.id}`}
-            className="text-blue-600 font-medium hover:underline"
-          >
-            Ver entradas disponibles →
-          </Link>
-        ) : (
+      <div className="mt-6 flex flex-col items-start gap-2">
+        <Link href={eventHref} className="text-blue-600 font-medium hover:underline">
+          {primaryCtaLabel}
+        </Link>
+        {!hasTickets ? (
           <EventAlertButton
             eventId={event?.id}
             eventName={title}
@@ -103,7 +112,7 @@ export default function EventCard({ event }) {
             hideHelper
             allowUnsubscribe={false}
           />
-        )}
+        ) : null}
       </div>
     </div>
   );
