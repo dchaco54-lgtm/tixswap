@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { calculateSellerFee, calculateSellerPayout } from '@/lib/fees';
 import { detectTicketColumns } from '@/lib/db/ticketSchema';
+import { tableHasColumn } from '@/lib/db/schemaColumns';
 import { sendEmail } from '@/lib/email/resend';
 import { templateTicketPublished, templateEventNewTicketAlert } from '@/lib/email/templates';
 import { createNotification } from '@/lib/notifications';
@@ -139,13 +140,40 @@ export async function POST(request) {
     });
 
     const columns = await detectTicketColumns(supabase);
+    const hasTicketUploadsEventId = await tableHasColumn(supabase, 'ticket_uploads', 'event_id');
+    if (!hasTicketUploadsEventId) {
+      console.warn('[tickets/publish] ticket_uploads.event_id missing, using legacy-compatible flow');
+    }
     let upload = null;
     if (ticketUploadId) {
+      const uploadSelect = [
+        'id',
+        'user_id',
+        'seller_id',
+        'ticket_id',
+        'is_nominated',
+        'is_nominada',
+        'storage_bucket',
+        'storage_path',
+        'storage_path_staging',
+        'storage_path_final',
+        'original_name',
+        'filename_original',
+        'mime_type',
+        'file_size',
+        'size_bytes',
+        'validation_status',
+        'validation_reason',
+        'provider',
+        'status',
+        'sha256',
+        'file_hash',
+      ];
+      if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, 'event_id');
+
       const { data: uploadRow, error: uploadErr } = await supabase
         .from('ticket_uploads')
-        .select(
-          'id,user_id,seller_id,event_id,ticket_id,is_nominated,is_nominada,storage_bucket,storage_path,storage_path_staging,storage_path_final,original_name,filename_original,mime_type,file_size,size_bytes,validation_status,validation_reason,provider,status,sha256,file_hash'
-        )
+        .select(uploadSelect.join(','))
         .eq('id', ticketUploadId)
         .maybeSingle();
 

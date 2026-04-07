@@ -5,6 +5,7 @@ import {
   createTicketUploadSignedUrl,
   getTicketUploadEffectivePath,
 } from "@/lib/ticketUploads";
+import { tableHasColumn } from "@/lib/db/schemaColumns";
 import { ensureRequestPlaceholderEvent } from "@/lib/requestEventPlaceholders";
 
 export const runtime = "nodejs"; // necesario para crypto + Buffer
@@ -83,14 +84,38 @@ export async function POST(req) {
 
     // Hash anti-duplicado
     const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
+    const hasTicketUploadsEventId = await tableHasColumn(
+      supabaseAdmin,
+      "ticket_uploads",
+      "event_id"
+    );
+
+    if (!hasTicketUploadsEventId) {
+      console.warn(
+        "[tickets/register] ticket_uploads.event_id missing, using legacy-compatible flow"
+      );
+    }
 
     // Tabla real usa file_hash (y también tiene sha256, pero históricamente lo tienes null)
     // 1) Duplicado en DB
+    const duplicateSelect = [
+      "id",
+      "file_hash",
+      "sha256",
+      "storage_bucket",
+      "storage_path",
+      "storage_path_staging",
+      "storage_path_final",
+      "created_at",
+    ];
+
+    if (hasTicketUploadsEventId) {
+      duplicateSelect.splice(1, 0, "event_id");
+    }
+
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("ticket_uploads")
-      .select(
-        "id,event_id,file_hash,sha256,storage_bucket,storage_path,storage_path_staging,storage_path_final,created_at"
-      )
+      .select(duplicateSelect.join(","))
       .eq("file_hash", sha256)
       .maybeSingle();
 
@@ -121,7 +146,7 @@ export async function POST(req) {
           sha256,
           ticketUploadId: existing.id,
           uploadId: existing.id,
-          eventId: existing.event_id || eventId || null,
+          eventId: existing?.event_id ?? eventId ?? null,
           storagePath: effectivePath,
           signedUrl,
           filePath: effectivePath,
@@ -160,7 +185,6 @@ export async function POST(req) {
     // 3) Insert DB (ALINEADO A TU ESQUEMA REAL)
     const insertPayload = {
       user_id: userId || null,
-      event_id: eventId,
       ticket_id: null,
       file_hash: sha256,
       sha256: sha256, // existe en tu tabla, aunque antes lo dejabas null
@@ -193,6 +217,10 @@ export async function POST(req) {
         },
       },
     };
+
+    if (hasTicketUploadsEventId) {
+      insertPayload.event_id = eventId;
+    }
 
     const { data: inserted, error: insertErr } = await supabaseAdmin
       .from("ticket_uploads")
