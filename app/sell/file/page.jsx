@@ -7,6 +7,12 @@ import { BrowserQRCodeReader } from "@zxing/browser";
 
 const DRAFT_KEY = "tixswap_sell_draft_v1";
 
+function looksLikePdf(file) {
+  const mime = String(file?.type || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  return mime === "application/pdf" || name.endsWith(".pdf");
+}
+
 export default function SellFilePage() {
   const router = useRouter();
 
@@ -132,7 +138,7 @@ export default function SellFilePage() {
     setSummary(null);
 
     if (!file) return setError("Selecciona un PDF primero.");
-    if (file.type !== "application/pdf") return setError("El archivo debe ser PDF.");
+    if (!looksLikePdf(file)) return setError("El archivo debe ser PDF.");
     if (file.size > 8 * 1024 * 1024) return setError("Máx 8MB.");
 
     setUploading(true);
@@ -190,7 +196,9 @@ export default function SellFilePage() {
         // duplicado
         if (res.status === 409 || data?.error === "DUPLICATE") {
           setError(data?.message || "Este ticket ya fue subido antes.");
-          if (data?.existing?.viewUrl) setViewUrl(data.existing.viewUrl);
+          if (data?.existing?.viewUrl || data?.viewUrl) {
+            setViewUrl(data?.existing?.viewUrl || data?.viewUrl || null);
+          }
           if (data?.sha256) setSha256(data.sha256);
           return;
         }

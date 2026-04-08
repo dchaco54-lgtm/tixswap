@@ -15,6 +15,12 @@ function getEnv(name) {
   return v && String(v).trim().length ? String(v).trim() : null;
 }
 
+function looksLikePdf(file) {
+  const mime = String(file?.type || "").toLowerCase();
+  const name = String(file?.name || "").toLowerCase();
+  return mime === "application/pdf" || name.endsWith(".pdf");
+}
+
 export async function POST(req) {
   try {
     const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL");
@@ -36,8 +42,8 @@ export async function POST(req) {
     if (!(file instanceof File)) return json({ error: "Invalid file" }, 400);
 
     // Validación básica
-    if (file.type !== "application/pdf") {
-      return json({ error: "Solo PDF (application/pdf)" }, 400);
+    if (!looksLikePdf(file)) {
+      return json({ error: "Solo PDF" }, 400);
     }
     const maxBytes = 8 * 1024 * 1024;
     if (file.size > maxBytes) {
