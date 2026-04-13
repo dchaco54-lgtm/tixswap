@@ -54,10 +54,10 @@ export default function WhatsAppFloatingButton() {
     : "bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] right-[max(0.75rem,env(safe-area-inset-right))] sm:bottom-6 sm:right-5";
 
   const buttonClass = isHome
-    ? "inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-full border border-emerald-200 bg-white/96 px-2.5 py-2 pr-4 shadow-lg transition-all duration-200 hover:scale-[1.02] hover:shadow-xl sm:gap-3 sm:px-3 sm:py-2.5 sm:pr-5"
-    : "inline-flex h-12 w-12 items-center justify-center rounded-full border border-emerald-200 bg-white/96 shadow-lg transition-all duration-200 hover:scale-[1.02] hover:shadow-xl sm:h-[52px] sm:w-[52px]";
+    ? "inline-flex max-w-[calc(100vw-1.5rem)] items-center gap-1.5 rounded-full border border-emerald-200 bg-blue-50 px-2 py-1 pr-3 shadow-lg transition-all duration-200 hover:scale-[1.02] hover:shadow-xl sm:gap-3 sm:bg-blue-50 sm:px-3 sm:py-2.5 sm:pr-5"
+    : "inline-flex h-12 w-12 items-center justify-center rounded-full border border-emerald-200 bg-blue-50 shadow-lg transition-all duration-200 hover:scale-[1.02] hover:shadow-xl sm:h-[52px] sm:w-[52px]";
 
-  const logoSize = isHome ? 40 : 38;
+  const logoSize = isHome ? 30 : 38;
 
   return (
     <a
@@ -75,13 +75,13 @@ export default function WhatsAppFloatingButton() {
           aria-hidden="true"
           width={logoSize}
           height={logoSize}
-          className="h-9 w-9 sm:h-10 sm:w-10"
+          className="h-7 w-7 sm:h-10 sm:w-10"
           priority={isHome}
         />
       </span>
 
       {isHome ? (
-        <span className="pr-0.5 text-xs font-semibold leading-tight text-slate-800 sm:text-sm">
+        <span className="pr-0.5 text-[11px] font-semibold leading-tight text-slate-800 sm:text-sm">
           Dudas o consultas, escríbenos
         </span>
       ) : null}
