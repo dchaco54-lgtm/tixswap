@@ -85,6 +85,21 @@ export default function RegisterPage() {
         return;
       }
 
+      const emailCheckRes = await fetch("/api/auth/check-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail }),
+      });
+      const emailCheckJson = await emailCheckRes.json().catch(() => ({}));
+
+      if (emailCheckRes.ok && emailCheckJson?.exists) {
+        setErrors({
+          submit:
+            "Ese correo ya tiene una cuenta en TixSwap. Si entraste antes con Google, usa ese mismo acceso para iniciar sesión.",
+        });
+        return;
+      }
+
       const authBaseUrl = (
         process.env.NEXT_PUBLIC_SITE_URL ||
         process.env.NEXT_PUBLIC_APP_URL ||
