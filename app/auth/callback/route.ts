@@ -6,12 +6,12 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { syncProfileFromAuthUser } from '@/lib/profileCompletionServer';
 
 /**
- * Auth Callback Route Handler (PKCE)
+ * Auth Callback Route Handler
  * 
  * Este endpoint procesa la confirmación de email desde Supabase.
  * Flujo:
- * 1. Usuario recibe email con link: /auth/callback?code=xxx&redirectTo=/dashboard
- * 2. Route handler intercambia el code por sesión (PKCE)
+ * 1. Usuario recibe email con link: /auth/callback?token_hash=xxx&type=email
+ * 2. Route handler verifica el token hash o intercambia el code por sesión
  * 3. Sesión se guarda en cookies (SSR-friendly)
  * 4. Redirige a redirectTo o /dashboard
  */
@@ -19,14 +19,25 @@ import { syncProfileFromAuthUser } from '@/lib/profileCompletionServer';
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get('code');
-  const token = requestUrl.searchParams.get('token'); // Implicit flow fallback
+  const tokenHash =
+    requestUrl.searchParams.get('token_hash') ||
+    requestUrl.searchParams.get('token');
   const type = requestUrl.searchParams.get('type');
-  const redirectTo = requestUrl.searchParams.get('redirectTo') || '/dashboard';
-  const origin = process.env.NEXT_PUBLIC_APP_URL || requestUrl.origin;
+  const redirectToParam =
+    requestUrl.searchParams.get('redirectTo') ||
+    requestUrl.searchParams.get('redirect_to') ||
+    requestUrl.searchParams.get('next') ||
+    '/dashboard';
+  const redirectTo = redirectToParam.startsWith('/') ? redirectToParam : '/dashboard';
+  const origin = (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    requestUrl.origin
+  ).replace(/\/+$/, "");
 
   console.log('[AuthCallback] Iniciando callback:', {
     code: code ? `${code.substring(0, 20)}...` : 'null',
-    token: token ? `${token.substring(0, 20)}...` : 'null',
+    tokenHash: tokenHash ? `${tokenHash.substring(0, 20)}...` : 'null',
     type,
     redirectTo,
     origin,
@@ -34,10 +45,10 @@ export async function GET(request: NextRequest) {
   });
 
   // ============================================
-  // 1. VALIDAR CODE O TOKEN
+  // 1. VALIDAR CODE O TOKEN_HASH
   // ============================================
-  if (!code && !token) {
-    console.warn('[AuthCallback] No code ni token en URL');
+  if (!code && !tokenHash) {
+    console.warn('[AuthCallback] No code ni token_hash en URL');
     return NextResponse.redirect(
       new URL(`/login?error=no_code&message=${encodeURIComponent('Link de confirmación inválido. Verifica que hayas usado el link completo del email.')}`, origin)
     );
@@ -51,15 +62,18 @@ export async function GET(request: NextRequest) {
     const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
     // ============================================
-    // 3. INTERCAMBIAR CODE/TOKEN POR SESIÓN
+    // 3. INTERCAMBIAR CODE O VERIFICAR TOKEN_HASH
     // ============================================
     
     type OtpType =
+      | "email"
       | "signup"
       | "invite"
       | "magiclink"
       | "recovery"
       | "email_change";
+
+    const otpType = (type || 'email') as OtpType;
     
     if (code) {
       // PKCE flow (preferred)
@@ -74,33 +88,56 @@ export async function GET(request: NextRequest) {
           name: exchangeError.name,
         });
 
-        const errorMessages: { [key: string]: string } = {
-          'invalid_code': 'El link de confirmación expiró o ya fue usado',
-          'access_denied': 'Acceso denegado. Intenta registrarte de nuevo',
-          'server_error': 'Error del servidor. Intenta más tarde',
-        };
+        // Compat: rescata links antiguos/mal configurados donde TokenHash llegó en `code`.
+        console.log('[AuthCallback] Reintentando con verifyOtp usando code como token_hash...');
 
-        const message = errorMessages[exchangeError.message] || exchangeError.message || 'Error al confirmar el correo';
+        const { data: otpData, error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: code,
+          type: otpType,
+        });
 
-        return NextResponse.redirect(
-          new URL(`/login?error=auth_error&message=${encodeURIComponent(message)}`, origin)
-        );
+        if (verifyError) {
+          console.error('[AuthCallback] Error en verifyOtp fallback:', verifyError);
+
+          const errorMessages: { [key: string]: string } = {
+            invalid_code: 'El link de confirmación expiró o ya fue usado',
+            access_denied: 'Acceso denegado. Intenta registrarte de nuevo',
+            server_error: 'Error del servidor. Intenta más tarde',
+          };
+
+          const message =
+            errorMessages[exchangeError.message] ||
+            verifyError.message ||
+            exchangeError.message ||
+            'Error al confirmar el correo';
+
+          return NextResponse.redirect(
+            new URL(`/login?error=auth_error&message=${encodeURIComponent(message)}`, origin)
+          );
+        }
+
+        if (!otpData?.session) {
+          console.warn('[AuthCallback] No session después de verifyOtp fallback');
+          return NextResponse.redirect(
+            new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
+          );
+        }
       }
 
-      if (!data?.session) {
+      if (!data?.session && !exchangeError) {
         console.warn('[AuthCallback] No session después del exchange');
         return NextResponse.redirect(
           new URL(`/login?error=no_session&message=${encodeURIComponent('No se pudo establecer la sesión')}`, origin)
         );
       }
       
-    } else if (token && type) {
-      // Implicit flow fallback (deprecated pero soportado)
-      console.log('[AuthCallback] Usando implicit flow con token (deprecated)...');
+    } else if (tokenHash) {
+      // SSR/email flow actual recomendado por Supabase
+      console.log('[AuthCallback] Usando verifyOtp con token_hash...');
       
       const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        token_hash: token,
-        type: type as OtpType,
+        token_hash: tokenHash,
+        type: otpType,
       });
 
       if (verifyError) {

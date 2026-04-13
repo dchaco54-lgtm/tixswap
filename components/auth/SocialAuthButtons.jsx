@@ -71,11 +71,12 @@ export default function SocialAuthButtons({
     try {
       setLoadingProvider(provider);
 
-      const origin =
-        typeof window !== "undefined"
-          ? window.location.origin
-          : "https://www.tixswap.cl";
-      const callbackUrl = `${origin}/auth/callback?redirectTo=${encodeURIComponent(
+      const authBaseUrl = (
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        (typeof window !== "undefined" ? window.location.origin : "https://www.tixswap.cl")
+      ).replace(/\/+$/, "");
+      const callbackUrl = `${authBaseUrl}/auth/callback?redirectTo=${encodeURIComponent(
         redirectTo
       )}`;
 
