@@ -4,6 +4,9 @@ import { useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 
+const SOCIAL_AUTH_ENABLED =
+  process.env.NEXT_PUBLIC_AUTH_SOCIAL_ENABLED !== "false";
+
 const PROVIDERS = [
   { id: "google", label: "Continuar con Google" },
   { id: "facebook", label: "Continuar con Facebook" },
@@ -66,6 +69,10 @@ export default function SocialAuthButtons({
   onError,
 }) {
   const [loadingProvider, setLoadingProvider] = useState("");
+
+  if (!SOCIAL_AUTH_ENABLED) {
+    return null;
+  }
 
   async function handleOAuth(provider) {
     try {

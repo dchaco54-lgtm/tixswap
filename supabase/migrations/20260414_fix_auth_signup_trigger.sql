@@ -1,11 +1,5 @@
--- ============================================
--- SINCRONIZACIÓN COMPLETA: Web <-> Supabase
--- Ejecutar TODO en Supabase SQL Editor
--- ============================================
-
 BEGIN;
 
--- PASO 1: Asegurar estructura de profiles con defaults correctos
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS role text;
 
@@ -14,14 +8,13 @@ ALTER TABLE public.profiles
   ALTER COLUMN seller_tier SET DEFAULT 'basic',
   ALTER COLUMN role SET DEFAULT 'standard';
 
--- Actualizar filas existentes sin tier/user_type
-UPDATE public.profiles 
-SET seller_tier = 'basic' 
-WHERE seller_tier IS NULL OR seller_tier = '';
-
-UPDATE public.profiles 
-SET user_type = 'standard' 
+UPDATE public.profiles
+SET user_type = 'standard'
 WHERE user_type IS NULL OR user_type = '';
+
+UPDATE public.profiles
+SET seller_tier = 'basic'
+WHERE seller_tier IS NULL OR seller_tier = '';
 
 UPDATE public.profiles
 SET role = COALESCE(NULLIF(role, ''), NULLIF(user_type, ''), 'standard')
@@ -30,12 +23,6 @@ WHERE role IS NULL OR role = '';
 ALTER TABLE public.profiles
   ALTER COLUMN role SET NOT NULL;
 
--- PASO 2: Constraints de unicidad
-CREATE UNIQUE INDEX IF NOT EXISTS profiles_email_unique ON public.profiles(email);
-CREATE UNIQUE INDEX IF NOT EXISTS profiles_rut_unique ON public.profiles(rut) 
-  WHERE rut IS NOT NULL AND rut <> '';
-
--- PASO 3: Función trigger robusta que sincroniza auth.users -> profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -51,38 +38,16 @@ DECLARE
   v_role text;
   v_status text;
 BEGIN
-  -- Extraer datos de metadata desde raw_user_meta_data
-  v_full_name := COALESCE(
-    NEW.raw_user_meta_data->>'full_name',
-    ''
-  );
-  
-  v_rut := COALESCE(
-    NEW.raw_user_meta_data->>'rut',
-    ''
-  );
-  
-  v_phone := COALESCE(
-    NEW.raw_user_meta_data->>'phone',
-    ''
-  );
-  
-  v_user_type := COALESCE(
-    NEW.raw_user_meta_data->>'user_type',
-    'standard'
-  );
+  v_full_name := COALESCE(NEW.raw_user_meta_data->>'full_name', '');
+  v_rut := COALESCE(NEW.raw_user_meta_data->>'rut', '');
+  v_phone := COALESCE(NEW.raw_user_meta_data->>'phone', '');
 
-  v_user_type := LOWER(TRIM(v_user_type));
+  v_user_type := LOWER(TRIM(COALESCE(NEW.raw_user_meta_data->>'user_type', 'standard')));
   IF v_user_type NOT IN ('free', 'standard', 'admin') THEN
     v_user_type := 'standard';
   END IF;
-  
-  v_seller_tier := COALESCE(
-    NEW.raw_user_meta_data->>'seller_tier',
-    'basic'
-  );
 
-  v_seller_tier := LOWER(TRIM(v_seller_tier));
+  v_seller_tier := LOWER(TRIM(COALESCE(NEW.raw_user_meta_data->>'seller_tier', 'basic')));
   IF v_seller_tier NOT IN ('basic', 'pro', 'elite') THEN
     v_seller_tier := 'basic';
   END IF;
@@ -97,24 +62,23 @@ BEGIN
     NULLIF(TRIM(NEW.raw_user_meta_data->>'status'), ''),
     'online'
   );
-
   v_status := LOWER(TRIM(v_status));
   IF v_status NOT IN ('online', 'busy', 'away', 'invisible') THEN
     v_status := 'online';
   END IF;
 
-  -- Validar que RUT no exista en otra cuenta
   IF v_rut <> '' THEN
-    PERFORM 1 FROM public.profiles 
-    WHERE rut = v_rut AND id <> NEW.id 
+    PERFORM 1
+    FROM public.profiles
+    WHERE rut = v_rut
+      AND id <> NEW.id
     LIMIT 1;
-    
+
     IF FOUND THEN
       RAISE EXCEPTION 'RUT % ya está registrado en otra cuenta', v_rut;
     END IF;
   END IF;
 
-  -- Upsert en profiles (idempotente)
   INSERT INTO public.profiles (
     id,
     email,
@@ -148,16 +112,15 @@ BEGIN
     full_name = COALESCE(NULLIF(EXCLUDED.full_name, ''), public.profiles.full_name),
     rut = COALESCE(NULLIF(EXCLUDED.rut, ''), public.profiles.rut),
     phone = COALESCE(NULLIF(EXCLUDED.phone, ''), public.profiles.phone),
-    role = COALESCE(NULLIF(EXCLUDED.role, ''), public.profiles.role),
     user_type = COALESCE(NULLIF(EXCLUDED.user_type, ''), public.profiles.user_type),
     seller_tier = COALESCE(NULLIF(EXCLUDED.seller_tier, ''), public.profiles.seller_tier),
+    role = COALESCE(NULLIF(EXCLUDED.role, ''), public.profiles.role),
     status = COALESCE(NULLIF(EXCLUDED.status, ''), public.profiles.status);
 
   RETURN NEW;
 END;
 $$;
 
--- PASO 4: Crear/Recrear trigger
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 
 CREATE TRIGGER on_auth_user_created
@@ -165,27 +128,4 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_user();
 
-
-
--- PASO 6: Verificar todo
-SELECT 
-  'Trigger creado' as status,
-  COUNT(*) as count
-FROM information_schema.triggers 
-WHERE trigger_schema = 'public' 
-  AND trigger_name = 'on_auth_user_created';
-
-SELECT 
-  'Realtime habilitado' as status,
-  tablename 
-FROM pg_publication_tables 
-WHERE pubname = 'supabase_realtime' 
-  AND tablename = 'profiles';
-
 COMMIT;
-
--- ============================================
--- LISTO ✅
--- Ahora cada signup crea/actualiza profiles automáticamente
--- Y los cambios en profiles se transmiten en tiempo real
--- ============================================

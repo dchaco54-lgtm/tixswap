@@ -12,6 +12,8 @@ import { isValidEmail, validatePasswordStrength } from "@/lib/validations";
 
 const DEFAULT_USER_TYPE = "standard";
 const DEFAULT_SELLER_TIER = "basic";
+const SOCIAL_AUTH_ENABLED =
+  process.env.NEXT_PUBLIC_AUTH_SOCIAL_ENABLED !== "false";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -163,8 +165,9 @@ export default function RegisterPage() {
               </h1>
 
               <p className="mt-4 text-base leading-7 text-blue-100">
-                Crea tu cuenta con correo o acceso social. Nombre, RUT y teléfono
-                quedan para el momento de comprar, vender o usar funciones de confianza.
+                {SOCIAL_AUTH_ENABLED
+                  ? "Crea tu cuenta con correo o acceso social. Nombre, RUT y teléfono quedan para el momento de comprar, vender o usar funciones de confianza."
+                  : "Crea tu cuenta con correo. Nombre, RUT y teléfono quedan para el momento de comprar, vender o usar funciones de confianza."}
               </p>
 
               <div className="mt-8 space-y-4">
@@ -210,28 +213,32 @@ export default function RegisterPage() {
                 </p>
               </div>
 
-              <div>
-                <div className="mb-3 text-sm font-semibold text-slate-700">
-                  Iniciar sesión con
-                </div>
-                <SocialAuthButtons
-                  redirectTo={redirectTo}
-                  onError={(message) => setSocialError(message)}
-                />
-                {socialError ? (
-                  <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                    {socialError}
+              {SOCIAL_AUTH_ENABLED ? (
+                <>
+                  <div>
+                    <div className="mb-3 text-sm font-semibold text-slate-700">
+                      Iniciar sesión con
+                    </div>
+                    <SocialAuthButtons
+                      redirectTo={redirectTo}
+                      onError={(message) => setSocialError(message)}
+                    />
+                    {socialError ? (
+                      <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                        {socialError}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
 
-              <div className="my-6 flex items-center gap-3">
-                <div className="h-px flex-1 bg-slate-200" />
-                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  o crea tu cuenta con correo
-                </span>
-                <div className="h-px flex-1 bg-slate-200" />
-              </div>
+                  <div className="my-6 flex items-center gap-3">
+                    <div className="h-px flex-1 bg-slate-200" />
+                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      o crea tu cuenta con correo
+                    </span>
+                    <div className="h-px flex-1 bg-slate-200" />
+                  </div>
+                </>
+              ) : null}
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
