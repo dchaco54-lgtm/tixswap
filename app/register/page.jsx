@@ -9,7 +9,6 @@ import { PASSWORD_POLICY } from "@/lib/security/passwordPolicy";
 import { createClient } from "@/lib/supabase/client";
 import {
   normalizeFormData,
-  validatePasswordStrength,
   validateRegisterForm,
 } from "@/lib/validations";
 
@@ -36,7 +35,6 @@ export default function RegisterPage() {
     setRedirectTo(params.get("redirectTo") || "/dashboard");
   }, []);
 
-  const passwordValidation = validatePasswordStrength(password);
   const validation = validateRegisterForm({
     fullName,
     rut,
@@ -46,10 +44,7 @@ export default function RegisterPage() {
     confirmPassword,
     acceptedTerms,
   });
-  const canSubmit =
-    !loading &&
-    validation.valid &&
-    passwordValidation.valid;
+  const canSubmit = !loading;
 
   async function handleSubmit(event) {
     event.preventDefault();
