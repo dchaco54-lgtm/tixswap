@@ -5,26 +5,30 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import PasswordField from "@/components/PasswordField";
-import SocialAuthButtons from "@/components/auth/SocialAuthButtons";
 import { PASSWORD_POLICY } from "@/lib/security/passwordPolicy";
 import { createClient } from "@/lib/supabase/client";
-import { isValidEmail, validatePasswordStrength } from "@/lib/validations";
+import {
+  normalizeFormData,
+  validatePasswordStrength,
+  validateRegisterForm,
+} from "@/lib/validations";
 
 const DEFAULT_USER_TYPE = "standard";
 const DEFAULT_SELLER_TIER = "basic";
-const SOCIAL_AUTH_ENABLED =
-  process.env.NEXT_PUBLIC_AUTH_SOCIAL_ENABLED !== "false";
 
 export default function RegisterPage() {
   const router = useRouter();
   const [redirectTo, setRedirectTo] = useState("/dashboard");
 
+  const [fullName, setFullName] = useState("");
+  const [rut, setRut] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const [socialError, setSocialError] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -33,40 +37,30 @@ export default function RegisterPage() {
   }, []);
 
   const passwordValidation = validatePasswordStrength(password);
+  const validation = validateRegisterForm({
+    fullName,
+    rut,
+    email,
+    phone,
+    password,
+    confirmPassword,
+    acceptedTerms,
+  });
   const canSubmit =
     !loading &&
-    acceptedTerms &&
-    isValidEmail(email) &&
+    validation.valid &&
     passwordValidation.valid;
 
   async function handleSubmit(event) {
     event.preventDefault();
     setErrors({});
-    setSocialError("");
 
-    const nextErrors = {};
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-
-    if (!normalizedEmail) {
-      nextErrors.email = "Debes ingresar tu correo.";
-    } else if (!isValidEmail(normalizedEmail)) {
-      nextErrors.email = "Correo inválido. Revisa el formato.";
-    }
-
-    if (!password) {
-      nextErrors.password = "Debes ingresar una contraseña.";
-    } else if (!passwordValidation.valid) {
-      nextErrors.password = passwordValidation.message;
-    }
-
-    if (!acceptedTerms) {
-      nextErrors.terms = "Debes aceptar los Términos y Condiciones.";
-    }
-
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
+    if (!validation.valid) {
+      setErrors(validation.errors);
       return;
     }
+
+    const normalized = normalizeFormData({ fullName, rut, email, phone });
 
     try {
       setLoading(true);
@@ -90,14 +84,28 @@ export default function RegisterPage() {
       const emailCheckRes = await fetch("/api/auth/check-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail }),
+        body: JSON.stringify({ email: normalized.email }),
       });
       const emailCheckJson = await emailCheckRes.json().catch(() => ({}));
 
       if (emailCheckRes.ok && emailCheckJson?.exists) {
         setErrors({
-          submit:
-            "Ese correo ya tiene una cuenta en TixSwap. Si entraste antes con Google, usa ese mismo acceso para iniciar sesión.",
+          email:
+            "Ese correo ya tiene una cuenta en TixSwap. Inicia sesión con tu correo y contraseña.",
+        });
+        return;
+      }
+
+      const rutCheckRes = await fetch("/api/auth/check-rut", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rut: normalized.rut }),
+      });
+      const rutCheckJson = await rutCheckRes.json().catch(() => ({}));
+
+      if (rutCheckRes.ok && rutCheckJson?.exists) {
+        setErrors({
+          rut: "Ese RUT ya está registrado en otra cuenta.",
         });
         return;
       }
@@ -113,10 +121,13 @@ export default function RegisterPage() {
 
       const supabase = createClient();
       const { data, error } = await supabase.auth.signUp({
-        email: normalizedEmail,
+        email: normalized.email,
         password,
         options: {
           data: {
+            full_name: normalized.fullName,
+            rut: normalized.rut,
+            phone: normalized.phone,
             user_type: DEFAULT_USER_TYPE,
             seller_tier: DEFAULT_SELLER_TIER,
           },
@@ -129,7 +140,7 @@ export default function RegisterPage() {
       }
 
       if (data?.user && !data?.session) {
-        router.push(`/verify-email?email=${encodeURIComponent(normalizedEmail)}`);
+        router.push(`/verify-email?email=${encodeURIComponent(normalized.email)}`);
         return;
       }
 
@@ -157,31 +168,30 @@ export default function RegisterPage() {
 
             <div className="mt-12 max-w-md">
               <div className="inline-flex items-center rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
-                Registro simple
+                Registro clásico
               </div>
 
               <h1 className="mt-5 text-4xl font-black leading-tight">
-                Entra rápido. Verifica tus datos solo cuando realmente importe.
+                Crea tu cuenta con tus datos desde el inicio.
               </h1>
 
               <p className="mt-4 text-base leading-7 text-blue-100">
-                {SOCIAL_AUTH_ENABLED
-                  ? "Crea tu cuenta con correo o acceso social. Nombre, RUT y teléfono quedan para el momento de comprar, vender o usar funciones de confianza."
-                  : "Crea tu cuenta con correo. Nombre, RUT y teléfono quedan para el momento de comprar, vender o usar funciones de confianza."}
+                Completa nombre, RUT, teléfono, correo y contraseña para dejar tu
+                cuenta lista desde el primer acceso.
               </p>
 
               <div className="mt-8 space-y-4">
                 <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4">
-                  <div className="text-sm font-semibold">Menos fricción al entrar</div>
+                  <div className="text-sm font-semibold">Cuenta lista al tiro</div>
                   <div className="mt-1 text-sm text-blue-100">
-                    Solo te pedimos lo esencial para activar tu cuenta.
+                    Tus datos principales quedan cargados desde el registro.
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4">
-                  <div className="text-sm font-semibold">Seguridad donde corresponde</div>
+                  <div className="text-sm font-semibold">Validación más clara</div>
                   <div className="mt-1 text-sm text-blue-100">
-                    Validamos identidad antes de transacciones, publicaciones y chat.
+                    Evitamos cuentas incompletas antes de comprar, vender o chatear.
                   </div>
                 </div>
               </div>
@@ -208,39 +218,71 @@ export default function RegisterPage() {
                   Crear cuenta
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">
-                  Empieza en segundos. Los datos de verificación te los pediremos
-                  solo antes de acciones sensibles.
+                  Ingresa tus datos para dejar tu cuenta configurada desde el comienzo.
                 </p>
               </div>
 
-              {SOCIAL_AUTH_ENABLED ? (
-                <>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Nombre completo
+                  </label>
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(event) => setFullName(event.target.value)}
+                    placeholder="Ej: Juan Pérez Soto"
+                    className="tix-input"
+                    autoComplete="name"
+                    disabled={loading}
+                  />
+                  {errors.fullName ? (
+                    <p className="mt-1 text-xs text-rose-600">{errors.fullName}</p>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <div className="mb-3 text-sm font-semibold text-slate-700">
-                      Iniciar sesión con
-                    </div>
-                    <SocialAuthButtons
-                      redirectTo={redirectTo}
-                      onError={(message) => setSocialError(message)}
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      RUT
+                    </label>
+                    <input
+                      type="text"
+                      value={rut}
+                      onChange={(event) => setRut(event.target.value)}
+                      placeholder="12.345.678-9"
+                      className="tix-input"
+                      autoComplete="off"
+                      disabled={loading}
                     />
-                    {socialError ? (
-                      <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                        {socialError}
-                      </div>
+                    {errors.rut ? (
+                      <p className="mt-1 text-xs text-rose-600">{errors.rut}</p>
                     ) : null}
                   </div>
 
-                  <div className="my-6 flex items-center gap-3">
-                    <div className="h-px flex-1 bg-slate-200" />
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                      o crea tu cuenta con correo
-                    </span>
-                    <div className="h-px flex-1 bg-slate-200" />
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Teléfono
+                    </label>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(event) => setPhone(event.target.value)}
+                      placeholder="+56 9 1234 5678"
+                      className="tix-input"
+                      autoComplete="tel"
+                      disabled={loading}
+                    />
+                    {errors.phone ? (
+                      <p className="mt-1 text-xs text-rose-600">{errors.phone}</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-400">
+                        Usa un celular chileno en formato +56 9XXXXXXXX.
+                      </p>
+                    )}
                   </div>
-                </>
-              ) : null}
+                </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-700">
                     Correo electrónico
@@ -284,6 +326,28 @@ export default function RegisterPage() {
                   )}
                 </div>
 
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    Confirma tu contraseña
+                  </label>
+                  <PasswordField
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Repite tu contraseña"
+                    inputClassName="tix-input"
+                    required
+                    disabled={loading}
+                    autoComplete="new-password"
+                    name="confirmPassword"
+                    id="confirmPassword"
+                  />
+                  {errors.confirmPassword ? (
+                    <p className="mt-1 text-xs text-rose-600">
+                      {errors.confirmPassword}
+                    </p>
+                  ) : null}
+                </div>
+
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <label className="flex items-start gap-3 text-sm text-slate-600">
                     <input
@@ -322,8 +386,8 @@ export default function RegisterPage() {
               </form>
 
               <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                No te pediremos nombre, RUT ni teléfono al inicio. Eso aparece solo
-                antes de comprar, vender o usar el chat.
+                Te pedimos nombre, RUT y teléfono desde el registro para dejar tu
+                cuenta lista y evitar pasos extra después.
               </div>
 
               <p className="mt-6 text-center text-sm text-slate-500">

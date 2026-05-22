@@ -5,10 +5,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import PasswordField from "@/components/PasswordField";
-import SocialAuthButtons from "@/components/auth/SocialAuthButtons";
-
-const SOCIAL_AUTH_ENABLED =
-  process.env.NEXT_PUBLIC_AUTH_SOCIAL_ENABLED !== "false";
 
 function LoginContent() {
   const router = useRouter();
@@ -26,7 +22,6 @@ function LoginContent() {
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
-  const [socialError, setSocialError] = useState("");
 
   // Mostrar error de URL si viene (ej: desde callback)
   useEffect(() => {
@@ -79,7 +74,6 @@ function LoginContent() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage("");
-    setSocialError("");
     setLoading(true);
     const supabase = createClient();
 
@@ -183,33 +177,6 @@ function LoginContent() {
               {errorMessage}
             </div>
           )}
-
-          {SOCIAL_AUTH_ENABLED ? (
-            <>
-              <div className="mb-6">
-                <div className="mb-3 text-sm font-semibold text-slate-700">
-                  Iniciar sesión con
-                </div>
-                <SocialAuthButtons
-                  redirectTo={redirectTo}
-                  onError={(message) => setSocialError(message)}
-                />
-                {socialError ? (
-                  <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {socialError}
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="mb-6 flex items-center gap-3">
-                <div className="h-px flex-1 bg-slate-200" />
-                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  o sigue con tu correo
-                </span>
-                <div className="h-px flex-1 bg-slate-200" />
-              </div>
-            </>
-          ) : null}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
