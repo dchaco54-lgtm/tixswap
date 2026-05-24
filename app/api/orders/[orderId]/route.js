@@ -169,7 +169,8 @@ export async function GET(req, { params }) {
         }
         if (buyerProfile) {
           buyer_name = buyerProfile.full_name || null;
-          buyer_rut = buyerProfile.rut || null;
+          // RUT solo se expone al propio comprador, no al vendedor
+          buyer_rut = isBuyer ? (buyerProfile.rut || null) : null;
         }
       } catch (e) {
         console.error("GET /api/orders/[orderId] buyer profile join exception", e);

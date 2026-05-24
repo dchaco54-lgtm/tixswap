@@ -33,6 +33,50 @@ export async function POST(req) {
     }
 
     const body = await req.json().catch(() => ({}));
+    const action = normalizeString(body?.action);
+
+    if (action === "hide_expired") {
+      const nowIso = new Date().toISOString();
+      const { data: rows, error: rowsError } = await admin
+        .from("events")
+        .select("id")
+        .lt("starts_at", nowIso)
+        .or("status.is.null,status.eq.published,status.eq.active");
+
+      if (rowsError) {
+        console.error("[admin/events/bulk] hide_expired select error:", rowsError);
+        return NextResponse.json(
+          { error: "No pudimos buscar eventos vencidos" },
+          { status: 500 }
+        );
+      }
+
+      const ids = (rows || []).map((row) => row.id).filter(Boolean);
+      if (!ids.length) {
+        return NextResponse.json({ ok: true, updated: 0, ids: [] });
+      }
+
+      const { error: updateError } = await admin
+        .from("events")
+        .update({ status: "draft" })
+        .in("id", ids);
+
+      if (updateError) {
+        console.error("[admin/events/bulk] hide_expired update error:", updateError);
+        return NextResponse.json(
+          { error: "No pudimos ocultar los eventos vencidos" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        action: "hide_expired",
+        updated: ids.length,
+        ids,
+      });
+    }
+
     const updatesRaw = Array.isArray(body?.updates) ? body.updates : [];
 
     const normalized = updatesRaw

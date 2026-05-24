@@ -19,6 +19,7 @@ const FIELD_LABELS = {
   venue: "Recinto",
   city: "Ciudad",
   image_url: "Imagen/banner",
+  status: "Estado de publicación",
 };
 
 function normalizeString(value) {
@@ -56,6 +57,41 @@ function formatDateTime(value) {
   return d.toLocaleString("es-CL", { dateStyle: "medium", timeStyle: "short" });
 }
 
+function normalizePublicationStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getEditablePublicationStatus(value) {
+  const normalized = normalizePublicationStatus(value);
+  if (normalized === "draft" || normalized === "hidden" || normalized === "paused") {
+    return "draft";
+  }
+  return "published";
+}
+
+function getPublicationStatusLabel(value) {
+  return value === "draft" ? "Borrador" : "Publicado";
+}
+
+function getTemporalStatus(value) {
+  if (!value) return "sin_fecha";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "sin_fecha";
+  return d.getTime() < Date.now() ? "vencido" : "vigente";
+}
+
+function getTemporalStatusLabel(value) {
+  if (value === "vencido") return "Vencido";
+  if (value === "vigente") return "Vigente";
+  return "Sin fecha";
+}
+
+function getTemporalStatusClass(value) {
+  if (value === "vencido") return "bg-slate-100 text-slate-700 border-slate-200";
+  if (value === "vigente") return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  return "bg-amber-50 text-amber-700 border-amber-200";
+}
+
 export default function AdminEventEditPage() {
   const params = useParams();
   const router = useRouter();
@@ -71,6 +107,7 @@ export default function AdminEventEditPage() {
     venue: "",
     city: "",
     image_url: "",
+    status: "published",
   });
 
   const [changeType, setChangeType] = useState("menor");
@@ -150,6 +187,7 @@ export default function AdminEventEditPage() {
           venue: ev?.venue || "",
           city: ev?.city || "",
           image_url: ev?.image_url || "",
+          status: getEditablePublicationStatus(ev?.status),
         });
       } catch (err) {
         console.warn("[AdminEventEdit] load error:", err);
@@ -214,6 +252,15 @@ export default function AdminEventEditPage() {
       });
     }
 
+    const originalPublicationStatus = getEditablePublicationStatus(event?.status);
+    if (originalPublicationStatus !== form.status) {
+      changes.push({
+        field: "status",
+        before: getPublicationStatusLabel(originalPublicationStatus),
+        after: getPublicationStatusLabel(form.status),
+      });
+    }
+
     return changes;
   }, [event, form]);
 
@@ -272,6 +319,9 @@ export default function AdminEventEditPage() {
         venue: normalizeString(form.venue),
         city: normalizeString(form.city),
         image_url: normalizeString(form.image_url),
+        ...(form.status !== getEditablePublicationStatus(event?.status)
+          ? { status: form.status }
+          : {}),
       },
       changes: diff,
     });
@@ -369,6 +419,19 @@ export default function AdminEventEditPage() {
               </h2>
 
               <div className="grid grid-cols-1 gap-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getTemporalStatusClass(
+                      getTemporalStatus(event?.starts_at)
+                    )}`}
+                  >
+                    {getTemporalStatusLabel(getTemporalStatus(event?.starts_at))}
+                  </span>
+                  <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                    {getPublicationStatusLabel(form.status)}
+                  </span>
+                </div>
+
                 <div>
                   <label className="text-sm font-semibold text-slate-700">
                     Nombre del evento
@@ -452,6 +515,35 @@ export default function AdminEventEditPage() {
                       />
                     </div>
                   )}
+                </div>
+
+                <div>
+                  <label className="text-sm font-semibold text-slate-700">
+                    Estado de publicación
+                  </label>
+                  <div className="mt-2 grid grid-cols-2 gap-3">
+                    {["published", "draft"].map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() => updateForm({ status })}
+                        className={`rounded-xl border px-4 py-3 text-left ${
+                          form.status === status
+                            ? "border-blue-400 bg-blue-50 text-blue-800"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <div className="font-semibold">
+                          {getPublicationStatusLabel(status)}
+                        </div>
+                        <div className="mt-1 text-xs">
+                          {status === "published"
+                            ? "Se muestra en el front público."
+                            : "Se oculta del front público."}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

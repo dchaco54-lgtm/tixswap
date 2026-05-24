@@ -58,6 +58,8 @@ export async function POST(req) {
     if (!ticket) return NextResponse.json({ error: "Ticket no encontrado" }, { status: 404 });
     if (!isBuyableStatus(ticket.status))
       return NextResponse.json({ error: "Ticket no disponible" }, { status: 409 });
+    if (ticket.seller_id === user.id)
+      return NextResponse.json({ error: "No puedes comprar tu propio ticket" }, { status: 400 });
 
     const priceRaw = pickFirst(ticket.price, ticket.value, ticket.amount, ticket.price_clp);
     const ticketPrice = parseCLP(priceRaw);

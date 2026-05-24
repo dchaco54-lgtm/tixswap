@@ -2,8 +2,22 @@ import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isValidEmail } from "@/lib/validations";
+import { rateLimitByRequest } from "@/lib/security/rateLimit";
 
 export async function POST(req) {
+  const rate = rateLimitByRequest(req, {
+    bucket: "auth-check-email",
+    limit: 20,
+    windowMs: 5 * 60 * 1000,
+  });
+
+  if (!rate.ok) {
+    return NextResponse.json(
+      { error: "Demasiadas solicitudes. Intenta nuevamente en unos minutos." },
+      { status: 429 }
+    );
+  }
+
   const body = await req.json().catch(() => ({}));
   const email = String(body?.email || "").trim().toLowerCase();
 

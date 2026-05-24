@@ -128,6 +128,9 @@ export async function POST(request) {
 
     // Calcular fee del vendedor según su tipo usando los helpers
     const originalPrice = Number(price);
+    if (!Number.isFinite(originalPrice) || originalPrice <= 0) {
+      return NextResponse.json({ error: 'El precio debe ser mayor a 0' }, { status: 400 });
+    }
     const platformFee = calculateSellerFee(originalPrice, userRole);
     const sellerPayout = calculateSellerPayout(originalPrice, userRole);
 

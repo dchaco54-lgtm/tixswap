@@ -14,11 +14,11 @@ function getSupabaseAdmin() {
 async function isAdminByProfiles(supabase, userId) {
   const { data, error } = await supabase
     .from("profiles")
-    .select("role")
+    .select("user_type")
     .eq("id", userId)
     .maybeSingle();
   if (error) return false;
-  return data?.role === "admin";
+  return data?.user_type === "admin";
 }
 
 export async function POST(req) {

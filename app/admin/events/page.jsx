@@ -374,6 +374,7 @@ export default function AdminEventsPage() {
     done: 0,
     total: 0,
   });
+  const [hidingExpired, setHidingExpired] = useState(false);
   const [publicationFilter, setPublicationFilter] = useState("all");
   const [temporalFilter, setTemporalFilter] = useState("all");
 
@@ -776,6 +777,62 @@ export default function AdminEventsPage() {
     }
   };
 
+  const hideExpiredFromFront = async () => {
+    const total = events.filter((event) => {
+      const publicationStatus = normalizePublicationStatus(event?.status);
+      return (
+        getEventTemporalStatus(event) === "vencido" &&
+        (!publicationStatus ||
+          publicationStatus === "published" ||
+          publicationStatus === "active")
+      );
+    }).length;
+
+    if (!total) {
+      setMsg("No hay eventos vencidos publicados para ocultar.");
+      setErr("");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Se ocultarán ${total} eventos vencidos del front público, cambiando su status a draft. ¿Continuar?`
+    );
+    if (!confirmed) return;
+
+    setHidingExpired(true);
+    setErr("");
+    setMsg("");
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("No autorizado");
+
+      const res = await fetch("/api/admin/events/bulk", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "hide_expired" }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || "No se pudieron ocultar los vencidos");
+      }
+
+      setMsg(`Eventos vencidos ocultados del front ✅ (${json?.updated || 0})`);
+      await loadEvents();
+    } catch (e) {
+      setErr(e?.message || "No se pudieron ocultar los vencidos");
+    } finally {
+      setHidingExpired(false);
+    }
+  };
+
   const preview = useMemo(() => bulkRows.slice(0, 10), [bulkRows]);
   const imagePreview = useMemo(() => bulkImageRows.slice(0, 10), [bulkImageRows]);
   const publicationStatusOptions = useMemo(() => {
@@ -808,6 +865,17 @@ export default function AdminEventsPage() {
       return true;
     });
   }, [events, publicationFilter, temporalFilter]);
+  const expiredPublishedCount = useMemo(() => {
+    return events.filter((event) => {
+      const publicationStatus = normalizePublicationStatus(event?.status);
+      return (
+        getEventTemporalStatus(event) === "vencido" &&
+        (!publicationStatus ||
+          publicationStatus === "published" ||
+          publicationStatus === "active")
+      );
+    }).length;
+  }, [events]);
 
   return (
     <div className="min-h-screen bg-[#f4f7ff]">
@@ -1247,6 +1315,20 @@ export default function AdminEventsPage() {
               >
                 Exportar filtro
               </button>
+
+              {hasStatusColumn === true && (
+                <button
+                  type="button"
+                  onClick={hideExpiredFromFront}
+                  disabled={hidingExpired || expiredPublishedCount === 0}
+                  className="tix-btn-ghost"
+                  title="Cambia a draft los eventos vencidos que aún están visibles en el front."
+                >
+                  {hidingExpired
+                    ? "Ocultando vencidos…"
+                    : `Ocultar vencidos del front${expiredPublishedCount ? ` (${expiredPublishedCount})` : ""}`}
+                </button>
+              )}
 
               <button onClick={loadEvents} className="tix-btn-ghost">
                 Recargar

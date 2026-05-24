@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ALLOWED_FIELDS = ["title", "starts_at", "venue", "city", "image_url"];
+const ALLOWED_FIELDS = ["title", "starts_at", "venue", "city", "image_url", "status"];
 
 const FIELD_LABELS = {
   title: "Nombre del evento",
@@ -18,6 +18,7 @@ const FIELD_LABELS = {
   venue: "Recinto",
   city: "Ciudad",
   image_url: "Imagen/banner",
+  status: "Estado de publicación",
 };
 
 const CHANGE_TYPE_LABELS = {
@@ -43,8 +44,16 @@ function normalizeStartsAt(value) {
   return d.toISOString();
 }
 
+function normalizePublicationStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "draft") return "draft";
+  if (normalized === "published" || normalized === "active") return "published";
+  return null;
+}
+
 function normalizeField(field, value) {
   if (field === "starts_at") return normalizeStartsAt(value);
+  if (field === "status") return normalizePublicationStatus(value);
   return normalizeString(value);
 }
 
@@ -64,6 +73,9 @@ function formatDateTime(value) {
 
 function formatFieldValue(field, value) {
   if (field === "starts_at") return formatDateTime(value);
+  if (field === "status") {
+    return value === "draft" ? "Borrador" : value === "published" ? "Publicado" : "—";
+  }
   return value ?? "—";
 }
 
@@ -254,7 +266,7 @@ export async function PUT(req, { params }) {
 
     const { data: eventRow, error: eventErr } = await admin
       .from("events")
-      .select("id, title, starts_at, venue, city, image_url")
+      .select("id, title, starts_at, venue, city, image_url, status")
       .eq("id", eventId)
       .maybeSingle();
 
