@@ -111,6 +111,166 @@ function rowToEvent(row) {
   return { payload, errors };
 }
 
+function rowToImageUpdate(row) {
+  const map = {};
+  for (const [k, v] of Object.entries(row || {})) {
+    map[normKey(k)] = v;
+  }
+
+  const id = String(pick(map, ["id", "event_id", "evento_id"])).trim();
+  const image_url = String(
+    pick(map, ["url_de_imagen", "image_url", "imagen", "image", "url_imagen"])
+  ).trim();
+  const title = String(
+    pick(map, ["titulo", "title", "evento", "nombre", "nombre_del_evento"])
+  ).trim();
+  const starts_at = parseDateValue(
+    pick(map, ["fecha", "fecha_hora", "inicio", "starts_at", "date", "datetime"])
+  );
+  const venue = String(
+    pick(map, ["ubicacion", "recinto", "venue", "lugar", "location"])
+  ).trim();
+
+  const isEmpty = !id && !image_url && !title && !starts_at && !venue;
+  if (isEmpty || !image_url) {
+    return { payload: null, errors: [], skip: true };
+  }
+
+  const errors = [];
+  if (!id) errors.push("Falta id del evento");
+
+  return {
+    payload: errors.length
+      ? null
+      : {
+          id,
+          image_url,
+          title: title || null,
+          starts_at: starts_at || null,
+          venue: venue || null,
+        },
+    errors,
+    skip: false,
+  };
+}
+
+function formatEventDateTime(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("es-CL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function getEventTemporalStatus(event, now = new Date()) {
+  const d = new Date(event?.starts_at || "");
+  if (Number.isNaN(d.getTime())) return "sin_fecha";
+  return d.getTime() < now.getTime() ? "vencido" : "vigente";
+}
+
+function getEventTemporalStatusLabel(status) {
+  if (status === "vigente") return "Vigente";
+  if (status === "vencido") return "Vencido";
+  return "Sin fecha";
+}
+
+function getEventTemporalStatusClass(status) {
+  if (status === "vigente") {
+    return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  }
+  if (status === "vencido") {
+    return "bg-slate-100 text-slate-600 border-slate-200";
+  }
+  return "bg-amber-50 text-amber-700 border-amber-200";
+}
+
+function normalizePublicationStatus(status) {
+  return String(status || "").trim().toLowerCase();
+}
+
+function getPublicationStatusLabel(status) {
+  const normalized = normalizePublicationStatus(status);
+  if (normalized === "published") return "Publicado";
+  if (normalized === "active") return "Activo";
+  if (normalized === "draft") return "Borrador";
+  if (normalized === "paused") return "Pausado";
+  if (normalized === "hidden") return "Oculto";
+  if (!normalized) return "Sin estado";
+  return status;
+}
+
+function getPublicationStatusClass(status) {
+  const normalized = normalizePublicationStatus(status);
+  if (normalized === "published" || normalized === "active") {
+    return "bg-blue-50 text-blue-700 border-blue-200";
+  }
+  if (normalized === "draft" || normalized === "paused") {
+    return "bg-amber-50 text-amber-700 border-amber-200";
+  }
+  if (normalized === "hidden") {
+    return "bg-slate-100 text-slate-600 border-slate-200";
+  }
+  return "bg-slate-50 text-slate-700 border-slate-200";
+}
+
+function downloadWorkbook(fileName, sheets) {
+  const workbook = XLSX.utils.book_new();
+
+  sheets.forEach(({ name, rows }) => {
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, sheet, name);
+  });
+
+  XLSX.writeFile(workbook, fileName);
+}
+
+function downloadEventsTemplate() {
+  downloadWorkbook("tixswap-modelo-eventos.xlsx", [
+    {
+      name: "crear_eventos",
+      rows: [
+        {
+          titulo: "Morat",
+          fecha: "08/09/2026 21:00",
+          recinto: "Movistar Arena",
+          ciudad: "Santiago",
+          categoria: "Pop Rock / Pop Latino",
+          url_imagen: "https://ejemplo.com/banner-morat.jpg",
+        },
+      ],
+    },
+    {
+      name: "actualizar_imagenes",
+      rows: [
+        {
+          id: "uuid-del-evento",
+          title: "Morat",
+          fecha: "08/09/2026 21:00",
+          recinto: "Movistar Arena",
+          url_imagen: "https://ejemplo.com/banner-morat.jpg",
+        },
+      ],
+    },
+  ]);
+}
+
+function buildEventExportRows(events = []) {
+  return events.map((event) => ({
+    id: event?.id || "",
+    title: event?.title || "",
+    starts_at: event?.starts_at || "",
+    fecha_local: formatEventDateTime(event?.starts_at),
+    venue: event?.venue || "",
+    city: event?.city || "",
+    category: event?.category || "",
+    image_url: event?.image_url || "",
+    status_publicacion: getPublicationStatusLabel(event?.status),
+    vigencia: getEventTemporalStatusLabel(getEventTemporalStatus(event)),
+  }));
+}
+
 function isWarningsColumnMissingError(error) {
   const code = String(error?.code || "");
   const message = String(error?.message || "").toLowerCase();
@@ -206,6 +366,16 @@ export default function AdminEventsPage() {
   const [bulkErrors, setBulkErrors] = useState([]); // [{rowIndex, errors, raw}]
   const [bulkImporting, setBulkImporting] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
+  const [bulkImageFileName, setBulkImageFileName] = useState("");
+  const [bulkImageRows, setBulkImageRows] = useState([]);
+  const [bulkImageErrors, setBulkImageErrors] = useState([]);
+  const [bulkImageUpdating, setBulkImageUpdating] = useState(false);
+  const [bulkImageProgress, setBulkImageProgress] = useState({
+    done: 0,
+    total: 0,
+  });
+  const [publicationFilter, setPublicationFilter] = useState("all");
+  const [temporalFilter, setTemporalFilter] = useState("all");
 
   useEffect(() => {
     const init = async () => {
@@ -483,7 +653,161 @@ export default function AdminEventsPage() {
     }
   };
 
+  const parseBulkImageFile = async (file) => {
+    setMsg("");
+    setErr("");
+    setBulkImageFileName(file?.name || "");
+    setBulkImageRows([]);
+    setBulkImageErrors([]);
+    setBulkImageProgress({ done: 0, total: 0 });
+
+    try {
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: "array", cellDates: true });
+      const sheetName = wb.SheetNames?.[0];
+      if (!sheetName) throw new Error("El archivo no tiene hojas.");
+
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+      if (!rows.length) throw new Error("El archivo está vacío.");
+
+      const valids = [];
+      const errs = [];
+      const seen = new Set();
+
+      rows.forEach((row, idx) => {
+        const { payload, errors, skip } = rowToImageUpdate(row);
+        if (skip) return;
+
+        if (errors.length) {
+          errs.push({ rowIndex: idx + 2, errors, raw: row });
+          return;
+        }
+
+        if (seen.has(payload.id)) {
+          errs.push({
+            rowIndex: idx + 2,
+            errors: ["Duplicado dentro del archivo (mismo id)"],
+            raw: row,
+          });
+          return;
+        }
+
+        seen.add(payload.id);
+        valids.push(payload);
+      });
+
+      setBulkImageRows(valids);
+      setBulkImageErrors(errs);
+
+      if (!valids.length && !errs.length) {
+        setMsg(
+          "No encontré filas con id + url_imagen. Exporta la base, completa las URLs y vuelve a importar."
+        );
+        return;
+      }
+
+      setMsg(
+        `Archivo de imágenes listo: ${valids.length} filas para actualizar${errs.length ? ` · ${errs.length} con error` : ""
+        }`
+      );
+    } catch (e) {
+      setErr(e?.message || "No pude leer el archivo de imágenes");
+    }
+  };
+
+  const bulkUpdateImages = async () => {
+    if (!bulkImageRows.length) return;
+
+    setBulkImageUpdating(true);
+    setErr("");
+    setMsg("");
+    setBulkImageProgress({ done: 0, total: bulkImageRows.length });
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error("No autorizado");
+
+      const res = await fetch("/api/admin/events/bulk", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          updates: bulkImageRows.map((row) => ({
+            id: row.id,
+            image_url: row.image_url,
+          })),
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || "No se pudo actualizar masivamente");
+      }
+
+      setBulkImageProgress({
+        done: json?.updated ?? bulkImageRows.length,
+        total: bulkImageRows.length,
+      });
+
+      const parts = [`${json?.updated || 0} actualizados`];
+      if ((json?.missingIds || []).length) {
+        parts.push(`${json.missingIds.length} no encontrados`);
+      }
+      if ((json?.errors || []).length) {
+        parts.push(`${json.errors.length} con error`);
+      }
+      setMsg(`Actualización masiva lista ✅ ${parts.join(" · ")}`);
+
+      setBulkImageFileName("");
+      setBulkImageRows([]);
+      setBulkImageErrors([]);
+      await loadEvents();
+    } catch (e) {
+      setErr(e?.message || "Falló la actualización masiva de imágenes");
+    } finally {
+      setBulkImageUpdating(false);
+    }
+  };
+
   const preview = useMemo(() => bulkRows.slice(0, 10), [bulkRows]);
+  const imagePreview = useMemo(() => bulkImageRows.slice(0, 10), [bulkImageRows]);
+  const publicationStatusOptions = useMemo(() => {
+    const values = Array.from(
+      new Set(
+        events
+          .map((event) => normalizePublicationStatus(event?.status))
+          .filter(Boolean)
+      )
+    );
+
+    return values.sort();
+  }, [events]);
+  const filteredEvents = useMemo(() => {
+    return events.filter((event) => {
+      const publicationStatus = normalizePublicationStatus(event?.status);
+      const temporalStatus = getEventTemporalStatus(event);
+
+      if (
+        publicationFilter !== "all" &&
+        publicationStatus !== publicationFilter
+      ) {
+        return false;
+      }
+
+      if (temporalFilter !== "all" && temporalStatus !== temporalFilter) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [events, publicationFilter, temporalFilter]);
 
   return (
     <div className="min-h-screen bg-[#f4f7ff]">
@@ -614,6 +938,13 @@ export default function AdminEventsPage() {
                 (los nombres pueden variar, igual los detecto).
               </p>
             </div>
+            <button
+              type="button"
+              onClick={downloadEventsTemplate}
+              className="tix-btn-ghost whitespace-nowrap"
+            >
+              Descargar modelo Excel
+            </button>
           </div>
 
           <div className="mt-4 flex flex-col gap-3">
@@ -723,21 +1054,214 @@ export default function AdminEventsPage() {
           </div>
         </div>
 
+        <div className="tix-card p-6 mt-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">
+                Actualización masiva de imágenes
+              </h2>
+              <p className="text-slate-600 mt-1">
+                Exporta los eventos, completa la columna{" "}
+                <code className="text-slate-700">image_url</code> o{" "}
+                <code className="text-slate-700">url_imagen</code> y vuelve a
+                subir el archivo. La actualización se hace por{" "}
+                <code className="text-slate-700">id</code>.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadWorkbook("tixswap-eventos-export.xlsx", [
+                    {
+                      name: "eventos",
+                      rows: buildEventExportRows(events),
+                    },
+                  ])
+                }
+                className="tix-btn-ghost"
+              >
+                Exportar eventos
+              </button>
+              <button
+                type="button"
+                onClick={downloadEventsTemplate}
+                className="tix-btn-ghost"
+              >
+                Modelo Excel
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3">
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) parseBulkImageFile(file);
+              }}
+            />
+
+            {bulkImageFileName && (
+              <div className="text-sm text-slate-700">
+                Archivo: <b>{bulkImageFileName}</b> · Listas para actualizar:{" "}
+                <b>{bulkImageRows.length}</b> · Con error:{" "}
+                <b>{bulkImageErrors.length}</b>
+              </div>
+            )}
+
+            {!!imagePreview.length && (
+              <div className="mt-2 overflow-auto rounded-2xl border border-slate-100">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="text-left px-4 py-3">ID</th>
+                      <th className="text-left px-4 py-3">Título</th>
+                      <th className="text-left px-4 py-3">Fecha</th>
+                      <th className="text-left px-4 py-3">Recinto</th>
+                      <th className="text-left px-4 py-3">URL imagen</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white">
+                    {imagePreview.map((row) => (
+                      <tr key={row.id} className="border-t border-slate-100">
+                        <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                          {row.id}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-900">
+                          {row.title || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {formatEventDateTime(row.starts_at)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {row.venue || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 max-w-[320px] truncate">
+                          {row.image_url}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {!!bulkImageErrors.length && (
+              <details className="mt-2">
+                <summary className="cursor-pointer text-sm font-semibold text-rose-700">
+                  Ver errores ({bulkImageErrors.length})
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {bulkImageErrors.slice(0, 25).map((row, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800 text-sm"
+                    >
+                      <b>Fila {row.rowIndex}:</b> {row.errors.join(" · ")}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={bulkUpdateImages}
+                disabled={bulkImageUpdating || bulkImageRows.length === 0}
+                className="tix-btn-primary"
+              >
+                {bulkImageUpdating
+                  ? `Actualizando… (${bulkImageProgress.done}/${bulkImageProgress.total})`
+                  : `Actualizar ${bulkImageRows.length || ""} imágenes`}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkImageFileName("");
+                  setBulkImageRows([]);
+                  setBulkImageErrors([]);
+                  setBulkImageProgress({ done: 0, total: 0 });
+                }}
+                className="tix-btn-ghost"
+              >
+                Limpiar
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Lista eventos */}
         <div className="tix-card p-6 mt-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-extrabold text-slate-900">
-              Eventos ({events.length})
-            </h2>
-            <button onClick={loadEvents} className="tix-btn-ghost">
-              Recargar
-            </button>
+          <div className="flex flex-col gap-3 mb-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">
+                Eventos ({filteredEvents.length} de {events.length})
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">
+                `status` sigue siendo el estado de publicación. Vigencia se calcula por fecha.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={temporalFilter}
+                onChange={(e) => setTemporalFilter(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+              >
+                <option value="all">Todas las vigencias</option>
+                <option value="vigente">Vigentes</option>
+                <option value="vencido">Vencidos</option>
+              </select>
+
+              {hasStatusColumn === true && (
+                <select
+                  value={publicationFilter}
+                  onChange={(e) => setPublicationFilter(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                >
+                  <option value="all">Todos los estados</option>
+                  {publicationStatusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {getPublicationStatusLabel(status)}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              <button
+                type="button"
+                onClick={() =>
+                  downloadWorkbook("tixswap-eventos-filtrados.xlsx", [
+                    {
+                      name: "eventos",
+                      rows: buildEventExportRows(filteredEvents),
+                    },
+                  ])
+                }
+                className="tix-btn-ghost"
+              >
+                Exportar filtro
+              </button>
+
+              <button onClick={loadEvents} className="tix-btn-ghost">
+                Recargar
+              </button>
+            </div>
           </div>
 
           {loadingEvents ? (
             <p className="text-slate-600">Cargando…</p>
           ) : events.length === 0 ? (
             <p className="text-slate-600">Aún no hay eventos.</p>
+          ) : filteredEvents.length === 0 ? (
+            <p className="text-slate-600">
+              No hay eventos que coincidan con los filtros seleccionados.
+            </p>
           ) : (
             <div className="overflow-auto rounded-2xl border border-slate-100">
               <table className="min-w-full text-sm">
@@ -748,22 +1272,18 @@ export default function AdminEventsPage() {
                     <th className="text-left px-4 py-3">Recinto</th>
                     <th className="text-left px-4 py-3">Ciudad</th>
                     <th className="text-left px-4 py-3">Categoría</th>
+                    <th className="text-left px-4 py-3">Estado</th>
                     <th className="text-left px-4 py-3">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white">
-                  {events.map((ev) => (
+                  {filteredEvents.map((ev) => (
                     <tr key={ev.id} className="border-t border-slate-100">
                       <td className="px-4 py-3 font-semibold text-slate-900">
                         {ev.title}
                       </td>
                       <td className="px-4 py-3 text-slate-700">
-                        {ev.starts_at
-                          ? new Date(ev.starts_at).toLocaleString("es-CL", {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            })
-                          : "—"}
+                        {formatEventDateTime(ev.starts_at)}
                       </td>
                       <td className="px-4 py-3 text-slate-700">{ev.venue}</td>
                       <td className="px-4 py-3 text-slate-700">
@@ -771,6 +1291,28 @@ export default function AdminEventsPage() {
                       </td>
                       <td className="px-4 py-3 text-slate-700">
                         {ev.category || "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getEventTemporalStatusClass(
+                              getEventTemporalStatus(ev)
+                            )}`}
+                          >
+                            {getEventTemporalStatusLabel(
+                              getEventTemporalStatus(ev)
+                            )}
+                          </span>
+                          {hasStatusColumn === true && (
+                            <span
+                              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${getPublicationStatusClass(
+                                ev?.status
+                              )}`}
+                            >
+                              {getPublicationStatusLabel(ev?.status)}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
