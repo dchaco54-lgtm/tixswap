@@ -8,11 +8,12 @@ export async function GET(request) {
     const secret = process.env.CRON_SECRET;
     const auth = request.headers.get('authorization') || '';
 
-    // If a secret is configured, require: Authorization: Bearer <CRON_SECRET>
-    if (secret) {
-      const ok = auth === `Bearer ${secret}`;
-      if (!ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!secret) {
+      return NextResponse.json({ error: 'CRON_SECRET not configured' }, { status: 500 });
     }
+
+    const ok = auth === `Bearer ${secret}`;
+    if (!ok) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const url = new URL(request.url);
     const ttl = Number(url.searchParams.get('ttl')) || DEFAULT_TTL_MINUTES;
