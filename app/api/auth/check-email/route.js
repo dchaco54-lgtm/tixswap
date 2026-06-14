@@ -27,15 +27,16 @@ export async function POST(req) {
 
   try {
     const admin = supabaseAdmin();
+
+    // Query auth.users directly — catches users whose profile row was never created
     const { data, error } = await admin
-      .from("profiles")
+      .schema("auth")
+      .from("users")
       .select("id")
       .eq("email", email)
       .maybeSingle();
 
-    if (error && error.code !== "PGRST116") {
-      throw error;
-    }
+    if (error && error.code !== "PGRST116") throw error;
 
     return NextResponse.json({ exists: Boolean(data?.id) });
   } catch (error) {

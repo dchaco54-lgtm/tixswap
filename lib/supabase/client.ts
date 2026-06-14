@@ -10,4 +10,7 @@
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import type { Database } from "@/src/types/database.types";
 
-export const createClient = () => createClientComponentClient<Database>();
+export const createClient = () =>
+  createClientComponentClient<Database>({
+    options: { auth: { flowType: "implicit" } },
+  });
