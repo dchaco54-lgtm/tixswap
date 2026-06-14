@@ -1,63 +1,109 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
 
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import { getWebpayTransaction } from '@/lib/webpay';
-import { sendEmail } from '@/lib/email/resend';
-import { templateOrderPaidBuyer, templateOrderPaidSeller } from '@/lib/email/templates';
-import { createNotification } from '@/lib/notifications';
-import { logAuditEvent, AUDIT_EVENTS } from '@/lib/security/audit';
+import { sendEmail } from "@/lib/email/resend";
+import {
+  templateOrderPaidBuyer,
+  templateOrderPaidSeller,
+} from "@/lib/email/templates";
+import { createNotification } from "@/lib/notifications";
+import {
+  buildSafeWebpayPayload,
+  maskTokenForLog,
+  processWebpayCallback,
+  WEBPAY_ORDER_STATUS,
+  WEBPAY_PAYMENT_STATE,
+} from "@/lib/payments/webpayCallback";
+import { logAuditEvent, AUDIT_EVENTS } from "@/lib/security/audit";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getWebpayTransaction } from "@/lib/webpay";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 function normalizeBaseUrl(url) {
-  if (!url) return '';
-  return url.endsWith('/') ? url.slice(0, -1) : url;
+  if (!url) return "";
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+function redirectToPayment(baseUrl, payment, orderId = null) {
+  if (payment === "success" && orderId) {
+    return NextResponse.redirect(
+      `${baseUrl}/dashboard/purchases/${orderId}?payment=success`,
+      { status: 303 }
+    );
+  }
+
+  const qs = new URLSearchParams();
+  qs.set("payment", payment || "unknown");
+  if (orderId) qs.set("order", orderId);
+  return NextResponse.redirect(`${baseUrl}/dashboard/purchases?${qs.toString()}`, {
+    status: 303,
+  });
+}
+
+function getReturnBaseUrl(req) {
+  return normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
+}
+
+function getPostString(formData, key) {
+  const value = formData.get(key);
+  return String(value || "").trim() || null;
+}
+
+function getQueryString(searchParams, key) {
+  return String(searchParams.get(key) || "").trim() || null;
 }
 
 async function loadOrderEmailData(admin, order) {
-  const ids = [order.buyer_id, order.seller_id].filter(Boolean);
-  const profilesById = {};
+  const ids = [order?.buyer_id, order?.seller_id].filter(Boolean);
+  const profileMap = {};
 
   if (ids.length) {
-    const { data: profiles } = await admin
-      .from('profiles')
-      .select('id, full_name, email')
-      .in('id', ids);
+    const { data: profiles, error } = await admin
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", ids);
 
-    (profiles || []).forEach((p) => {
-      profilesById[p.id] = p;
-    });
+    if (error) throw error;
+
+    for (const profile of profiles || []) {
+      profileMap[profile.id] = profile;
+    }
   }
 
   let ticket = null;
-  if (order.ticket_id) {
-    const { data: t } = await admin
-      .from('tickets')
-      .select('id, event_id')
-      .eq('id', order.ticket_id)
+  if (order?.ticket_id) {
+    const { data, error } = await admin
+      .from("tickets")
+      .select("id, event_id")
+      .eq("id", order.ticket_id)
       .maybeSingle();
-    ticket = t || null;
+
+    if (error) throw error;
+    ticket = data || null;
   }
 
-  const eventId = order.event_id || ticket?.event_id || null;
+  const eventId = order?.event_id || ticket?.event_id || null;
   let eventName = null;
   if (eventId) {
-    const { data: eventRow } = await admin
-      .from('events')
-      .select('title')
-      .eq('id', eventId)
+    const { data: eventRow, error } = await admin
+      .from("events")
+      .select("title")
+      .eq("id", eventId)
       .maybeSingle();
+
+    if (error) throw error;
     eventName = eventRow?.title || null;
   }
 
   return {
-    buyer: profilesById[order.buyer_id] || null,
-    seller: profilesById[order.seller_id] || null,
+    buyer: profileMap[order?.buyer_id] || null,
+    seller: profileMap[order?.seller_id] || null,
     eventName,
   };
 }
 
-async function sendPaidEmails(admin, order, baseUrl) {
+async function sendSuccessEffects(admin, order, ticket, expectedAmountClp, baseUrl) {
   try {
     const { buyer, seller, eventName } = await loadOrderEmailData(admin, order);
 
@@ -70,7 +116,7 @@ async function sendPaidEmails(admin, order, baseUrl) {
           ? `Tu compra para ${eventName} fue confirmada.`
           : "Tu compra fue confirmada.",
         link: `/dashboard/purchases/${order.id}`,
-        metadata: { orderId: order.id, ticketId: order.ticket_id || null },
+        metadata: { orderId: order.id, ticketId: ticket?.id || null },
       });
     }
 
@@ -82,303 +128,325 @@ async function sendPaidEmails(admin, order, baseUrl) {
         body: eventName
           ? `Vendiste una entrada para ${eventName}.`
           : "Vendiste una entrada.",
-        link: order.ticket_id ? `/dashboard/publications/${order.ticket_id}` : "/dashboard/publicaciones",
-        metadata: { orderId: order.id, ticketId: order.ticket_id || null },
+        link: ticket?.id
+          ? `/dashboard/publications/${ticket.id}`
+          : "/dashboard/publicaciones",
+        metadata: { orderId: order.id, ticketId: ticket?.id || null },
       });
     }
 
     if (buyer?.email) {
       const { subject, html } = templateOrderPaidBuyer({
-        buyerName: buyer?.full_name || null,
+        buyerName: buyer.full_name || null,
         eventName,
-        totalClp: order.total_clp ?? order.total_amount ?? null,
+        totalClp: expectedAmountClp,
         orderId: order.id,
         link: `${baseUrl}/dashboard/purchases/${order.id}`,
       });
 
-      const buyerRes = await sendEmail({ to: buyer.email, subject, html });
-      if (!buyerRes.ok && !buyerRes.skipped) {
-        console.warn('[Webpay Return] Buyer email error:', buyerRes.error);
+      const buyerResult = await sendEmail({ to: buyer.email, subject, html });
+      if (!buyerResult.ok && !buyerResult.skipped) {
+        console.warn("[Webpay Return] Buyer email error", {
+          orderId: order.id,
+          error: buyerResult.error,
+        });
       }
     }
 
     if (seller?.email) {
       const { subject, html } = templateOrderPaidSeller({
-        sellerName: seller?.full_name || null,
+        sellerName: seller.full_name || null,
         eventName,
         amountClp: order.amount_clp ?? order.amount ?? null,
         orderId: order.id,
-        ticketId: order.ticket_id,
-        link: `${baseUrl}/dashboard/publications/${order.ticket_id}`,
+        ticketId: ticket?.id || order.ticket_id || null,
+        link: `${baseUrl}/dashboard/publications/${ticket?.id || order.ticket_id}`,
       });
 
-      const sellerRes = await sendEmail({ to: seller.email, subject, html });
-      if (!sellerRes.ok && !sellerRes.skipped) {
-        console.warn('[Webpay Return] Seller email error:', sellerRes.error);
+      const sellerResult = await sendEmail({ to: seller.email, subject, html });
+      if (!sellerResult.ok && !sellerResult.skipped) {
+        console.warn("[Webpay Return] Seller email error", {
+          orderId: order.id,
+          error: sellerResult.error,
+        });
       }
     }
-  } catch (err) {
-    console.warn('[Webpay Return] Email error:', err);
+  } catch (error) {
+    console.warn("[Webpay Return] Success effects skipped", {
+      orderId: order?.id || null,
+      error: error?.message || "unknown_error",
+    });
+  }
+}
+
+async function updateOrderState(admin, orderId, patch) {
+  const nextPatch = { ...patch, updated_at: new Date().toISOString() };
+  const { error } = await admin.from("orders").update(nextPatch).eq("id", orderId);
+  if (error) throw error;
+}
+
+async function releaseTicket(admin, ticketId) {
+  const { error } = await admin
+    .from("tickets")
+    .update({ status: "active" })
+    .eq("id", ticketId)
+    .eq("status", "held");
+
+  if (error) throw error;
+}
+
+async function markOrderForReview(admin, orderId, paymentPayload) {
+  if (!orderId) return;
+
+  try {
+    await updateOrderState(admin, orderId, {
+      status: WEBPAY_ORDER_STATUS.PAYMENT_REVIEW,
+      payment_state: WEBPAY_PAYMENT_STATE.PAYMENT_REVIEW,
+      payment_payload: buildSafeWebpayPayload(paymentPayload),
+    });
+  } catch (error) {
+    console.error("[Webpay Return] No se pudo marcar orden en revision", {
+      orderId,
+      error: error.message,
+    });
+  }
+}
+
+async function handleCancellation({
+  admin,
+  baseUrl,
+  source,
+  buyOrder,
+  sessionId,
+}) {
+  if (!buyOrder) {
+    return redirectToPayment(baseUrl, "canceled");
+  }
+
+  const { data: order, error } = await admin
+    .from("orders")
+    .select(
+      "id, ticket_id, buyer_id, status, session_id, buy_order, amount_clp, total_clp, total_amount"
+    )
+    .eq("buy_order", buyOrder)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[Webpay Return] Error buscando orden cancelada", {
+      buyOrder,
+      error: error.message,
+    });
+    return redirectToPayment(baseUrl, "error");
+  }
+
+  if (!order?.id) {
+    return redirectToPayment(baseUrl, "canceled");
+  }
+
+  const persistedSessionId = String(order.session_id || "").trim() || null;
+  if (persistedSessionId && sessionId && persistedSessionId !== sessionId) {
+    await markOrderForReview(admin, order.id, {
+      buy_order: buyOrder,
+      session_id: sessionId,
+      status: WEBPAY_PAYMENT_STATE.CANCELED,
+      response_code: null,
+    });
+
+    await logAuditEvent({
+      eventType: AUDIT_EVENTS.PAYMENT_REVIEW_REQUIRED,
+      userId: order.buyer_id || null,
+      orderId: order.id,
+      metadata: {
+        provider: "webpay",
+        reason: "cancel_session_mismatch",
+        source,
+        buy_order: buyOrder,
+      },
+    });
+
+    return redirectToPayment(baseUrl, "review", order.id);
+  }
+
+  if (String(order.status || "").toLowerCase() === WEBPAY_ORDER_STATUS.PAID) {
+    return redirectToPayment(baseUrl, "success", order.id);
+  }
+
+  await updateOrderState(admin, order.id, {
+    status: WEBPAY_ORDER_STATUS.CANCELED,
+    payment_state: WEBPAY_PAYMENT_STATE.CANCELED,
+    payment_payload: {
+      buy_order: buyOrder,
+      session_id: sessionId,
+      status: WEBPAY_PAYMENT_STATE.CANCELED,
+      source,
+      canceled_at: new Date().toISOString(),
+    },
+  });
+
+  if (order.ticket_id) {
+    await releaseTicket(admin, order.ticket_id);
+  }
+
+  await logAuditEvent({
+    eventType: AUDIT_EVENTS.PAYMENT_CANCELED,
+    userId: order.buyer_id || null,
+    orderId: order.id,
+    metadata: {
+      provider: "webpay",
+      buy_order: buyOrder,
+      source,
+    },
+  });
+
+  return redirectToPayment(baseUrl, "canceled", order.id);
+}
+
+async function handleCallback({ req, source, token, buyOrder, sessionId }) {
+  const admin = supabaseAdmin();
+  const baseUrl = getReturnBaseUrl(req);
+
+  if (!token && buyOrder) {
+    return handleCancellation({
+      admin,
+      baseUrl,
+      source,
+      buyOrder,
+      sessionId,
+    });
+  }
+
+  if (!token) {
+    return redirectToPayment(baseUrl, "unknown");
+  }
+
+  try {
+    const callbackResult = await processWebpayCallback({
+      token,
+      source,
+      logger: console,
+      commitTransaction: async (tokenValue) => {
+        const transaction = getWebpayTransaction();
+        return transaction.commit(tokenValue);
+      },
+      loadOrderByBuyOrder: async (buyOrderValue) => {
+        const { data, error } = await admin
+          .from("orders")
+          .select(
+            "id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, total_paid_clp, fee_clp, currency, session_id, buy_order, payment_state, webpay_token, webpay_authorization_code"
+          )
+          .eq("buy_order", buyOrderValue)
+          .maybeSingle();
+
+        if (error) throw error;
+        return data || null;
+      },
+      loadTicketById: async (ticketId) => {
+        const { data, error } = await admin
+          .from("tickets")
+          .select("id, event_id, status, seller_id")
+          .eq("id", ticketId)
+          .maybeSingle();
+
+        if (error) throw error;
+        return data || null;
+      },
+      updateOrderState: async (orderId, patch) => {
+        await updateOrderState(admin, orderId, patch);
+      },
+      releaseTicket: async (ticketId) => {
+        await releaseTicket(admin, ticketId);
+      },
+      settleApprovedPayment: async ({
+        order,
+        ticket,
+        result,
+        expectedAmountClp,
+        token: webpayToken,
+      }) => {
+        const paidAt = result?.transaction_date
+          ? new Date(result.transaction_date).toISOString()
+          : new Date().toISOString();
+
+        const payload = buildSafeWebpayPayload(result);
+        const { data, error } = await admin.rpc("settle_webpay_order_payment", {
+          p_order_id: order.id,
+          p_ticket_id: ticket.id,
+          p_buy_order: result?.buy_order || order.buy_order,
+          p_session_id: order.session_id || null,
+          p_paid_at: paidAt,
+          p_total_paid_clp: expectedAmountClp,
+          p_webpay_token: webpayToken,
+          p_authorization_code: result?.authorization_code || null,
+          p_payment_type_code: result?.payment_type_code || null,
+          p_card_last4: result?.card_detail?.card_number || null,
+          p_installments_number: result?.installments_number ?? null,
+          p_payment_payload: payload,
+        });
+
+        if (error) {
+          await markOrderForReview(admin, order.id, result);
+          await logAuditEvent({
+            eventType: AUDIT_EVENTS.PAYMENT_REVIEW_REQUIRED,
+            userId: order.buyer_id || null,
+            orderId: order.id,
+            metadata: {
+              provider: "webpay",
+              reason: "settle_rpc_failed",
+              buy_order: result?.buy_order || order.buy_order || null,
+            },
+          });
+
+          console.error("[Webpay Return] Error consolidando pago autorizado", {
+            orderId: order.id,
+            error: error.message,
+          });
+
+          return { requiresReview: true };
+        }
+
+        const alreadyPaid = Boolean(data?.already_paid);
+        return { alreadyPaid };
+      },
+      sendSuccessEffects: async ({ order, ticket, expectedAmountClp }) => {
+        await sendSuccessEffects(admin, order, ticket, expectedAmountClp, baseUrl);
+      },
+      logAuditEvent,
+      auditEvents: AUDIT_EVENTS,
+    });
+
+    return redirectToPayment(
+      baseUrl,
+      callbackResult?.redirectPayment || "unknown",
+      callbackResult?.orderId || callbackResult?.order?.id || null
+    );
+  } catch (error) {
+    console.error("[Webpay Return] Error procesando callback", {
+      source,
+      token: maskTokenForLog(token),
+      error: error?.message || "unknown_error",
+    });
+    return redirectToPayment(baseUrl, "error");
   }
 }
 
 export async function POST(req) {
-  try {
-    const formData = await req.formData();
-
-    // Flujo normal: token_ws
-    const token = formData.get('token_ws');
-
-    // Flujo cancelación/timeout: vienen estos campos, sin token_ws
-    const tbkBuyOrder = formData.get('TBK_ORDEN_COMPRA');
-
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    const redirectBase = `${baseUrl}/dashboard/purchases`;
-
-    const admin = supabaseAdmin();
-
-    // Si canceló antes de pagar en Webpay
-    if (!token && tbkBuyOrder) {
-      const { data: order } = await admin
-        .from('orders')
-        .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
-        .eq('buy_order', tbkBuyOrder)
-        .single();
-
-      if (order?.ticket_id) {
-        await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
-      }
-
-      if (order?.id) {
-        await admin
-          .from('orders')
-          .update({ status: 'canceled', payment_state: 'canceled' })
-          .eq('id', order.id);
-      }
-
-      return NextResponse.redirect(`${redirectBase}?payment=canceled`, { status: 303 });
-    }
-
-    if (!token) {
-      // No sabemos qué pasó, pero no hay token ni buyOrder
-      return NextResponse.redirect(`${redirectBase}?payment=unknown`, { status: 303 });
-    }
-
-    // Commit en Webpay
-    const transaction = getWebpayTransaction();
-    const result = await transaction.commit(token);
-
-    const buyOrder = result?.buy_order;
-
-    // Buscar orden
-    const { data: order, error: orderError } = await admin
-      .from('orders')
-      .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
-      .eq('buy_order', buyOrder)
-      .single();
-
-    if (orderError || !order) {
-      return NextResponse.redirect(`${redirectBase}?payment=order_not_found`, { status: 303 });
-    }
-
-    // Aprobado típicamente: response_code === 0 y status === 'AUTHORIZED'
-    const approved = Number(result?.response_code) === 0 && result?.status === 'AUTHORIZED';
-
-    if (approved) {
-      if (order.status === 'paid') {
-        return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
-          status: 303,
-        });
-      }
-
-      // Marcar orden pagada + ticket vendido
-      await admin
-        .from('orders')
-        .update({
-          status: 'paid',
-          payment_state: result?.status || 'AUTHORIZED',
-          webpay_token: token,
-          webpay_authorization_code: result?.authorization_code,
-          webpay_payment_type_code: result?.payment_type_code,
-          webpay_card_last4: result?.card_detail?.card_number,
-          webpay_installments_number: result?.installments_number,
-          paid_at: new Date().toISOString(),
-        })
-        .eq('id', order.id);
-
-      await admin.from('tickets').update({ status: 'sold' }).eq('id', order.ticket_id);
-      await sendPaidEmails(admin, order, baseUrl);
-
-      // Auditoría PCI DSS: registrar pago exitoso
-      await logAuditEvent({
-        eventType: AUDIT_EVENTS.PAYMENT_SUCCESS,
-        userId: order.buyer_id || null,
-        orderId: order.id,
-        metadata: {
-          provider: 'webpay',
-          authorization_code: result?.authorization_code,
-          payment_type_code: result?.payment_type_code,
-          card_last4: result?.card_detail?.card_number,
-          amount_clp: order.amount_clp,
-          total_clp: order.total_clp,
-        },
-      });
-
-      return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
-        status: 303,
-      });
-    }
-
-    // Rechazado / fallido => liberar ticket
-    await admin
-      .from('orders')
-      .update({
-        status: 'failed',
-        payment_state: result?.status || 'FAILED',
-        webpay_token: token,
-      })
-      .eq('id', order.id);
-
-    await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
-
-    await logAuditEvent({
-      eventType: AUDIT_EVENTS.PAYMENT_FAILED,
-      userId: order.buyer_id || null,
-      orderId: order.id,
-      metadata: { provider: 'webpay', response_code: result?.response_code, status: result?.status },
-    });
-
-    return NextResponse.redirect(`${redirectBase}?payment=failed&order=${order.id}`, {
-      status: 303,
-    });
-  } catch (err) {
-    console.error('Webpay return error:', err);
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    return NextResponse.redirect(`${baseUrl}/dashboard/purchases?payment=error`, { status: 303 });
-  }
+  const formData = await req.formData();
+  return handleCallback({
+    req,
+    source: "POST",
+    token: getPostString(formData, "token_ws"),
+    buyOrder: getPostString(formData, "TBK_ORDEN_COMPRA"),
+    sessionId: getPostString(formData, "TBK_ID_SESION"),
+  });
 }
 
-// Webpay puede redirigir con GET (token_ws en query string)
 export async function GET(req) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const token = searchParams.get('token_ws');
-    const tbkBuyOrder = searchParams.get('TBK_ORDEN_COMPRA');
-    const tbkIdSesion = searchParams.get('TBK_ID_SESION');
-
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    const redirectBase = `${baseUrl}/dashboard/purchases`;
-
-    const admin = supabaseAdmin();
-
-    console.log('[Webpay Return] GET:', { token: !!token, tbkBuyOrder, tbkIdSesion });
-
-    // Si canceló antes de pagar en Webpay
-    if (!token && tbkBuyOrder) {
-      const { data: order } = await admin
-        .from('orders')
-        .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
-        .eq('buy_order', tbkBuyOrder)
-        .single();
-
-      if (order?.ticket_id) {
-        await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
-      }
-
-      if (order?.id) {
-        await admin
-          .from('orders')
-          .update({ status: 'canceled', payment_state: 'canceled' })
-          .eq('id', order.id);
-      }
-
-      return NextResponse.redirect(`${redirectBase}?payment=canceled`, { status: 303 });
-    }
-
-    if (!token) {
-      return NextResponse.redirect(`${redirectBase}?payment=unknown`, { status: 303 });
-    }
-
-    // Commit en Webpay
-    console.log('[Webpay Return] Committing transaction:', token);
-    const transaction = getWebpayTransaction();
-    const result = await transaction.commit(token);
-
-    console.log('[Webpay Return] Result:', {
-      buyOrder: result?.buy_order,
-      status: result?.status,
-      responseCode: result?.response_code,
-    });
-
-    const buyOrder = result?.buy_order;
-
-    // Buscar orden
-    const { data: order, error: orderError } = await admin
-      .from('orders')
-      .select('id, ticket_id, status, buyer_id, seller_id, event_id, amount, amount_clp, total_amount, total_clp, fee_clp')
-      .eq('buy_order', buyOrder)
-      .single();
-
-    if (orderError || !order) {
-      console.error('[Webpay Return] Order not found:', buyOrder);
-      return NextResponse.redirect(`${redirectBase}?payment=order_not_found`, { status: 303 });
-    }
-
-    // Aprobado típicamente: response_code === 0 y status === 'AUTHORIZED'
-    const approved = Number(result?.response_code) === 0 && result?.status === 'AUTHORIZED';
-
-    if (approved) {
-      console.log('[Webpay Return] Payment approved for order:', order.id);
-
-      if (order.status === 'paid') {
-        return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
-          status: 303,
-        });
-      }
-      
-      // Marcar orden pagada + ticket vendido
-      await admin
-        .from('orders')
-        .update({
-          status: 'paid',
-          payment_state: result?.status || 'AUTHORIZED',
-          webpay_token: token,
-          webpay_authorization_code: result?.authorization_code,
-          webpay_payment_type_code: result?.payment_type_code,
-          webpay_card_last4: result?.card_detail?.card_number,
-          webpay_installments_number: result?.installments_number,
-          paid_at: new Date().toISOString(),
-        })
-        .eq('id', order.id);
-
-      await admin.from('tickets').update({ status: 'sold' }).eq('id', order.ticket_id);
-      await sendPaidEmails(admin, order, baseUrl);
-
-      return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
-        status: 303,
-      });
-    }
-
-    // Rechazado / fallido => liberar ticket
-    console.log('[Webpay Return] Payment failed/rejected for order:', order.id);
-    
-    await admin
-      .from('orders')
-      .update({
-        status: 'failed',
-        payment_state: result?.status || 'FAILED',
-        webpay_token: token,
-      })
-      .eq('id', order.id);
-
-    await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
-
-    return NextResponse.redirect(`${redirectBase}?payment=failed&order=${order.id}`, {
-      status: 303,
-    });
-  } catch (err) {
-    console.error('[Webpay Return] Error:', err);
-    const baseUrl = normalizeBaseUrl(process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin);
-    return NextResponse.redirect(`${baseUrl}/dashboard/purchases?payment=error`, { status: 303 });
-  }
+  const { searchParams } = new URL(req.url);
+  return handleCallback({
+    req,
+    source: "GET",
+    token: getQueryString(searchParams, "token_ws"),
+    buyOrder: getQueryString(searchParams, "TBK_ORDEN_COMPRA"),
+    sessionId: getQueryString(searchParams, "TBK_ID_SESION"),
+  });
 }

@@ -1,124 +1,77 @@
-# ✅ CHECKLIST: Poner Webpay en Producción
+# Webpay Plus en Producción
 
-## 1. Variables de Entorno en Vercel (HACER AHORA)
+## Variables de entorno en Vercel
 
-Ve a: **Vercel Dashboard → Tu Proyecto → Settings → Environment Variables**
+Configurar únicamente en **Production**:
 
-Agregar estas 3 variables:
+| Variable | Valor esperado |
+|----------|----------------|
+| `WEBPAY_ENV` | `production` |
+| `WEBPAY_COMMERCE_CODE` | `YOUR_PRODUCTION_COMMERCE_CODE` |
+| `WEBPAY_API_KEY_SECRET` | `YOUR_PRODUCTION_API_KEY_SECRET` |
+| `NEXT_PUBLIC_SITE_URL` | `https://tixswap.cl` |
 
-| Variable | Valor | Environment |
-|----------|-------|-------------|
-| `WEBPAY_ENV` | `production` | Production |
-| `WEBPAY_COMMERCE_CODE` | `597053037929` | Production |
-| `WEBPAY_API_KEY_SECRET` | `64890ada-9435-474e-b1c4-f7b377cf30f7` | Production |
+Notas:
 
-**IMPORTANTE:** 
-- NO las pongas en Preview/Development (para que esos ambientes sigan usando integración)
-- Guarda cada una haciendo click en "Save"
+- No guardar secretos en Git.
+- No copiar credenciales reales a `.env`, `.env.local`, tests, logs ni documentación.
+- Preview y Development deben seguir usando integración salvo decisión explícita.
 
----
+## Pasos en Vercel
 
-## 2. Variable del Sitio (VERIFICAR)
+1. Ir a `Project Settings -> Environment Variables`.
+2. Cargar las variables anteriores en `Production`.
+3. Verificar que no existan valores productivos en `Preview` ni `Development`.
+4. Hacer un redeploy manual del último deployment productivo.
+5. Verificar en logs sólo una de estas líneas:
+   - `[Webpay] Ambiente: PRODUCTION`
+   - `[Webpay] Ambiente: INTEGRATION`
 
-Verifica que tengas esta variable (si no existe, agrégala):
+## Validaciones previas al merge
 
-| Variable | Valor | Environment |
-|----------|-------|-------------|
-| `NEXT_PUBLIC_SITE_URL` | `https://tixswap.cl` | Production |
+1. Confirmar que `WEBPAY_ENV=production` sin `WEBPAY_COMMERCE_CODE` falla al iniciar la sesión Webpay.
+2. Confirmar que `WEBPAY_ENV=production` sin `WEBPAY_API_KEY_SECRET` falla al iniciar la sesión Webpay.
+3. Confirmar que `WEBPAY_ENV=integration` usa integración aunque existan credenciales productivas cargadas por error.
+4. Confirmar que el monto enviado a Webpay coincide con `orders.total_clp` y con la validación del callback.
+5. Confirmar que el callback duplicado no vuelve a vender el ticket ni duplica correos/notificaciones.
 
-Esto asegura que las URLs de retorno de Webpay usen HTTPS.
+## Procedimiento de prueba
 
----
+1. Publicar un ticket de prueba.
+2. Entrar a checkout y verificar el desglose de monto.
+3. Crear sesión Webpay y revisar que la orden quede en `pending` con `payment_state = session_created`.
+4. Completar un pago aprobado.
+5. Verificar:
+   - `orders.status = paid`
+   - `orders.payment_state = AUTHORIZED`
+   - `tickets.status = sold`
+   - `orders.total_paid_clp = orders.total_clp`
+   - existencia de auditoría `PAYMENT_SUCCESS`
+6. Repetir con rechazo/cancelación y verificar estados `failed` o `canceled` según corresponda.
+7. Forzar una discrepancia de monto en ambiente de prueba y verificar `payment_review` + auditoría `PAYMENT_AMOUNT_MISMATCH`.
 
-## 3. Redeploy (DESPUÉS DE AGREGAR VARIABLES)
+## Monitoreo
 
-1. Ve a: **Deployments** (tab superior)
-2. Click en el último deployment
-3. Click en los 3 puntos (...) → **"Redeploy"**
-4. Espera a que termine (1-2 minutos)
+- Revisar logs de `create-session` y `return` después del deploy.
+- Revisar filas nuevas en `audit_events` para:
+  - `PAYMENT_INITIATED`
+  - `PAYMENT_SUCCESS`
+  - `PAYMENT_FAILED`
+  - `PAYMENT_CANCELED`
+  - `PAYMENT_AMOUNT_MISMATCH`
+  - `PAYMENT_REVIEW_REQUIRED`
+- Revisar órdenes que queden en `payment_review`.
+- Revisar tickets que permanezcan en `held` fuera de lo esperado.
 
----
+## Rollback
 
-## 4. Verificación Post-Deploy (REVISAR LOGS)
+1. Cambiar `WEBPAY_ENV` a `integration`.
+2. Redeploy manual.
+3. Revisar que los logs indiquen `[Webpay] Ambiente: INTEGRATION`.
+4. Monitorear órdenes creadas durante la ventana del rollback y conciliar cualquier `payment_review`.
 
-Después del deploy, ve a **Logs** y busca en la consola:
-- ✅ Debe decir: `[Webpay] Usando ambiente PRODUCTION con código: 5970...`
-- ❌ NO debe decir: `[Webpay] Usando ambiente INTEGRATION`
+## Advertencias
 
-Si ves "INTEGRATION", significa que las variables no se tomaron → Verifica el paso 1 y 3.
-
----
-
-## 5. Prueba de $50 (TRANSBANK REQUIERE ESTO)
-
-Según el email de Transbank, debes:
-
-1. **Hacer una compra real de $50 en producción**
-2. Usar una tarjeta de **crédito o débito real**
-3. Verificar que:
-   - La transacción se apruebe
-   - Se guarde el pago en la base de datos
-   - El ticket cambie de estado correctamente
-
----
-
-## 6. Seguridad - Requerimientos de Transbank
-
-### ✅ HTTPS Obligatorio
-- [x] Tu sitio usa HTTPS (tixswap.cl) ✅
-- [x] Todos los callbacks usan HTTPS ✅
-
-### ✅ Validación de Montos (YA IMPLEMENTADO)
-El código ya valida que los montos coincidan en:
-- `/app/api/payments/webpay/return/route.js`
-
-### 📋 Recomendaciones Adicionales (hacer después)
-- [ ] Escaneos de vulnerabilidad cada 3 meses
-- [ ] Actualizar dependencias regularmente
-- [ ] Implementar WAF/IPS si es posible
-- [ ] Contraseñas robustas en admin
-- [ ] Backups regulares del código y DB
-- [ ] Logs de auditoría para transacciones
-- [ ] Auditoría externa anual
-
----
-
-## 7. Página de Resultado (YA IMPLEMENTADO)
-
-Tu página de resultado debe mostrar (verifica que ya lo haga):
-- [x] Número de orden
-- [x] Monto y moneda
-- [x] Código de autorización
-- [x] Fecha de transacción
-- [x] Tipo de pago (Débito/Crédito)
-- [x] Últimos 4 dígitos de tarjeta
-- [x] Descripción del ticket
-
----
-
-## 8. Monitoreo Post-Producción
-
-Después de ir a producción:
-1. Revisar logs diariamente la primera semana
-2. Verificar que todas las transacciones se guarden correctamente
-3. Probar flujos de error (tarjeta rechazada, timeout, etc.)
-4. Monitorear emails de notificaciones
-
----
-
-## 🚨 ROLLBACK (Si algo sale mal)
-
-Si necesitas volver a integración:
-1. En Vercel → Environment Variables
-2. Cambiar `WEBPAY_ENV` de `production` a `integration`
-3. Redeploy
-4. Listo, volverás a usar las credenciales de prueba
-
----
-
-## ✅ LISTO PARA PRODUCCIÓN
-
-Una vez completados todos los pasos:
-1. Haz la compra de $50 de prueba
-2. Envía confirmación a Transbank
-3. ¡Ya estás operando con dinero real! 💰
+- No desplegar a producción sin cargar las variables reales en Vercel.
+- No forzar producción por presencia de credenciales: el cambio depende sólo de `WEBPAY_ENV`.
+- No liberar tickets automáticamente cuando exista posibilidad de autorización pendiente o conciliación manual.

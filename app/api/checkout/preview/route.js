@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { calculateFees } from "@/lib/fees";
+import { buildWebpayCheckoutFees } from "@/lib/payments/webpayAmounts";
 
 function getAdminOrResponse() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -104,7 +104,9 @@ async function getProfileSafe(admin, userId) {
   }
 
   const set = new Set((cols || []).map((x) => x.column_name));
-  const fields = ["id", "full_name", "name", "avatar_url"].filter((f) => set.has(f));
+  const fields = ["id", "full_name", "name", "avatar_url", "seller_tier"].filter((f) =>
+    set.has(f)
+  );
   const selectStr = fields.length ? fields.join(",") : "id";
 
   const { data: prof, error } = await admin
@@ -164,8 +166,11 @@ async function handlePreview(admin, ticketId) {
     avatar_url: sellerFromProfile?.avatar_url || null,
   };
 
-  // 4) Fees (REGLA FIJA)
-  const fees = calculateFees(ticketPrice);
+  // 4) Fees de checkout Webpay
+  const fees = buildWebpayCheckoutFees({
+    ticketPrice,
+    sellerTier: sellerProfile?.seller_tier,
+  });
 
   // 5) Ratings (si existe tabla)
   let sellerStats = { avgRating: null, averageStars: null, totalRatings: 0 };

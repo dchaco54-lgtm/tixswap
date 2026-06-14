@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 export const dynamic = 'force-dynamic';
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { getFees } from "@/lib/fees";
+import {
+  buildWebpayCheckoutFees,
+} from "@/lib/payments/webpayAmounts";
+import { resolveWebpayEnvironmentLabel } from "@/lib/webpay";
 
 // GET /api/payments/webpay/preview?ticketId=<uuid>
 export async function GET(req) {
@@ -41,7 +44,10 @@ export async function GET(req) {
       .eq("id", ticket.seller_id)
       .maybeSingle();
 
-    const fees = getFees(ticket.price, { sellerTier: sellerProfile?.seller_tier });
+    const fees = buildWebpayCheckoutFees({
+      ticketPrice: ticket.price,
+      sellerTier: sellerProfile?.seller_tier,
+    });
     const breakdown = {
       price: Number(ticket.price || 0),
       buyerFee: fees.platformFee,
@@ -49,10 +55,8 @@ export async function GET(req) {
       currency: ticket.currency || "CLP",
     };
 
-    const webpayEnv = (process.env.WEBPAY_ENV || "integration").toLowerCase();
-    const webpayEnabled =
-      webpayEnv !== "production" ||
-      (!!process.env.WEBPAY_COMMERCE_CODE && !!process.env.WEBPAY_API_KEY_SECRET);
+    const webpayEnv = resolveWebpayEnvironmentLabel();
+    const webpayEnabled = true;
 
     return NextResponse.json({
       ticket,
