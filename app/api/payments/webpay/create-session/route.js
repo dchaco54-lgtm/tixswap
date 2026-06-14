@@ -237,7 +237,7 @@ export async function POST(req) {
         orderAmounts.totalAmountClp,
         returnUrl
       );
-    } catch (error) {
+    } catch {
       await releaseHeldTicket(admin, ticketId);
       await admin
         .from("orders")
