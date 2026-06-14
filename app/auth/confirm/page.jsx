@@ -27,16 +27,21 @@ function ConfirmContent() {
       const supabase = createClient();
       let error;
 
-      if (code) {
-        ({ error } = await supabase.auth.exchangeCodeForSession(code));
-      } else {
+      if (tokenHash) {
         ({ error } = await supabase.auth.verifyOtp({
           token_hash: tokenHash,
           type,
         }));
+      } else if (code) {
+        ({ error } = await supabase.auth.exchangeCodeForSession(code));
       }
 
-      if (error) throw error;
+      if (error) {
+        if (error.message?.includes("code verifier") || error.message?.includes("expired")) {
+          throw new Error("Este link ya expiró o es de un registro anterior. Por favor regístrate de nuevo.");
+        }
+        throw error;
+      }
 
       setStatus("success");
       router.push(`${redirectTo}?confirmed=true`);
