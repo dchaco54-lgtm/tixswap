@@ -39,7 +39,18 @@ function ConfirmContent() {
       }
 
       if (error) {
-        throw new Error(`[${code ? "code" : "token_hash"}/${type}] ${error.message}`);
+        if (error.message?.includes("code verifier") || error.message?.includes("PKCE")) {
+          throw new Error(
+            "Este link solo funciona desde el mismo browser donde te registraste. " +
+            "Abre el correo en ese browser o vuelve a registrarte."
+          );
+        }
+        if (error.message?.includes("expired") || error.message?.includes("invalid")) {
+          throw new Error(
+            "Este link ya expiró o ya fue usado. Por favor regístrate de nuevo."
+          );
+        }
+        throw new Error(error.message);
       }
 
       setStatus("success");
