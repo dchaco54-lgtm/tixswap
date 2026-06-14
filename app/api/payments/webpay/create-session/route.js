@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { getWebpayTransaction } from '@/lib/webpay';
 import { normalizeTier, TIERS, getTierCommissionPercent } from '@/lib/tiers';
+import { logAuditEvent, AUDIT_EVENTS } from '@/lib/security/audit';
 import {
   buildProfileIncompleteResponse,
   syncProfileFromAuthUser,
@@ -261,6 +262,14 @@ export async function POST(req) {
         payment_state: 'session_created',
       })
       .eq('id', order.id);
+
+    // Auditoría: pago iniciado
+    await logAuditEvent({
+      eventType: AUDIT_EVENTS.PAYMENT_INITIATED,
+      userId: user.id,
+      orderId: order.id,
+      metadata: { provider: 'webpay', ticketId, amount: amount, total: totalAmount },
+    });
 
     console.log('[Webpay] Respuesta exitosa:', { token: result.token?.slice(0, 8) + '...' });
     return NextResponse.json({ token: result.token, url: result.url }, { status: 200 });

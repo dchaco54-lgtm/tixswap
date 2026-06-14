@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { logAuditEvent, AUDIT_EVENTS } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
 
@@ -50,6 +51,13 @@ export async function POST(req) {
       .eq("id", order_id);
 
     if (upErr) return NextResponse.json({ error: "DB error", details: upErr.message }, { status: 500 });
+
+    await logAuditEvent({
+      eventType: AUDIT_EVENTS.ORDER_DISPUTED,
+      userId: user.id,
+      orderId: order_id,
+      metadata: { reason: reason.slice(0, 200) },
+    });
 
     return NextResponse.json({ ok: true });
   } catch (e) {

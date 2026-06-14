@@ -271,6 +271,18 @@ function buildEventExportRows(events = []) {
   }));
 }
 
+function buildImageUpdateExportRows(events = []) {
+  return events.map((event) => ({
+    id: event?.id || "",
+    titulo: event?.title || "",
+    fecha: formatEventDateTime(event?.starts_at),
+    recinto: event?.venue || "",
+    ciudad: event?.city || "",
+    categoria: event?.category || "",
+    url_imagen: event?.image_url || "",
+  }));
+}
+
 function isWarningsColumnMissingError(error) {
   const code = String(error?.code || "");
   const message = String(error?.message || "").toLowerCase();
@@ -1141,16 +1153,16 @@ export default function AdminEventsPage() {
               <button
                 type="button"
                 onClick={() =>
-                  downloadWorkbook("tixswap-eventos-export.xlsx", [
+                  downloadWorkbook("tixswap-eventos-para-actualizar-imagenes.xlsx", [
                     {
-                      name: "eventos",
-                      rows: buildEventExportRows(events),
+                      name: "actualizar_imagenes",
+                      rows: buildImageUpdateExportRows(events),
                     },
                   ])
                 }
                 className="tix-btn-ghost"
               >
-                Exportar eventos
+                Descargar eventos y actualizar
               </button>
               <button
                 type="button"

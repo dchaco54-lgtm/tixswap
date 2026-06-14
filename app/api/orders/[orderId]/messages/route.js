@@ -66,28 +66,22 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: 'No autorizado' }, { status: 403 });
     }
 
-    // Traer buyer_name, buyer_rut, seller_name, seller_rut
-    let buyer_name = null, buyer_rut = null, seller_name = null, seller_rut = null;
+    // Solo exponemos nombres — el RUT es dato sensible y no es necesario en el chat
+    let buyer_name = null, seller_name = null;
     try {
       const ids = [order.buyer_id, order.seller_id].filter(Boolean);
       if (ids.length) {
         const { data: profiles, error: profErr } = await admin
           .from('profiles')
-          .select('id, full_name, rut')
+          .select('id, full_name')
           .in('id', ids);
         if (profErr) {
           console.error('GET /api/orders/[orderId]/messages profile join error', profErr);
         }
         if (profiles) {
           for (const p of profiles) {
-            if (p.id === order.buyer_id) {
-              buyer_name = p.full_name || null;
-              buyer_rut = p.rut || null;
-            }
-            if (p.id === order.seller_id) {
-              seller_name = p.full_name || null;
-              seller_rut = p.rut || null;
-            }
+            if (p.id === order.buyer_id) buyer_name = p.full_name || null;
+            if (p.id === order.seller_id) seller_name = p.full_name || null;
           }
         }
       }
@@ -138,9 +132,7 @@ export async function GET(req, { params }) {
     return NextResponse.json({
       messages: enriched,
       buyer_name,
-      buyer_rut,
       seller_name,
-      seller_rut,
     });
   } catch (err) {
     console.error('GET /api/orders/[orderId]/messages error:', err);
@@ -175,10 +167,26 @@ export async function POST(req, { params }) {
     }
 
     const cleanMessage = sanitizeUserText(message, { maxLen: 2000 });
-    const safeAttachmentUrl =
-      typeof attachment_url === "string"
-        ? sanitizeUserText(attachment_url, { maxLen: 500 })
-        : null;
+
+    // Solo aceptar adjuntos que sean URLs HTTPS del storage de Supabase
+    let safeAttachmentUrl = null;
+    if (typeof attachment_url === "string" && attachment_url.trim()) {
+      try {
+        const parsed = new URL(attachment_url.trim());
+        const supabaseHost = process.env.NEXT_PUBLIC_SUPABASE_URL
+          ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname
+          : null;
+        const isHttps = parsed.protocol === 'https:';
+        const isOwnStorage = supabaseHost && parsed.hostname === supabaseHost;
+        if (isHttps && isOwnStorage) {
+          safeAttachmentUrl = parsed.toString().slice(0, 500);
+        }
+        // Si no pasa validación, se ignora silenciosamente (no bloqueamos el mensaje)
+      } catch {
+        // URL malformada: ignorar
+      }
+    }
+
     const safeAttachmentName =
       typeof attachment_name === "string"
         ? sanitizeUserText(attachment_name, { maxLen: 180 })

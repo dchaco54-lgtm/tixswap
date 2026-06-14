@@ -5,6 +5,7 @@ import { getWebpayTransaction } from '@/lib/webpay';
 import { sendEmail } from '@/lib/email/resend';
 import { templateOrderPaidBuyer, templateOrderPaidSeller } from '@/lib/email/templates';
 import { createNotification } from '@/lib/notifications';
+import { logAuditEvent, AUDIT_EVENTS } from '@/lib/security/audit';
 
 export const dynamic = 'force-dynamic';
 
@@ -208,6 +209,21 @@ export async function POST(req) {
       await admin.from('tickets').update({ status: 'sold' }).eq('id', order.ticket_id);
       await sendPaidEmails(admin, order, baseUrl);
 
+      // Auditoría PCI DSS: registrar pago exitoso
+      await logAuditEvent({
+        eventType: AUDIT_EVENTS.PAYMENT_SUCCESS,
+        userId: order.buyer_id || null,
+        orderId: order.id,
+        metadata: {
+          provider: 'webpay',
+          authorization_code: result?.authorization_code,
+          payment_type_code: result?.payment_type_code,
+          card_last4: result?.card_detail?.card_number,
+          amount_clp: order.amount_clp,
+          total_clp: order.total_clp,
+        },
+      });
+
       return NextResponse.redirect(`${redirectBase}?payment=success&order=${order.id}`, {
         status: 303,
       });
@@ -224,6 +240,13 @@ export async function POST(req) {
       .eq('id', order.id);
 
     await admin.from('tickets').update({ status: 'active' }).eq('id', order.ticket_id);
+
+    await logAuditEvent({
+      eventType: AUDIT_EVENTS.PAYMENT_FAILED,
+      userId: order.buyer_id || null,
+      orderId: order.id,
+      metadata: { provider: 'webpay', response_code: result?.response_code, status: result?.status },
+    });
 
     return NextResponse.redirect(`${redirectBase}?payment=failed&order=${order.id}`, {
       status: 303,

@@ -1,6 +1,9 @@
 // app/api/wallet/save/route.js
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { validateBankData } from "@/lib/security/bankValidation";
+import { rateLimitByRequest } from "@/lib/security/rateLimit";
+import { logAuditEvent, AUDIT_EVENTS } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,16 +31,38 @@ export async function POST(req) {
     }
     const user = uData.user;
 
+    // Rate limiting: máximo 5 cambios de cuenta bancaria por hora
+    const rate = rateLimitByRequest(req, {
+      bucket: `wallet-save:${user.id}`,
+      limit: 5,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!rate.ok) {
+      return NextResponse.json(
+        { error: "Demasiados cambios de cuenta. Intenta en una hora." },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
     const bank_name = (body?.bank_name || "").trim();
     const account_type = (body?.account_type || "").trim();
     const account_number = (body?.account_number || "").trim();
-    const transfer_email = (body?.transfer_email || "").trim() || null;
+    const transfer_email = (body?.transfer_email || "").trim().toLowerCase() || null;
     const transfer_phone = (body?.transfer_phone || "").trim() || null;
 
     if (!bank_name || !account_type || !account_number) {
       return NextResponse.json(
         { error: "Faltan datos obligatorios (banco, tipo, número de cuenta)." },
+        { status: 400 }
+      );
+    }
+
+    // Validación estricta de datos bancarios
+    const bankValidation = validateBankData({ bank_name, account_type, account_number, transfer_email, transfer_phone });
+    if (!bankValidation.valid) {
+      return NextResponse.json(
+        { error: "Datos bancarios inválidos.", details: bankValidation.errors },
         { status: 400 }
       );
     }
@@ -94,6 +119,12 @@ export async function POST(req) {
     if (error) {
       return NextResponse.json({ error: "DB error", details: error.message }, { status: 500 });
     }
+
+    await logAuditEvent({
+      eventType: AUDIT_EVENTS.WALLET_SAVED,
+      userId: user.id,
+      metadata: { bank_name, account_type },
+    });
 
     return NextResponse.json({ ok: true, payout_account: data }, { status: 200 });
   } catch (e) {

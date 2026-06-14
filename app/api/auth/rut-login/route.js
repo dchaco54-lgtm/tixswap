@@ -1,8 +1,23 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { rateLimitByRequest } from "@/lib/security/rateLimit";
 
 export async function POST(req) {
   try {
+    // Brute-force protection: 10 intentos por IP cada 15 minutos (OWASP recommendation)
+    const rate = rateLimitByRequest(req, {
+      bucket: "auth-rut-login",
+      limit: 10,
+      windowMs: 15 * 60 * 1000,
+    });
+
+    if (!rate.ok) {
+      return NextResponse.json(
+        { message: "Demasiados intentos. Intenta nuevamente en 15 minutos." },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const rutRaw = String(body?.rut || "").trim();
     const password = String(body?.password || "");
