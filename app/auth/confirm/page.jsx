@@ -13,7 +13,9 @@ function ConfirmContent() {
 
   const code = searchParams.get("code");
   const tokenHash = searchParams.get("token_hash");
-  const type = searchParams.get("type") || "email";
+  const rawType = searchParams.get("type") || "email";
+  // 'signup' is a legacy alias; supabase-js v2 verifyOtp expects 'email' for email confirmation
+  const type = rawType === "signup" ? "email" : rawType;
   const redirectTo = searchParams.get("redirectTo") || "/dashboard";
 
   const hasToken = Boolean(code || tokenHash);
@@ -37,10 +39,7 @@ function ConfirmContent() {
       }
 
       if (error) {
-        if (error.message?.includes("code verifier") || error.message?.includes("expired")) {
-          throw new Error("Este link ya expiró o es de un registro anterior. Por favor regístrate de nuevo.");
-        }
-        throw error;
+        throw new Error(`[${code ? "code" : "token_hash"}/${type}] ${error.message}`);
       }
 
       setStatus("success");
