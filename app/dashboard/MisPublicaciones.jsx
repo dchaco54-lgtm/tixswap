@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import ShareButton from "@/components/ShareButton";
@@ -63,6 +63,7 @@ export default function MisPublicaciones() {
     seat: "",
   });
   const [saving, setSaving] = useState(false);
+  const fetchPublicationsRef = useRef(null);
 
   const showToast = (type, msg) => {
     setToast({ type, msg });
@@ -115,8 +116,10 @@ export default function MisPublicaciones() {
     }
   };
 
+  fetchPublicationsRef.current = fetchPublications;
+
   useEffect(() => {
-    fetchPublications();
+    fetchPublicationsRef.current?.();
   }, []);
 
   /** =========================================================

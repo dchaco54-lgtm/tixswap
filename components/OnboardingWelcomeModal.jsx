@@ -53,12 +53,13 @@ export default function OnboardingWelcomeModal({ onClose, onComplete, profile })
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === 'Escape') {
-        handleDismiss();
+        console.log('[Onboarding] Dismissing at step:', step);
+        onClose?.();
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, [onClose, step]);
 
   const handleDismiss = () => {
     console.log('[Onboarding] Dismissing at step:', step);

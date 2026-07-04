@@ -131,13 +131,14 @@ export default function DashboardTour({ onComplete }) {
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === 'Escape') {
-        handleSkip();
+        localStorage.setItem(TOUR_STORAGE_KEY, 'true');
+        onComplete?.();
       }
     };
 
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, [onComplete]);
 
   if (!position) return null;
 

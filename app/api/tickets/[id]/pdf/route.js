@@ -1,6 +1,7 @@
 // app/api/tickets/[id]/pdf/route.js
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getTicketUploadBucket, getTicketUploadEffectivePath } from "@/lib/ticketUploads";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ export async function GET(req, { params }) {
     // 1) Traer ticket
     const { data: ticket, error: tErr } = await supabase
       .from("tickets")
-      .select("id, ticket_upload_id, storage_bucket, storage_path")
+      .select("*")
       .eq("id", ticketId)
       .single();
 
@@ -70,8 +71,13 @@ export async function GET(req, { params }) {
     }
 
     // 5) Elegir qué archivo entregar
-    let bucket = ticket.storage_bucket || "tickets";
-    let path = ticket.storage_path || null;
+    let bucket = ticket.storage_bucket || ticket.upload_bucket || ticket.pdf_bucket || "tickets";
+    let path =
+      ticket.storage_path ||
+      ticket.upload_path ||
+      ticket.pdf_path ||
+      ticket.ticket_pdf_path ||
+      null;
 
     // Si hay renominado, usarlo (para buyer y seller)
     if (order.renominated_storage_path) {
@@ -83,11 +89,11 @@ export async function GET(req, { params }) {
     if (!path && ticket.ticket_upload_id) {
       const { data: tu2 } = await supabase
         .from("ticket_uploads")
-        .select("storage_bucket, storage_path")
+        .select("*")
         .eq("id", ticket.ticket_upload_id)
         .maybeSingle();
-      bucket = tu2?.storage_bucket || bucket;
-      path = tu2?.storage_path || path;
+      bucket = tu2 ? getTicketUploadBucket(tu2) || bucket : bucket;
+      path = tu2 ? getTicketUploadEffectivePath(tu2) || path : path;
     }
 
     if (!path) {

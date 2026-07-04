@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calculateSellerFee } from "@/lib/fees";
+import { tableHasColumn } from "@/lib/db/schemaColumns";
 import { detectEventColumns, detectTicketColumns } from "@/lib/db/ticketSchema";
 import { sendEmail } from "@/lib/email/resend";
 import { templateTicketPublished } from "@/lib/email/templates";
@@ -117,11 +118,35 @@ export async function POST(req) {
     const userRole = sellerProfile?.user_type || "standard";
     const platformFee = calculateSellerFee(price, userRole);
 
+    const hasTicketUploadsEventId = await tableHasColumn(admin, "ticket_uploads", "event_id");
+    if (!hasTicketUploadsEventId) {
+      console.warn(
+        "[event-requests/approve] ticket_uploads.event_id missing, using legacy-compatible flow"
+      );
+    }
+
+    const uploadSelect = [
+      "id",
+      "user_id",
+      "seller_id",
+      "ticket_id",
+      "is_nominated",
+      "is_nominada",
+      "storage_bucket",
+      "storage_path",
+      "storage_path_staging",
+      "storage_path_final",
+      "validation_status",
+      "validation_reason",
+      "status",
+      "sha256",
+      "file_hash",
+    ];
+    if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, "event_id");
+
     const { data: upload, error: uploadErr } = await admin
       .from("ticket_uploads")
-      .select(
-        "id,user_id,seller_id,event_id,ticket_id,is_nominated,is_nominada,storage_bucket,storage_path,storage_path_staging,storage_path_final,validation_status,validation_reason,status,sha256,file_hash"
-      )
+      .select(uploadSelect.join(","))
       .eq("id", ticketUploadId)
       .maybeSingle();
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { tableHasColumn } from "@/lib/db/schemaColumns";
 import { createTicketUploadSignedUrl, getTicketUploadEffectivePath } from "@/lib/ticketUploads";
 
 export const runtime = "nodejs";
@@ -57,16 +58,35 @@ export async function GET(request) {
     const status = url.searchParams.get("status") || "";
     const limitRaw = Number(url.searchParams.get("limit") || 100);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 100;
+    const hasTicketUploadsEventId = await tableHasColumn(admin, "ticket_uploads", "event_id");
+
+    const uploadSelect = [
+      "id",
+      "user_id",
+      "seller_id",
+      "ticket_id",
+      "status",
+      "created_at",
+      "storage_bucket",
+      "storage_path",
+      "storage_path_staging",
+      "storage_path_final",
+      "filename_original",
+      "original_name",
+      "mime_type",
+      "size_bytes",
+      "file_size",
+      "sha256",
+    ];
+    if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, "event_id");
 
     let query = admin
       .from("ticket_uploads")
-      .select(
-        "id,user_id,seller_id,event_id,ticket_id,status,created_at,storage_bucket,storage_path,storage_path_staging,storage_path_final,filename_original,original_name,mime_type,size_bytes,file_size,sha256"
-      )
+      .select(uploadSelect.join(","))
       .order("created_at", { ascending: false })
       .limit(limit);
 
-    if (eventId) query = query.eq("event_id", eventId);
+    if (eventId && hasTicketUploadsEventId) query = query.eq("event_id", eventId);
     if (status) query = query.eq("status", status);
 
     const { data: uploads, error: uploadsErr } = await query;
@@ -74,25 +94,44 @@ export async function GET(request) {
       return NextResponse.json({ error: uploadsErr.message }, { status: 500 });
     }
 
-    const eventIds = Array.from(new Set((uploads || []).map((row) => row.event_id).filter(Boolean)));
+    const ticketIds = Array.from(new Set((uploads || []).map((row) => row.ticket_id).filter(Boolean)));
     const userIds = Array.from(
       new Set((uploads || []).map((row) => row.user_id || row.seller_id).filter(Boolean))
     );
 
-    const [{ data: events }, { data: profiles }] = await Promise.all([
-      eventIds.length
-        ? admin.from("events").select("id,title,starts_at,venue,city").in("id", eventIds)
+    const [{ data: ticketRows }, { data: profiles }] = await Promise.all([
+      ticketIds.length
+        ? admin.from("tickets").select("id,event_id").in("id", ticketIds)
         : Promise.resolve({ data: [] }),
       userIds.length
         ? admin.from("profiles").select("id,email,full_name").in("id", userIds)
         : Promise.resolve({ data: [] }),
     ]);
 
+    const ticketEventById = Object.fromEntries(
+      (ticketRows || []).map((row) => [row.id, row.event_id || null])
+    );
+
+    const resolvedUploads = (uploads || []).map((upload) => ({
+      ...upload,
+      event_id: upload.event_id || ticketEventById[upload.ticket_id] || null,
+    }));
+
+    const filteredUploads = eventId
+      ? resolvedUploads.filter((upload) => upload.event_id === eventId)
+      : resolvedUploads;
+
+    const eventIds = Array.from(new Set(filteredUploads.map((row) => row.event_id).filter(Boolean)));
+
+    const { data: events } = eventIds.length
+        ? admin.from("events").select("id,title,starts_at,venue,city").in("id", eventIds)
+        : Promise.resolve({ data: [] });
+
     const eventsById = Object.fromEntries((events || []).map((row) => [row.id, row]));
     const profilesById = Object.fromEntries((profiles || []).map((row) => [row.id, row]));
 
     const rows = await Promise.all(
-      (uploads || []).map(async (upload) => {
+      filteredUploads.map(async (upload) => {
         const ownerId = upload.user_id || upload.seller_id || null;
         const profile = ownerId ? profilesById[ownerId] || null : null;
         const event = upload.event_id ? eventsById[upload.event_id] || null : null;
