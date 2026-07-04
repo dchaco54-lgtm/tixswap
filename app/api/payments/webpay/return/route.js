@@ -374,7 +374,7 @@ async function handleCallback({ req, source, token, buyOrder, sessionId }) {
           p_buy_order: result?.buy_order || order.buy_order,
           p_session_id: order.session_id || null,
           p_paid_at: paidAt,
-          p_total_paid_clp: expectedAmountClp,
+          p_amount_clp: expectedAmountClp,
           p_webpay_token: webpayToken,
           p_authorization_code: result?.authorization_code || null,
           p_payment_type_code: result?.payment_type_code || null,
