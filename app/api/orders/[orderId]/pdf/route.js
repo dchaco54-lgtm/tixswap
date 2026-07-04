@@ -12,6 +12,70 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function normalizeValue(value) {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+}
+
+function uniqueValues(values = []) {
+  return Array.from(
+    new Set(values.map(normalizeValue).filter(Boolean))
+  );
+}
+
+function buildBucketCandidates(...values) {
+  return uniqueValues([
+    ...values,
+    process.env.TICKET_PDF_BUCKET,
+    "ticket-pdfs",
+    "tickets",
+  ]);
+}
+
+function buildPathCandidates(...values) {
+  return uniqueValues(values);
+}
+
+function createCandidateRef(...entries) {
+  const buckets = buildBucketCandidates(...entries.map((entry) => entry?.bucket));
+  const paths = buildPathCandidates(...entries.map((entry) => entry?.path));
+  if (!buckets.length || !paths.length) return null;
+  return { buckets, paths };
+}
+
+function mergeCandidateRefs(...refs) {
+  const buckets = uniqueValues(refs.flatMap((ref) => ref?.buckets || []));
+  const paths = uniqueValues(refs.flatMap((ref) => ref?.paths || []));
+  if (!buckets.length || !paths.length) return null;
+  return { buckets, paths };
+}
+
+async function createSignedUrlWithFallback(admin, candidateRef, expiresIn = 60 * 10) {
+  if (!candidateRef?.buckets?.length || !candidateRef?.paths?.length) {
+    return { error: "FILE_NOT_FOUND" };
+  }
+
+  let lastError = null;
+
+  for (const path of candidateRef.paths) {
+    for (const bucket of candidateRef.buckets) {
+      const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, expiresIn);
+      if (!error && data?.signedUrl) {
+        return { bucket, path, signedUrl: data.signedUrl };
+      }
+      lastError = error || lastError;
+    }
+  }
+
+  return {
+    error: lastError?.message || "SIGNED_URL_ERROR",
+    details: {
+      buckets: candidateRef.buckets,
+      paths: candidateRef.paths,
+    },
+  };
+}
+
 function toDateSafe(v) {
   try {
     const d = new Date(v);
@@ -57,15 +121,20 @@ async function resolvePdfForTicket(admin, ticketId) {
     ticket.storage_path ||
     ticket.pdf_path ||
     ticket.ticket_pdf_path ||
+    ticket.file_path ||
+    ticket.filepath ||
     null;
-  const directBucket =
-    ticket.upload_bucket ||
-    ticket.storage_bucket ||
-    ticket.pdf_bucket ||
-    "ticket-pdfs";
+  const directCandidate = createCandidateRef({
+    bucket:
+      ticket.upload_bucket ||
+      ticket.storage_bucket ||
+      ticket.pdf_bucket ||
+      null,
+    path: directPath,
+  });
 
-  if (directPath) {
-    return { bucket: directBucket, path: directPath, ticket };
+  if (directCandidate) {
+    return { ticket, candidateRef: directCandidate };
   }
 
   // 2) Si existiera ticket_upload_id (ideal)
@@ -78,10 +147,17 @@ async function resolvePdfForTicket(admin, ticketId) {
       .maybeSingle();
 
     if (upload) {
-      const path =
-        getTicketUploadEffectivePath(upload) || upload.path || null;
-      const bucket = getTicketUploadBucket(upload);
-      if (path) return { bucket, path, ticket, upload };
+      const uploadCandidate = createCandidateRef(
+        {
+          bucket: getTicketUploadBucket(upload),
+          path: getTicketUploadEffectivePath(upload),
+        },
+        {
+          bucket: upload.bucket || null,
+          path: upload.path || upload.file_path || null,
+        }
+      );
+      if (uploadCandidate) return { ticket, upload, candidateRef: uploadCandidate };
     }
   }
 
@@ -99,10 +175,17 @@ async function resolvePdfForTicket(admin, ticketId) {
       ticketCreatedAt: ticket.created_at,
     });
 
-    const path =
-      getTicketUploadEffectivePath(picked) || picked?.path || null;
-    const bucket = picked ? getTicketUploadBucket(picked) : "ticket-pdfs";
-    if (path) return { bucket, path, ticket, upload: picked };
+    const pickedCandidate = createCandidateRef(
+      {
+        bucket: picked ? getTicketUploadBucket(picked) : null,
+        path: picked ? getTicketUploadEffectivePath(picked) : null,
+      },
+      {
+        bucket: picked?.bucket || null,
+        path: picked?.path || picked?.file_path || null,
+      }
+    );
+    if (pickedCandidate) return { ticket, upload: picked, candidateRef: pickedCandidate };
   }
 
   return {
@@ -179,16 +262,21 @@ export async function GET(req, { params }) {
 
     // 0) Si existe PDF re-nominado, el comprador debe descargar ese.
     if (order.renominated_storage_path) {
-      const bucket = order.renominated_storage_bucket || "ticket-pdfs";
-      const path = order.renominated_storage_path;
+      const renominatedCandidate = createCandidateRef({
+        bucket: order.renominated_storage_bucket || null,
+        path: order.renominated_storage_path,
+      });
+      const signedRenominated = await createSignedUrlWithFallback(
+        admin,
+        renominatedCandidate
+      );
 
-      const { data: signed, error: sErr } = await admin.storage
-        .from(bucket)
-        .createSignedUrl(path, 60 * 10);
-
-      if (sErr || !signed?.signedUrl) {
+      if (!signedRenominated?.signedUrl) {
         return NextResponse.json(
-          { error: sErr?.message || "No se pudo firmar el PDF" },
+          {
+            error: signedRenominated?.error || "No se pudo firmar el PDF",
+            details: signedRenominated?.details || null,
+          },
           { status: 500 }
         );
       }
@@ -197,10 +285,15 @@ export async function GET(req, { params }) {
         eventType: "TICKET_FILE_SHARED",
         userId: user.id,
         orderId: order.id,
-        metadata: { bucket, path, source: "order-pdf-route", kind: "renominated" },
+        metadata: {
+          bucket: signedRenominated.bucket,
+          path: signedRenominated.path,
+          source: "order-pdf-route",
+          kind: "renominated",
+        },
       });
 
-      const res = NextResponse.redirect(signed.signedUrl, 302);
+      const res = NextResponse.redirect(signedRenominated.signedUrl, 302);
       res.headers.set("Cache-Control", "no-store");
       return res;
     }
@@ -210,15 +303,31 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: resolved.error }, { status: 404 });
     }
 
-    const { bucket, path } = resolved;
+    const candidateRef = mergeCandidateRefs(
+      resolved?.candidateRef || null,
+      createCandidateRef({
+        bucket: resolved?.ticket?.upload_bucket || resolved?.ticket?.storage_bucket || null,
+        path:
+          resolved?.ticket?.upload_path ||
+          resolved?.ticket?.storage_path ||
+          resolved?.ticket?.pdf_path ||
+          resolved?.ticket?.ticket_pdf_path ||
+          resolved?.ticket?.file_path ||
+          null,
+      })
+    );
 
-    const { data: signed, error: sErr } = await admin.storage
-      .from(bucket)
-      .createSignedUrl(path, 60 * 10);
+    const signedOriginal = await createSignedUrlWithFallback(
+      admin,
+      candidateRef
+    );
 
-    if (sErr || !signed?.signedUrl) {
+    if (!signedOriginal?.signedUrl) {
       return NextResponse.json(
-        { error: sErr?.message || "No se pudo firmar el PDF" },
+        {
+          error: signedOriginal?.error || "No se pudo firmar el PDF",
+          details: signedOriginal?.details || null,
+        },
         { status: 500 }
       );
     }
@@ -227,10 +336,15 @@ export async function GET(req, { params }) {
       eventType: "TICKET_FILE_SHARED",
       userId: user.id,
       orderId: order.id,
-      metadata: { bucket, path, source: "order-pdf-route", kind: "original" },
+      metadata: {
+        bucket: signedOriginal.bucket,
+        path: signedOriginal.path,
+        source: "order-pdf-route",
+        kind: "original",
+      },
     });
 
-    const res = NextResponse.redirect(signed.signedUrl, 302);
+    const res = NextResponse.redirect(signedOriginal.signedUrl, 302);
     res.headers.set("Cache-Control", "no-store");
     return res;
   } catch (e) {
