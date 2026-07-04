@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { tableHasColumn } from "@/lib/db/schemaColumns";
-import { createTicketUploadSignedUrl, getTicketUploadEffectivePath } from "@/lib/ticketUploads";
+import {
+  createTicketUploadSignedUrl,
+  getExistingTicketUploadColumns,
+  getTicketUploadEffectivePath,
+} from "@/lib/ticketUploads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,13 +61,12 @@ export async function GET(request) {
     const status = url.searchParams.get("status") || "";
     const limitRaw = Number(url.searchParams.get("limit") || 100);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 100;
-    const hasTicketUploadsEventId = await tableHasColumn(admin, "ticket_uploads", "event_id");
-    const hasTicketUploadsTicketId = await tableHasColumn(admin, "ticket_uploads", "ticket_id");
-
-    const uploadSelect = [
+    const uploadColumns = await getExistingTicketUploadColumns(admin, [
       "id",
       "user_id",
       "seller_id",
+      "event_id",
+      "ticket_id",
       "status",
       "created_at",
       "storage_bucket",
@@ -77,13 +79,13 @@ export async function GET(request) {
       "size_bytes",
       "file_size",
       "sha256",
-    ];
-    if (hasTicketUploadsTicketId) uploadSelect.splice(3, 0, "ticket_id");
-    if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, "event_id");
+    ]);
+    const hasTicketUploadsEventId = uploadColumns.includes("event_id");
+    const hasTicketUploadsTicketId = uploadColumns.includes("ticket_id");
 
     let query = admin
       .from("ticket_uploads")
-      .select(uploadSelect.join(","))
+      .select(uploadColumns.join(","))
       .order("created_at", { ascending: false })
       .limit(limit);
 

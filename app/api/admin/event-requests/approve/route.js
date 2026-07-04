@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calculateSellerFee } from "@/lib/fees";
-import { tableHasColumn } from "@/lib/db/schemaColumns";
 import { detectEventColumns, detectTicketColumns } from "@/lib/db/ticketSchema";
 import { sendEmail } from "@/lib/email/resend";
 import { templateTicketPublished } from "@/lib/email/templates";
 import { createNotification } from "@/lib/notifications";
-import { finalizeTicketUpload, getTicketUploadOwnerId } from "@/lib/ticketUploads";
+import {
+  finalizeTicketUpload,
+  getExistingTicketUploadColumns,
+  getTicketUploadOwnerId,
+} from "@/lib/ticketUploads";
 import { publishOrUpdatePlaceholderEvent } from "@/lib/requestEventPlaceholders";
 
 export const runtime = "nodejs";
@@ -118,23 +121,12 @@ export async function POST(req) {
     const userRole = sellerProfile?.user_type || "standard";
     const platformFee = calculateSellerFee(price, userRole);
 
-    const hasTicketUploadsEventId = await tableHasColumn(admin, "ticket_uploads", "event_id");
-    const hasTicketUploadsTicketId = await tableHasColumn(admin, "ticket_uploads", "ticket_id");
-    if (!hasTicketUploadsEventId) {
-      console.warn(
-        "[event-requests/approve] ticket_uploads.event_id missing, using legacy-compatible flow"
-      );
-    }
-    if (!hasTicketUploadsTicketId) {
-      console.warn(
-        "[event-requests/approve] ticket_uploads.ticket_id missing, using legacy-compatible flow"
-      );
-    }
-
-    const uploadSelect = [
+    const uploadColumns = await getExistingTicketUploadColumns(admin, [
       "id",
       "user_id",
       "seller_id",
+      "event_id",
+      "ticket_id",
       "is_nominated",
       "is_nominada",
       "storage_bucket",
@@ -146,13 +138,23 @@ export async function POST(req) {
       "status",
       "sha256",
       "file_hash",
-    ];
-    if (hasTicketUploadsTicketId) uploadSelect.splice(3, 0, "ticket_id");
-    if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, "event_id");
+    ]);
+    const hasTicketUploadsEventId = uploadColumns.includes("event_id");
+    const hasTicketUploadsTicketId = uploadColumns.includes("ticket_id");
+    if (!hasTicketUploadsEventId) {
+      console.warn(
+        "[event-requests/approve] ticket_uploads.event_id missing, using legacy-compatible flow"
+      );
+    }
+    if (!hasTicketUploadsTicketId) {
+      console.warn(
+        "[event-requests/approve] ticket_uploads.ticket_id missing, using legacy-compatible flow"
+      );
+    }
 
     const { data: upload, error: uploadErr } = await admin
       .from("ticket_uploads")
-      .select(uploadSelect.join(","))
+      .select(uploadColumns.join(","))
       .eq("id", ticketUploadId)
       .maybeSingle();
 
