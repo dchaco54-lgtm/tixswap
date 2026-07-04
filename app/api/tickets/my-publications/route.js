@@ -1,7 +1,7 @@
 // app/api/tickets/my-publications/route.js
 import { cookies } from "next/headers";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { buildTicketSelect, detectEventColumns, detectTicketColumns, normalizeTicket } from "@/lib/db/ticketSchema";
 import { supabaseServiceOptional } from "@/lib/supabaseServiceOptional";
 
@@ -34,20 +34,20 @@ export async function GET(request) {
     const envError = getEnvErrorResponse();
     if (envError) return envError;
 
-    const supabaseAuth = createRouteHandlerClient({ cookies });
+    const supabaseAuth = createClient(cookies());
     const service = supabaseServiceOptional();
     const authHeader = request.headers.get("authorization");
     let user = null;
 
-    if (authHeader?.startsWith("Bearer ")) {
-      const token = authHeader.replace("Bearer ", "");
-      const authDb = service || supabaseAuth;
-      const { data: authData, error: authErr } = await authDb.auth.getUser(token);
-      if (authErr || !authData?.user) {
-        return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    if (authHeader?.startsWith("Bearer ") && service) {
+      const token = authHeader.slice(7);
+      const { data: authData, error: authErr } = await service.auth.getUser(token);
+      if (!authErr && authData?.user) {
+        user = authData.user;
       }
-      user = authData.user;
-    } else {
+    }
+
+    if (!user) {
       const { data: authData, error: authErr } = await supabaseAuth.auth.getUser();
       if (authErr || !authData?.user) {
         return NextResponse.json({ error: "No autorizado" }, { status: 401 });

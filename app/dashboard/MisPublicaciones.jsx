@@ -47,6 +47,14 @@ export default function MisPublicaciones() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [salesLoading, setSalesLoading] = useState(true);
+  const [salesError, setSalesError] = useState("");
+  const [salesData, setSalesData] = useState({
+    soldCount: 0,
+    paid90dCount: 0,
+    paid90dTotal: 0,
+    recentSales: [],
+  });
 
   // UI extras
   const [query, setQuery] = useState("");
@@ -64,6 +72,7 @@ export default function MisPublicaciones() {
   });
   const [saving, setSaving] = useState(false);
   const fetchPublicationsRef = useRef(null);
+  const fetchSalesRef = useRef(null);
 
   const showToast = (type, msg) => {
     setToast({ type, msg });
@@ -118,8 +127,63 @@ export default function MisPublicaciones() {
 
   fetchPublicationsRef.current = fetchPublications;
 
+  const fetchSales = async () => {
+    try {
+      setSalesLoading(true);
+      setSalesError("");
+
+      const token = await getAccessToken();
+      if (!token) {
+        setSalesData({
+          soldCount: 0,
+          paid90dCount: 0,
+          paid90dTotal: 0,
+          recentSales: [],
+        });
+        return;
+      }
+
+      const res = await fetch("/api/orders/my-sales?months=6&listMonths=3", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || "No se pudieron cargar tus ventas.");
+      }
+
+      setSalesData({
+        soldCount: Number(data?.soldCount || 0),
+        paid90dCount: Number(data?.paid90dCount || 0),
+        paid90dTotal: Number(data?.paid90dTotal || 0),
+        recentSales: Array.isArray(data?.recentSales) ? data.recentSales : [],
+      });
+    } catch (err) {
+      console.error("MisPublicaciones sales error:", err);
+      setSalesError(
+        typeof err?.message === "string"
+          ? err.message
+          : "No se pudieron cargar tus ventas."
+      );
+      setSalesData({
+        soldCount: 0,
+        paid90dCount: 0,
+        paid90dTotal: 0,
+        recentSales: [],
+      });
+    } finally {
+      setSalesLoading(false);
+    }
+  };
+
+  fetchSalesRef.current = fetchSales;
+
   useEffect(() => {
     fetchPublicationsRef.current?.();
+    fetchSalesRef.current?.();
   }, []);
 
   /** =========================================================
@@ -167,6 +231,19 @@ export default function MisPublicaciones() {
       day: "2-digit",
       month: "short",
       year: "numeric",
+    }).format(d);
+  };
+
+  const fmtDateTime = (iso) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return new Intl.DateTimeFormat("es-CL", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     }).format(d);
   };
 
@@ -398,6 +475,111 @@ export default function MisPublicaciones() {
           <SummaryCard label="Activas" value={summary.active} />
           <SummaryCard label="Pausadas" value={summary.paused} />
           <SummaryCard label="Vendidas" value={summary.sold} />
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm mb-6">
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Ventas recientes
+              </h2>
+              <p className="text-sm text-slate-500">
+                Resumen de órdenes pagadas/autorizadas y últimos compradores.
+              </p>
+            </div>
+            <button
+              onClick={fetchSales}
+              className="px-4 py-2 rounded-xl border bg-white hover:bg-gray-50 transition text-sm"
+            >
+              Recargar ventas
+            </button>
+          </div>
+
+          {salesError ? (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {salesError}
+            </div>
+          ) : null}
+
+          {salesLoading ? (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="h-20 rounded-xl bg-slate-100 animate-pulse" />
+              <div className="h-20 rounded-xl bg-slate-100 animate-pulse" />
+              <div className="h-20 rounded-xl bg-slate-100 animate-pulse" />
+            </div>
+          ) : (
+            <>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <SummaryCard label="Tickets vendidos" value={salesData.soldCount} />
+                <SummaryCard label="Órdenes pagadas 90d" value={salesData.paid90dCount} />
+                <SummaryCard label="Monto pagado 90d" value={fmtCLP(salesData.paid90dTotal)} />
+              </div>
+
+              {salesData.recentSales.length === 0 ? (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-sm text-slate-500">
+                  Aún no hay ventas recientes para mostrar.
+                </div>
+              ) : (
+                <div className="mt-4 space-y-3">
+                  {salesData.recentSales.slice(0, 8).map((sale) => {
+                    const saleSeatLine = [
+                      sale?.ticket?.sector ? `Sector ${sale.ticket.sector}` : null,
+                      sale?.ticket?.row ? `Fila ${sale.ticket.row}` : null,
+                      sale?.ticket?.seat ? `Asiento ${sale.ticket.seat}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" • ");
+
+                    return (
+                      <div
+                        key={sale.id}
+                        className="rounded-xl border border-slate-200 px-4 py-4"
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-900 truncate">
+                              {sale?.ticket?.event?.title || "Venta"}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {sale?.ticket?.event?.venue || "—"}
+                              {sale?.ticket?.event?.city ? ` · ${sale.ticket.event.city}` : ""}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {saleSeatLine || "Sin detalle de asiento"}
+                            </div>
+                            <div className="mt-2 text-sm text-slate-700">
+                              Comprador:{" "}
+                              <span className="font-medium">
+                                {sale?.buyer?.full_name || sale?.buyer?.email || "Comprador"}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0 text-left lg:text-right">
+                            <div className="text-lg font-semibold text-slate-900">
+                              {fmtCLP(sale?.total_paid_clp ?? sale?.total_clp)}
+                            </div>
+                            <div className="mt-2">
+                              <SaleStatusBadge
+                                status={sale?.status}
+                                paymentState={sale?.payment_state}
+                              />
+                            </div>
+                            <div className="mt-2 text-xs text-slate-500">
+                              {fmtDateTime(sale?.paid_at || sale?.created_at)}
+                            </div>
+                            <div className="mt-1 text-[11px] text-slate-400">
+                              Orden {sale.id}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* Toolbar */}
@@ -717,6 +899,33 @@ function StatusBadge({ status }) {
       className={`inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border ${cfg.className}`}
     >
       {cfg.label}
+    </span>
+  );
+}
+
+function SaleStatusBadge({ status, paymentState }) {
+  const s = String(status || "").toLowerCase();
+  const ps = String(paymentState || "").toUpperCase();
+
+  if (s === "paid" || ps === "PAID" || ps === "AUTHORIZED") {
+    return (
+      <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
+        Pagada
+      </span>
+    );
+  }
+
+  if (s === "pending") {
+    return (
+      <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border bg-amber-50 text-amber-800 border-amber-200">
+        Pendiente
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border bg-slate-50 text-slate-600 border-slate-200">
+      {status || paymentState || "Estado"}
     </span>
   );
 }

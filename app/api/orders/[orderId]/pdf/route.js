@@ -5,6 +5,10 @@ import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { rateLimitByRequest } from "@/lib/security/rateLimit";
 import { logAuditEvent } from "@/lib/security/audit";
+import {
+  getTicketUploadBucket,
+  getTicketUploadEffectivePath,
+} from "@/lib/ticketUploads";
 
 export const dynamic = "force-dynamic";
 
@@ -49,9 +53,16 @@ async function resolvePdfForTicket(admin, ticketId) {
 
   // 1) Si el ticket ya tuviera paths guardados (schemas distintos)
   const directPath =
-    ticket.storage_path || ticket.pdf_path || ticket.ticket_pdf_path || null;
+    ticket.upload_path ||
+    ticket.storage_path ||
+    ticket.pdf_path ||
+    ticket.ticket_pdf_path ||
+    null;
   const directBucket =
-    ticket.storage_bucket || ticket.pdf_bucket || "ticket-pdfs";
+    ticket.upload_bucket ||
+    ticket.storage_bucket ||
+    ticket.pdf_bucket ||
+    "ticket-pdfs";
 
   if (directPath) {
     return { bucket: directBucket, path: directPath, ticket };
@@ -67,8 +78,9 @@ async function resolvePdfForTicket(admin, ticketId) {
       .maybeSingle();
 
     if (upload) {
-      const path = upload.storage_path || upload.file_path || upload.path;
-      const bucket = upload.storage_bucket || upload.bucket || "ticket-pdfs";
+      const path =
+        getTicketUploadEffectivePath(upload) || upload.path || null;
+      const bucket = getTicketUploadBucket(upload);
       if (path) return { bucket, path, ticket, upload };
     }
   }
@@ -87,8 +99,9 @@ async function resolvePdfForTicket(admin, ticketId) {
       ticketCreatedAt: ticket.created_at,
     });
 
-    const path = picked?.storage_path || picked?.file_path || picked?.path;
-    const bucket = picked?.storage_bucket || picked?.bucket || "ticket-pdfs";
+    const path =
+      getTicketUploadEffectivePath(picked) || picked?.path || null;
+    const bucket = picked ? getTicketUploadBucket(picked) : "ticket-pdfs";
     if (path) return { bucket, path, ticket, upload: picked };
   }
 
