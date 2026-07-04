@@ -95,17 +95,23 @@ export async function GET(req) {
     const url = new URL(req.url);
     const limitRaw = Number(url.searchParams.get("limit") || 500);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 1000) : 500;
+    const statusFilter = String(url.searchParams.get("status") || "").trim().toLowerCase();
 
     const ticketColumns = await detectTicketColumns(admin);
     const eventColumns = await detectEventColumns(admin);
     const selectStr = buildPublishedTicketsSelect(ticketColumns, eventColumns);
 
-    const { data: rows, error } = await admin
+    let query = admin
       .from("tickets")
       .select(selectStr)
-      .eq("status", "active")
       .order("created_at", { ascending: false })
       .limit(limit);
+
+    if (statusFilter) {
+      query = query.eq("status", statusFilter);
+    }
+
+    const { data: rows, error } = await query;
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -149,12 +155,24 @@ export async function GET(req) {
     });
 
     const summary = {
-      total_active: tickets.length,
+      total_published: tickets.length,
+      total_active: tickets.filter((ticket) => String(ticket.status || "").toLowerCase() === "active").length,
+      total_paused: tickets.filter((ticket) => String(ticket.status || "").toLowerCase() === "paused").length,
+      total_sold: tickets.filter((ticket) => String(ticket.status || "").toLowerCase() === "sold").length,
       events: new Set(tickets.map((ticket) => ticket.event_id).filter(Boolean)).size,
       sellers: new Set(tickets.map((ticket) => ticket.seller.id).filter(Boolean)).size,
     };
 
-    return NextResponse.json({ ok: true, tickets, summary, limit });
+    return NextResponse.json({
+      ok: true,
+      tickets,
+      summary,
+      filters: {
+        status: statusFilter || null,
+        limit,
+      },
+      limit,
+    });
   } catch (err) {
     console.error("[admin/published-tickets] error:", err);
     return NextResponse.json(

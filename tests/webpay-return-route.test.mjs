@@ -68,6 +68,82 @@ async function loadRouteModule(stubs) {
   return loadModule(routeModulePath, { stubs });
 }
 
+test("callback autorizado llama la RPC con p_amount_clp", async () => {
+  const rpcCalls = [];
+  const admin = {
+    rpc(name, params) {
+      rpcCalls.push({ name, params });
+      return Promise.resolve({ data: { already_paid: false }, error: null });
+    },
+  };
+
+  const route = await loadRouteModule({
+    "next/server": buildNextServerStub(),
+    "@/lib/email/resend": { sendEmail: async () => ({ ok: true }) },
+    "@/lib/email/templates": {
+      templateOrderPaidBuyer: () => ({ subject: "", html: "" }),
+      templateOrderPaidSeller: () => ({ subject: "", html: "" }),
+    },
+    "@/lib/notifications": { createNotification: async () => ({ ok: true }) },
+    "@/lib/payments/webpayCallback": {
+      buildSafeWebpayPayload: (value) => value,
+      maskTokenForLog: () => "***",
+      WEBPAY_ORDER_STATUS: {
+        PAID: "paid",
+        CANCELED: "canceled",
+        PAYMENT_REVIEW: "payment_review",
+      },
+      WEBPAY_PAYMENT_STATE: {
+        CANCELED: "canceled",
+        PAYMENT_REVIEW: "payment_review",
+      },
+      processWebpayCallback: async ({ settleApprovedPayment }) => {
+        await settleApprovedPayment({
+          order: {
+            id: "order-rpc-1",
+            buy_order: "BUY-RPC-1",
+            session_id: "SESSION-RPC-1",
+            buyer_id: "buyer-rpc-1",
+          },
+          ticket: { id: "ticket-rpc-1" },
+          result: {
+            buy_order: "BUY-RPC-1",
+            authorization_code: "AUTH-1",
+            payment_type_code: "VN",
+            installments_number: 0,
+            card_detail: { card_number: "4242" },
+          },
+          expectedAmountClp: 2070,
+          token: "token-rpc-1",
+        });
+
+        return { redirectPayment: "success", orderId: "order-rpc-1" };
+      },
+    },
+    "@/lib/security/audit": {
+      AUDIT_EVENTS: {
+        PAYMENT_CANCELED: "PAYMENT_CANCELED",
+        PAYMENT_REVIEW_REQUIRED: "PAYMENT_REVIEW_REQUIRED",
+      },
+      logAuditEvent: async () => {},
+    },
+    "@/lib/supabaseAdmin": { supabaseAdmin: () => admin },
+    "@/lib/webpay": { getWebpayTransaction: () => ({}) },
+  });
+
+  const response = await route.GET({
+    url: "https://tixswap.cl/api/payments/webpay/return?token_ws=token-rpc-1",
+    nextUrl: { origin: "https://tixswap.cl" },
+  });
+
+  assert.equal(response.status, 303);
+  assert.match(response.url, /payment=success/);
+  assert.equal(rpcCalls.length, 1);
+  assert.equal(rpcCalls[0].name, "settle_webpay_order_payment");
+  assert.equal(rpcCalls[0].params.p_amount_clp, 2070);
+  assert.equal("p_total_paid_clp" in rpcCalls[0].params, false);
+});
+
 test("cancelación previa al pago marca la orden como canceled y libera el ticket", async () => {
   const updates = [];
   const audits = [];

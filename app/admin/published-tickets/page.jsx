@@ -36,12 +36,16 @@ export default function AdminPublishedTicketsPage() {
   const [error, setError] = useState("");
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({
+    total_published: 0,
     total_active: 0,
+    total_paused: 0,
+    total_sold: 0,
     events: 0,
     sellers: 0,
   });
   const [query, setQuery] = useState("");
   const [eventFilter, setEventFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -108,6 +112,7 @@ export default function AdminPublishedTicketsPage() {
 
         const url = new URL("/api/admin/published-tickets", window.location.origin);
         url.searchParams.set("limit", "500");
+        if (statusFilter) url.searchParams.set("status", statusFilter);
 
         const res = await fetch(url.toString(), {
           headers: {
@@ -124,7 +129,10 @@ export default function AdminPublishedTicketsPage() {
         setRows(json?.tickets || []);
         setSummary(
           json?.summary || {
+            total_published: 0,
             total_active: 0,
+            total_paused: 0,
+            total_sold: 0,
             events: 0,
             sellers: 0,
           }
@@ -133,7 +141,14 @@ export default function AdminPublishedTicketsPage() {
         if (!alive) return;
         console.error("[admin/published-tickets] load error:", loadError);
         setRows([]);
-        setSummary({ total_active: 0, events: 0, sellers: 0 });
+        setSummary({
+          total_published: 0,
+          total_active: 0,
+          total_paused: 0,
+          total_sold: 0,
+          events: 0,
+          sellers: 0,
+        });
         setError(loadError?.message || "No se pudieron cargar las entradas publicadas");
       } finally {
         if (alive) setLoading(false);
@@ -144,7 +159,7 @@ export default function AdminPublishedTicketsPage() {
     return () => {
       alive = false;
     };
-  }, [authToken]);
+  }, [authToken, statusFilter]);
 
   const eventOptions = useMemo(() => {
     return Array.from(
@@ -196,7 +211,7 @@ export default function AdminPublishedTicketsPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Entradas publicadas</h1>
             <p className="text-sm text-slate-500">
-              Vista admin de todas las entradas activas publicadas en TixSwap.
+              Vista admin de todas las entradas publicadas en TixSwap.
             </p>
           </div>
 
@@ -209,13 +224,42 @@ export default function AdminPublishedTicketsPage() {
           </button>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Publicadas
+            </div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">
+              {summary.total_published || 0}
+            </div>
+          </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Activas
             </div>
             <div className="mt-2 text-2xl font-bold text-slate-900">{summary.total_active || 0}</div>
           </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Pausadas
+            </div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{summary.total_paused || 0}</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Vendidas
+            </div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{summary.total_sold || 0}</div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Mostrando
+            </div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">{filteredRows.length}</div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Eventos
@@ -228,16 +272,10 @@ export default function AdminPublishedTicketsPage() {
             </div>
             <div className="mt-2 text-2xl font-bold text-slate-900">{summary.sellers || 0}</div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Mostrando
-            </div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">{filteredRows.length}</div>
-          </div>
         </div>
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
             <input
               className="tix-input w-full"
               value={query}
@@ -249,18 +287,31 @@ export default function AdminPublishedTicketsPage() {
               value={eventFilter}
               onChange={(e) => setEventFilter(e.target.value)}
             >
-              <option value="">Todos los eventos</option>
-              {eventOptions.map((event) => (
-                <option key={event.id} value={event.id}>
-                  {event.title}
-                </option>
-              ))}
+                <option value="">Todos los eventos</option>
+                {eventOptions.map((event) => (
+                  <option key={event.id} value={event.id}>
+                    {event.title}
+                  </option>
+                ))}
+              </select>
+            <select
+              className="tix-input w-full"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="">Todos los estados</option>
+              <option value="active">active</option>
+              <option value="paused">paused</option>
+              <option value="sold">sold</option>
+              <option value="reserved">reserved</option>
+              <option value="pending">pending</option>
             </select>
             <button
               type="button"
               onClick={() => {
                 setQuery("");
                 setEventFilter("");
+                setStatusFilter("");
               }}
               className="tix-btn-secondary w-full"
             >
@@ -271,11 +322,11 @@ export default function AdminPublishedTicketsPage() {
 
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
           {loading ? (
-            <div className="p-6 text-sm text-slate-500">Cargando entradas activas...</div>
+            <div className="p-6 text-sm text-slate-500">Cargando entradas publicadas...</div>
           ) : error ? (
             <div className="p-6 text-sm text-red-600">{error}</div>
           ) : filteredRows.length === 0 ? (
-            <div className="p-6 text-sm text-slate-500">No hay entradas activas para esos filtros.</div>
+            <div className="p-6 text-sm text-slate-500">No hay entradas publicadas para esos filtros.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -284,6 +335,7 @@ export default function AdminPublishedTicketsPage() {
                     <th className="px-4 py-3">Evento</th>
                     <th className="px-4 py-3">Entrada</th>
                     <th className="px-4 py-3">Usuario</th>
+                    <th className="px-4 py-3">Estado</th>
                     <th className="px-4 py-3">Precio</th>
                     <th className="px-4 py-3">Publicada</th>
                   </tr>
@@ -308,6 +360,11 @@ export default function AdminPublishedTicketsPage() {
                         <div className="mt-1 break-all text-xs text-slate-500">
                           {row.seller?.email || row.seller?.id || "—"}
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                          {row.status || "—"}
+                        </span>
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-900">
                         {formatPrice(row.price, row.currency)}

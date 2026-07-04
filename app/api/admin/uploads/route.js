@@ -70,9 +70,12 @@ export async function GET(request) {
       "status",
       "created_at",
       "storage_bucket",
+      "bucket",
       "storage_path",
       "storage_path_staging",
       "storage_path_final",
+      "path",
+      "file_path",
       "filename_original",
       "original_name",
       "mime_type",
@@ -146,6 +149,7 @@ export async function GET(request) {
 
         return {
           ...upload,
+          effective_bucket: upload?.storage_bucket || upload?.bucket || null,
           effective_path: getTicketUploadEffectivePath(upload),
           event,
           profile,

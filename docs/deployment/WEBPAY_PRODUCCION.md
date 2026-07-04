@@ -50,6 +50,37 @@ Notas:
 6. Repetir con rechazo/cancelación y verificar estados `failed` o `canceled` según corresponda.
 7. Forzar una discrepancia de monto en ambiente de prueba y verificar `payment_review` + auditoría `PAYMENT_AMOUNT_MISMATCH`.
 
+## Regresiones reales observadas
+
+### 1. Orden queda `pending` aunque el comprador complete Webpay
+- Causa real observada:
+  - La ruta `app/api/payments/webpay/return/route.js` llamó la RPC `settle_webpay_order_payment` con `p_total_paid_clp`.
+  - La función SQL espera `p_amount_clp`.
+- Efecto:
+  - comprador ve `Pendiente`
+  - vendedor no ve la venta
+  - ticket puede quedar sin consolidar
+  - PDF comprador queda bloqueado por regla de negocio
+- Guardia obligatoria:
+  - Confirmar que el callback use `p_amount_clp`.
+  - Confirmar que la migración `supabase/migrations/20260614_webpay_production_hardening.sql` esté aplicada en producción.
+  - Mantener test de regresión para el nombre exacto del parámetro RPC.
+
+### 2. Front “termina bien” pero la compra no se consolida
+- Posibles causas a revisar:
+  - callback `/api/payments/webpay/return` no ejecutado
+  - `session_id` mismatch y orden enviada a `payment_review`
+  - RPC `settle_webpay_order_payment` inexistente en prod
+- Procedimiento:
+  - Revisar logs del callback.
+  - Revisar `audit_events` con `PAYMENT_REVIEW_REQUIRED`.
+  - Usar `supabase/scripts/WEBPAY_PENDING_ORDER_RESCUE.sql` para diagnosticar y rescatar una orden puntual.
+
+### 3. PDF comprador bloqueado después de una compra
+- Antes de depurar paths o buckets:
+  - confirmar primero que `orders.status = paid` o `payment_state = AUTHORIZED`
+  - si la orden sigue `pending`, el problema primario no es Storage sino consolidación de pago
+
 ## Monitoreo
 
 - Revisar logs de `create-session` y `return` después del deploy.
@@ -61,6 +92,7 @@ Notas:
   - `PAYMENT_AMOUNT_MISMATCH`
   - `PAYMENT_REVIEW_REQUIRED`
 - Revisar órdenes que queden en `payment_review`.
+- Revisar órdenes que permanezcan en `pending` más de unos minutos después de un pago exitoso informado por el usuario.
 - Revisar tickets que permanezcan en `held` fuera de lo esperado.
 
 ## Rollback

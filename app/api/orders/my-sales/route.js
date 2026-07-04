@@ -172,7 +172,7 @@ export async function GET(req) {
     if (buyerIds.length) {
       const { data: buyers, error: bErr } = await admin
         .from("profiles")
-        .select("id,full_name,name,email")
+        .select("id,full_name,email")
         .in("id", buyerIds);
 
       if (bErr) throw bErr;
@@ -225,7 +225,7 @@ export async function GET(req) {
           total_paid_clp: total,
           total_clp: total,
           buyer: buyer
-            ? { id: buyer.id, full_name: buyer.full_name || buyer.name || buyer.email || "Comprador", email: buyer.email || null }
+            ? { id: buyer.id, full_name: buyer.full_name || buyer.email || "Comprador", email: buyer.email || null }
             : null,
           ticket: o.ticket
             ? {
