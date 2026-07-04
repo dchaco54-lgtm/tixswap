@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import OrderChat from "@/app/components/OrderChat";
 import RatingModal from "@/components/RatingModal";
 import StarRating from "@/components/StarRating";
@@ -60,6 +61,7 @@ export default function PurchaseDetailPage() {
   const [ratingSubmitting, setRatingSubmitting] = useState(false);
   const [ratingError, setRatingError] = useState("");
   const [myRating, setMyRating] = useState(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   async function load() {
     setErr("");
@@ -91,7 +93,6 @@ export default function PurchaseDetailPage() {
     (order?.status || "").toLowerCase() === "paid" ||
     String(order?.payment_state || "").toUpperCase() === "AUTHORIZED";
 
-  const pdfHref = order ? `/api/orders/${order.id}/pdf` : "#";
   const canRate = String(t?.status || "").toLowerCase() === "sold";
   const hasRated = Boolean(myRating?.id);
   const isNominated = Boolean(
@@ -178,6 +179,46 @@ export default function PurchaseDetailPage() {
       setRatingError(e?.message || "No se pudo calificar");
     } finally {
       setRatingSubmitting(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!canDownload || !t?.id) return;
+
+    setDownloadingPdf(true);
+    setErr("");
+
+    try {
+      const supabase = createClient();
+      const { data: sessionRes, error: sessionErr } = await supabase.auth.getSession();
+      const token = sessionRes?.session?.access_token;
+
+      if (sessionErr || !token) {
+        throw new Error("Tu sesión expiró. Vuelve a iniciar sesión.");
+      }
+
+      const res = await fetch(`/api/tickets/${t.id}/pdf`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        cache: "no-store",
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.url) {
+        throw new Error(
+          json?.message ||
+          json?.details?.message ||
+          json?.error ||
+          "No se pudo generar la descarga."
+        );
+      }
+
+      window.open(json.url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setErr(e?.message || "No se pudo descargar el PDF.");
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -307,21 +348,18 @@ export default function PurchaseDetailPage() {
               ) : null}
 
               <div className="flex flex-col sm:flex-row gap-3">
-                <a
-                  href={pdfHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={(ev) => {
-                    if (!canDownload) ev.preventDefault();
-                  }}
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={!canDownload || downloadingPdf}
                   className={`inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm ${
-                    canDownload
+                    canDownload && !downloadingPdf
                       ? "bg-blue-600 text-white hover:bg-blue-700"
                       : "bg-slate-200 text-slate-500 cursor-not-allowed"
                   }`}
                 >
-                  Descargar PDF
-                </a>
+                  {downloadingPdf ? "Generando PDF..." : "Descargar PDF"}
+                </button>
 
                 <button
                   type="button"
