@@ -59,12 +59,12 @@ export async function GET(request) {
     const limitRaw = Number(url.searchParams.get("limit") || 100);
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 100;
     const hasTicketUploadsEventId = await tableHasColumn(admin, "ticket_uploads", "event_id");
+    const hasTicketUploadsTicketId = await tableHasColumn(admin, "ticket_uploads", "ticket_id");
 
     const uploadSelect = [
       "id",
       "user_id",
       "seller_id",
-      "ticket_id",
       "status",
       "created_at",
       "storage_bucket",
@@ -78,6 +78,7 @@ export async function GET(request) {
       "file_size",
       "sha256",
     ];
+    if (hasTicketUploadsTicketId) uploadSelect.splice(3, 0, "ticket_id");
     if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, "event_id");
 
     let query = admin
@@ -94,7 +95,9 @@ export async function GET(request) {
       return NextResponse.json({ error: uploadsErr.message }, { status: 500 });
     }
 
-    const ticketIds = Array.from(new Set((uploads || []).map((row) => row.ticket_id).filter(Boolean)));
+    const ticketIds = hasTicketUploadsTicketId
+      ? Array.from(new Set((uploads || []).map((row) => row.ticket_id).filter(Boolean)))
+      : [];
     const userIds = Array.from(
       new Set((uploads || []).map((row) => row.user_id || row.seller_id).filter(Boolean))
     );
@@ -114,7 +117,9 @@ export async function GET(request) {
 
     const resolvedUploads = (uploads || []).map((upload) => ({
       ...upload,
-      event_id: upload.event_id || ticketEventById[upload.ticket_id] || null,
+      event_id:
+        upload.event_id ||
+        (hasTicketUploadsTicketId ? ticketEventById[upload.ticket_id] || null : null),
     }));
 
     const filteredUploads = eventId

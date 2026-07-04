@@ -119,9 +119,15 @@ export async function POST(req) {
     const platformFee = calculateSellerFee(price, userRole);
 
     const hasTicketUploadsEventId = await tableHasColumn(admin, "ticket_uploads", "event_id");
+    const hasTicketUploadsTicketId = await tableHasColumn(admin, "ticket_uploads", "ticket_id");
     if (!hasTicketUploadsEventId) {
       console.warn(
         "[event-requests/approve] ticket_uploads.event_id missing, using legacy-compatible flow"
+      );
+    }
+    if (!hasTicketUploadsTicketId) {
+      console.warn(
+        "[event-requests/approve] ticket_uploads.ticket_id missing, using legacy-compatible flow"
       );
     }
 
@@ -129,7 +135,6 @@ export async function POST(req) {
       "id",
       "user_id",
       "seller_id",
-      "ticket_id",
       "is_nominated",
       "is_nominada",
       "storage_bucket",
@@ -142,6 +147,7 @@ export async function POST(req) {
       "sha256",
       "file_hash",
     ];
+    if (hasTicketUploadsTicketId) uploadSelect.splice(3, 0, "ticket_id");
     if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, "event_id");
 
     const { data: upload, error: uploadErr } = await admin

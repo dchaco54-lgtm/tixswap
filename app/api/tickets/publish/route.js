@@ -144,8 +144,12 @@ export async function POST(request) {
 
     const columns = await detectTicketColumns(supabase);
     const hasTicketUploadsEventId = await tableHasColumn(supabase, 'ticket_uploads', 'event_id');
+    const hasTicketUploadsTicketId = await tableHasColumn(supabase, 'ticket_uploads', 'ticket_id');
     if (!hasTicketUploadsEventId) {
       console.warn('[tickets/publish] ticket_uploads.event_id missing, using legacy-compatible flow');
+    }
+    if (!hasTicketUploadsTicketId) {
+      console.warn('[tickets/publish] ticket_uploads.ticket_id missing, using legacy-compatible flow');
     }
     let upload = null;
     if (ticketUploadId) {
@@ -153,7 +157,6 @@ export async function POST(request) {
         'id',
         'user_id',
         'seller_id',
-        'ticket_id',
         'is_nominated',
         'is_nominada',
         'storage_bucket',
@@ -172,6 +175,7 @@ export async function POST(request) {
         'sha256',
         'file_hash',
       ];
+      if (hasTicketUploadsTicketId) uploadSelect.splice(3, 0, 'ticket_id');
       if (hasTicketUploadsEventId) uploadSelect.splice(3, 0, 'event_id');
 
       const { data: uploadRow, error: uploadErr } = await supabase
