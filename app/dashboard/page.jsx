@@ -42,12 +42,12 @@ function formatDateTime(iso) {
 
 function statusPill(status, paymentState) {
   const s = String(status || "").toLowerCase();
-  const ps = String(paymentState || "").toLowerCase();
+  const ps = String(paymentState || "").toUpperCase();
 
   const base =
     "inline-flex items-center rounded-full px-2 py-1 text-[11px] font-extrabold";
 
-  if (s === "paid" || ps === "paid") {
+  if (s === "paid" || ps === "PAID" || ps === "AUTHORIZED") {
     return (
       <span className={`${base} bg-emerald-50 text-emerald-700`}>
         Pagada

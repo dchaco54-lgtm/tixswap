@@ -17,7 +17,10 @@ function formatDate(iso) {
 
 function statusLabel(o) {
   const s = (o?.status || "").toLowerCase();
-  if (s === "paid") return { text: "Pagada", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  const ps = String(o?.payment_state || "").toUpperCase();
+  if (s === "paid" || ps === "PAID" || ps === "AUTHORIZED") {
+    return { text: "Pagada", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  }
   if (s === "pending") return { text: "Pendiente", className: "bg-amber-50 text-amber-700 border-amber-200" };
   return { text: o?.status || "Estado", className: "bg-slate-50 text-slate-700 border-slate-200" };
 }
@@ -148,4 +151,3 @@ export default function PurchasesPage() {
     </div>
   );
 }
-

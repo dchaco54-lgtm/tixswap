@@ -67,6 +67,8 @@ export async function POST(req) {
       );
     }
 
+    const normalizedBankData = bankValidation.normalized;
+
     // ✅ Fuente real: profiles (fallback a metadata)
     const { data: prof } = await supabase
       .from("profiles")
@@ -101,11 +103,11 @@ export async function POST(req) {
       user_id: user.id,
       holder_name,
       holder_rut,
-      bank_name,
-      account_type,
-      account_number,
-      transfer_email,
-      transfer_phone,
+      bank_name: normalizedBankData.bank_name,
+      account_type: normalizedBankData.account_type,
+      account_number: normalizedBankData.account_number,
+      transfer_email: normalizedBankData.transfer_email,
+      transfer_phone: normalizedBankData.transfer_phone,
       created_at: now, // safe: en upsert se ignora si ya existe o si la tabla maneja defaults
       updated_at: now,
     };
@@ -123,7 +125,10 @@ export async function POST(req) {
     await logAuditEvent({
       eventType: AUDIT_EVENTS.WALLET_SAVED,
       userId: user.id,
-      metadata: { bank_name, account_type },
+      metadata: {
+        bank_name: normalizedBankData.bank_name,
+        account_type: normalizedBankData.account_type,
+      },
     });
 
     return NextResponse.json({ ok: true, payout_account: data }, { status: 200 });
@@ -134,4 +139,3 @@ export async function POST(req) {
     );
   }
 }
-

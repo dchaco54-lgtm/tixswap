@@ -5,11 +5,24 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const ACCOUNT_TYPES = [
-  "Cuenta corriente",
-  "Cuenta vista",
-  "CuentaRUT",
-  "Cuenta digital (Mach/Tenpo/otro)",
+  "Cuenta Corriente",
+  "Cuenta Vista",
+  "Cuenta RUT",
+  "Cuenta Digital",
 ];
+
+function normalizeAccountTypeValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return ACCOUNT_TYPES[0];
+
+  const key = raw.toLowerCase().replace(/\s+/g, " ");
+  if (key === "cuenta corriente") return "Cuenta Corriente";
+  if (key === "cuenta vista") return "Cuenta Vista";
+  if (key === "cuentarut" || key === "cuenta rut") return "Cuenta RUT";
+  if (key === "cuenta digital (mach/tenpo/otro)" || key === "cuenta digital") return "Cuenta Digital";
+
+  return ACCOUNT_TYPES.includes(raw) ? raw : ACCOUNT_TYPES[0];
+}
 
 function maskAccount(n) {
   const s = String(n || "").trim();
@@ -41,7 +54,7 @@ export default function WalletSection({ user: userProp = null }) {
 
   const [form, setForm] = useState({
     bank_name: "",
-    account_type: "Cuenta corriente",
+    account_type: ACCOUNT_TYPES[0],
     account_number: "",
     transfer_email: "",
     transfer_phone: "",
@@ -130,7 +143,7 @@ export default function WalletSection({ user: userProp = null }) {
         setSavedView(wData);
         setForm({
           bank_name: wData.bank_name || "",
-          account_type: wData.account_type || "Cuenta corriente",
+          account_type: normalizeAccountTypeValue(wData.account_type),
           account_number: wData.account_number || "",
           transfer_email: wData.transfer_email || "",
           transfer_phone: wData.transfer_phone || "",
@@ -163,7 +176,7 @@ export default function WalletSection({ user: userProp = null }) {
     if (savedView) {
       setForm({
         bank_name: savedView.bank_name || "",
-        account_type: savedView.account_type || "Cuenta corriente",
+        account_type: normalizeAccountTypeValue(savedView.account_type),
         account_number: savedView.account_number || "",
         transfer_email: savedView.transfer_email || "",
         transfer_phone: savedView.transfer_phone || "",

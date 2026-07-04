@@ -295,6 +295,17 @@ export default function AdminPage() {
               Ir a Uploads →
             </button>
           </div>
+
+          <div
+            onClick={() => router.push("/admin/published-tickets")}
+            className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 cursor-pointer hover:shadow-md transition-shadow"
+          >
+            <h3 className="text-lg font-semibold text-gray-900">Entradas publicadas</h3>
+            <p className="text-sm text-gray-500 mt-1">Ver todas las entradas activas por evento y vendedor</p>
+            <button className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+              Ir a Entradas →
+            </button>
+          </div>
         </div>
 
         {/* SECCIÓN EVENTOS */}

@@ -30,8 +30,8 @@ function getBearerToken(req) {
 
 function isPaid(order) {
   const s = String(order?.status || "").toLowerCase();
-  const ps = String(order?.payment_state || "").toLowerCase();
-  return s === "paid" || ps === "paid";
+  const ps = String(order?.payment_state || "").toUpperCase();
+  return s === "paid" || ps === "PAID" || ps === "AUTHORIZED";
 }
 
 function normalizeBuyerId(order) {
@@ -152,7 +152,7 @@ export async function GET(req) {
       .select(`
         id,status,payment_state,created_at,paid_at,total_amount,total_paid_clp,amount_clp,buyer_id,user_id,ticket_id,
         ticket:ticket_id(
-          id,price,sector,row_label,seat_label,notes,status,
+          id,price,sector,row_label,seat_label,status,
           event:events(id,title,starts_at,venue,city)
         )
       `)
@@ -233,7 +233,7 @@ export async function GET(req) {
                 sector: o.ticket.sector,
                 row: o.ticket.row_label ?? null,
                 seat: o.ticket.seat_label ?? null,
-                notes: o.ticket.notes,
+                notes: null,
                 event: o.ticket?.event
                   ? {
                       id: o.ticket.event.id,

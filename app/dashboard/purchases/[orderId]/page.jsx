@@ -33,7 +33,8 @@ function formatDateLong(iso) {
 
 function statusBadge(order) {
   const s = (order?.status || "").toLowerCase();
-  if (s === "paid")
+  const ps = String(order?.payment_state || "").toUpperCase();
+  if (s === "paid" || ps === "PAID" || ps === "AUTHORIZED")
     return {
       text: "Pagada",
       cls: "bg-emerald-50 text-emerald-700 border-emerald-200",

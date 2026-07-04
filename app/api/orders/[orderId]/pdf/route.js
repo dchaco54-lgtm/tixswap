@@ -78,7 +78,7 @@ async function resolvePdfForTicket(admin, ticketId) {
     const { data: uploads } = await admin
       .from("ticket_uploads")
       .select("*")
-      .eq("seller_id", ticket.seller_id)
+      .or(`seller_id.eq.${ticket.seller_id},user_id.eq.${ticket.seller_id}`)
       .order("created_at", { ascending: false })
       .limit(10);
 
