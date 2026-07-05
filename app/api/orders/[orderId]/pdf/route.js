@@ -248,6 +248,16 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
 
+    if (user.id === order.seller_id) {
+      return NextResponse.json(
+        {
+          error: "PDF_BLOCKED_FOR_SELLER",
+          message: "El vendedor no puede descargar el PDF una vez vendida la entrada.",
+        },
+        { status: 403 }
+      );
+    }
+
     // Para el MVP: debe ser paid o AUTHORIZED
     const paidOk =
       String(order.status || "").toLowerCase() === "paid" ||

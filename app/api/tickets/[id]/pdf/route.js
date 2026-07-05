@@ -106,6 +106,22 @@ export async function GET(req, { params }) {
     }
 
     const isBuyer = order.buyer_id === user.id;
+    const isSeller = order.seller_id === user.id;
+    const ticketSold = String(ticket.status || "").toLowerCase() === "sold";
+    const orderPaid =
+      String(order.status || "").toLowerCase() === "paid" ||
+      String(order.payment_state || "").toUpperCase() === "PAID" ||
+      String(order.payment_state || "").toUpperCase() === "AUTHORIZED";
+
+    if (isSeller && (ticketSold || orderPaid)) {
+      return NextResponse.json(
+        {
+          error: "PDF_BLOCKED_FOR_SELLER",
+          message: "El vendedor no puede descargar el PDF una vez vendida la entrada.",
+        },
+        { status: 403 }
+      );
+    }
 
     // 3) Saber si es nominada (desde ticket_uploads)
     let isNominada = false;

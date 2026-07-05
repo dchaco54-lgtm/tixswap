@@ -156,6 +156,7 @@ export default function PublicationDetailPage() {
   const badge = useMemo(() => statusBadge(ticket?.status), [ticket?.status]);
   const isSold = String(ticket?.status || "").toLowerCase() === "sold";
   const canEdit = !!ticket && !["sold", "locked", "processing"].includes(ticket.status);
+  const canSellerDownloadPdf = Boolean(ticket) && !isSold;
   const nominated = Boolean(ticket?.is_nominated);
   const summaryEntry = isSold && order ? order.ticket_price : (ticket?.price ?? 0);
   const summaryFee = isSold && order ? order.platform_fee : (ticket?.platform_fee ?? 0);
@@ -473,15 +474,32 @@ export default function PublicationDetailPage() {
                   </div>
                 ) : null}
 
+                {isSold ? (
+                  <div className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    Por seguridad, una vez vendida la entrada el vendedor ya no puede descargar el PDF original.
+                  </div>
+                ) : null}
+
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <a
-                    href={pdfHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    Descargar PDF
-                  </a>
+                  {canSellerDownloadPdf ? (
+                    <a
+                      href={pdfHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      Descargar PDF
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      title="Una vez vendida, el vendedor ya no puede descargar este PDF."
+                      className="inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm bg-slate-200 text-slate-500 cursor-not-allowed"
+                    >
+                      PDF bloqueado
+                    </button>
+                  )}
 
                   <button
                     type="button"
