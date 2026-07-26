@@ -1,9 +1,10 @@
 ---
-name: TixSwap API Rules
+name: Entribe API Rules
 description: Reglas para app/api/** (Next.js route handlers)
 applyTo: "app/api/**"
 ---
 
+- Leer `AGENTS.md`, `docs/ENTRIBE_AGENT_SEED.md` y `docs/db/schema.json` antes de tocar endpoints sensibles.
 - Nunca cambiar el shape de respuesta sin retrocompatibilidad.
 - Para /api/tickets/my-publications:
   - Siempre devolver `{ tickets, summary }`

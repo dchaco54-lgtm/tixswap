@@ -1,4 +1,4 @@
-Lee AGENTS.md y docs/db/schema.json antes de proponer cambios.
+Lee `AGENTS.md`, `docs/ENTRIBE_AGENT_SEED.md` y `docs/db/schema.json` antes de proponer cambios.
 
 Reglas:
 - No reescribir archivos completos.
@@ -7,3 +7,4 @@ Reglas:
 - Si algo es incierto, primero inspecciona (grep + schema.json + queries) y recién después cambia.
 - Bloqueante: CERO ESLint errors en build.
 - No tocar pagos/Webpay salvo instrucción explícita.
+- Para contexto de negocio, rebranding y criterio de producto, usa `docs/ENTRIBE_AGENT_SEED.md` como fuente base.

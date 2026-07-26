@@ -1,4 +1,8 @@
-# TixSwap – Reglas de trabajo del agente (AGENTS)
+# Entribe / TixSwap - Reglas de trabajo del agente (AGENTS)
+
+## Fuente base
+- Lee `docs/ENTRIBE_AGENT_SEED.md` como contexto principal de negocio, producto, rebranding y forma de trabajo.
+- Usa `AGENTS.md` como capa bloqueante local: si hay conflicto, estas reglas mandan para este repo.
 
 ## Idioma / tono
 - Español (Chile), directo, sin humo.
@@ -40,4 +44,3 @@
 3) Patch/diff preciso
 4) Comandos a correr (npm run build)
 5) Checklist final (UI + endpoint + prod)
-

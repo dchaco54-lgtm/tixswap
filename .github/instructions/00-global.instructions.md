@@ -1,9 +1,10 @@
 ---
-name: TixSwap Global Rules
-description: Reglas globales (cambios mínimos, no romper contratos, seguridad, estilo)
+name: Entribe Global Rules
+description: Reglas globales del repo (seed base, cambios mínimos, contratos, seguridad, estilo)
 applyTo: "**"
 ---
 
+- Leer `AGENTS.md` y `docs/ENTRIBE_AGENT_SEED.md` antes de proponer cambios.
 - Siempre hacer cambios mínimos (patch), NO reescribir archivos completos si no es necesario.
 - Antes de cambiar: localizar el archivo exacto y explicar el plan en 3-6 bullets.
 - Nunca romper contratos de API (si cambias respuesta: mantener retrocompatibilidad).
@@ -11,4 +12,5 @@ applyTo: "**"
 - Si falta data (relación null / columna inexistente / env var): responder seguro (null/false) y mensaje claro; nunca reventar build.
 - Nunca commitear secretos: nada de passwords/keys en .vscode/, .env.local, etc. Solo .env.local.example.
 - Siempre evitar ESLint build-breakers (unused vars, etc.).
+- Tratar TixSwap/Tixswap como marca histórica: no hacer reemplazos ciegos sin clasificar impacto visible, técnico y de configuración.
 - Lee docs/AI_WORKFLOW.md antes de proponer cambios.
