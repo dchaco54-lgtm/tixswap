@@ -248,6 +248,18 @@ export async function DELETE(request) {
         return NextResponse.json({ error: "Error al eliminar publicación" }, { status: 500 });
       }
     } else {
+      // Compatibilidad con esquemas que mantienen el vínculo inverso
+      // ticket_uploads.ticket_id -> tickets.id. Conservamos el upload.
+      const { error: detachErr } = await admin
+        .from("ticket_uploads")
+        .update({ ticket_id: null })
+        .eq("ticket_id", ticketId);
+
+      if (detachErr) {
+        console.error("[listing DELETE] Upload detach error:", detachErr);
+        return NextResponse.json({ error: "Error al eliminar publicación" }, { status: 500 });
+      }
+
       let qDel = admin.from("tickets").delete().eq("id", ticketId);
       if (ownerOr) qDel = qDel.or(ownerOr);
 

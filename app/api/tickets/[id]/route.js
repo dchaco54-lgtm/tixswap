@@ -121,10 +121,23 @@ export async function DELETE(req, { params }) {
     return NextResponse.json({ error: "No se puede eliminar este ticket en su estado actual." }, { status: 400 });
   }
 
-  const { error: deleteError } = await db
-    .from("tickets")
-    .delete()
-    .eq("id", ticketId);
+  const admin = supabaseAdmin();
+
+  // La base productiva mantiene también ticket_uploads.ticket_id -> tickets.id.
+  // Desvinculamos el upload con service role para conservar el PDF y permitir el borrado.
+  const { error: detachError } = await admin
+    .from("ticket_uploads")
+    .update({ ticket_id: null })
+    .eq("ticket_id", ticketId);
+  if (detachError) {
+    console.error("[ticket DELETE] Upload detach error:", detachError);
+    return NextResponse.json({ error: "Error al eliminar publicación" }, { status: 500 });
+  }
+
+  let deleteQuery = admin.from("tickets").delete().eq("id", ticketId);
+  if (!isAdmin) deleteQuery = deleteQuery.eq("seller_id", user.id);
+
+  const { error: deleteError } = await deleteQuery;
   if (deleteError) {
     return NextResponse.json({ error: deleteError.message }, { status: 500 });
   }
