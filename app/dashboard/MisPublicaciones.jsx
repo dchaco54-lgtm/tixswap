@@ -269,9 +269,13 @@ export default function MisPublicaciones() {
    *  OJO: este endpoint usa cookies, así que no necesitas bearer.
    *  ========================================================= */
   const apiPatchTicket = async (id, payload) => {
+    const token = await getAccessToken();
     const res = await fetch(`/api/tickets/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
@@ -282,7 +286,11 @@ export default function MisPublicaciones() {
   };
 
   const apiDeleteTicket = async (id) => {
-    const res = await fetch(`/api/tickets/${id}`, { method: "DELETE" });
+    const token = await getAccessToken();
+    const res = await fetch(`/api/tickets/${id}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
     if (!res.ok) {
       const txt = await res.text();
       throw new Error(txt || `DELETE ${res.status}`);

@@ -33,6 +33,7 @@ export default function AdminPublishedTicketsPage() {
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [authToken, setAuthToken] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
   const [error, setError] = useState("");
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({
@@ -46,6 +47,15 @@ export default function AdminPublishedTicketsPage() {
   const [query, setQuery] = useState("");
   const [eventFilter, setEventFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+
+  const computeSummary = (list) => ({
+    total_published: list.length,
+    total_active: list.filter((row) => String(row?.status || "").toLowerCase() === "active").length,
+    total_paused: list.filter((row) => String(row?.status || "").toLowerCase() === "paused").length,
+    total_sold: list.filter((row) => String(row?.status || "").toLowerCase() === "sold").length,
+    events: new Set(list.map((row) => row.event_id).filter(Boolean)).size,
+    sellers: new Set(list.map((row) => row.seller?.id).filter(Boolean)).size,
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -194,6 +204,48 @@ export default function AdminPublishedTicketsPage() {
     });
   }, [rows, query, eventFilter]);
 
+  const canDelete = (row) => {
+    const status = String(row?.status || "").toLowerCase();
+    return !["sold", "locked", "processing"].includes(status);
+  };
+
+  const handleDelete = async (row) => {
+    if (!authToken || !row?.id || !canDelete(row)) return;
+
+    const confirmed = window.confirm(
+      "¿Seguro que quieres eliminar esta publicación? Esta acción no se puede deshacer."
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeletingId(row.id);
+      setError("");
+
+      const res = await fetch(`/api/tickets/${row.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || "No se pudo eliminar la publicación");
+      }
+
+      setRows((prev) => {
+        const nextRows = prev.filter((item) => item.id !== row.id);
+        setSummary(computeSummary(nextRows));
+        return nextRows;
+      });
+    } catch (deleteError) {
+      console.error("[admin/published-tickets] delete error:", deleteError);
+      setError(deleteError?.message || "No se pudo eliminar la publicación");
+    } finally {
+      setDeletingId("");
+    }
+  };
+
   if (checkingAdmin) {
     return (
       <main className="min-h-[100dvh] bg-slate-50">
@@ -338,6 +390,7 @@ export default function AdminPublishedTicketsPage() {
                     <th className="px-4 py-3">Estado</th>
                     <th className="px-4 py-3">Precio</th>
                     <th className="px-4 py-3">Publicada</th>
+                    <th className="px-4 py-3 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -370,6 +423,25 @@ export default function AdminPublishedTicketsPage() {
                         {formatPrice(row.price, row.currency)}
                       </td>
                       <td className="px-4 py-3 text-slate-600">{formatDate(row.created_at)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(row)}
+                          disabled={!canDelete(row) || deletingId === row.id}
+                          className={`rounded-xl px-3 py-2 text-sm border transition ${
+                            !canDelete(row) || deletingId === row.id
+                              ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                              : "border-red-200 bg-white text-red-600 hover:bg-red-50"
+                          }`}
+                          title={
+                            canDelete(row)
+                              ? "Eliminar"
+                              : "No se puede eliminar este ticket en su estado actual"
+                          }
+                        >
+                          {deletingId === row.id ? "Eliminando..." : "Eliminar"}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

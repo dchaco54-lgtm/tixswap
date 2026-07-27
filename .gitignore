@@ -11,6 +11,9 @@ pnpm-debug.log*
 # Vercel
 .vercel/
 
+# VS Code local settings
+.vscode/settings.json
+
 # Env (secrets)
 .env
 .env.local
