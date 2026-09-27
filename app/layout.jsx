@@ -4,7 +4,8 @@ import WhatsAppFloatingButton from "@/components/WhatsAppFloatingButton";
 
 export const metadata = {
   title: "TixSwap",
-  description: "Marketplace de reventa segura de entradas",
+  description:
+    "Compra y vende entradas entre personas con reglas claras, soporte y trazabilidad en TixSwap.",
 };
 
 export default function RootLayout({ children }) {

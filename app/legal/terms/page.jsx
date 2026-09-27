@@ -33,7 +33,7 @@ export default function TermsPage() {
     <main className="min-h-screen">
       <section className="tix-container tix-section">
         <div className="tix-card p-6 md:p-10">
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
+          <h1 className="font-display text-3xl md:text-4xl font-bold text-[#1A1333]">
             Términos y Condiciones de TixSwap
           </h1>
 

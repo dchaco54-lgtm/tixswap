@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -68,11 +69,18 @@ export default function Footer() {
   };
 
   return (
-    <footer className="bg-[#0c0f19] text-gray-300 py-12 px-6">
+    <footer className="bg-[#1A1333] text-[#E4D9FF] py-12 px-6">
       <div className="max-w-6xl mx-auto grid md:grid-cols-4 gap-10">
         <div>
-          <h3 className="font-bold text-lg mb-3 text-white">TixSwap</h3>
-          <p className="text-sm text-gray-400">Reventa segura en un clic.</p>
+          <Image
+            src="/brand/tixswap-logo-white.png"
+            alt="TixSwap"
+            width={2064}
+            height={543}
+            sizes="152px"
+            className="mb-4 h-auto w-[152px]"
+          />
+          <p className="text-sm text-[#CFC1F2]">Tu entrada. Tu evento. Tu lugar.</p>
         </div>
 
         <div>

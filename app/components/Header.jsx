@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -111,16 +112,21 @@ export default function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b bg-white/80 backdrop-blur">
+    <header className="sticky top-0 z-50 border-b border-[#E4D9FF] bg-white/90 backdrop-blur">
       <div className="tix-container flex items-center justify-between gap-3 py-3">
         {/* Logo */}
-        <div className="flex items-center gap-2">
-          <Link href="/" className="flex items-center gap-2">
-            <span className="text-xl font-semibold text-blue-600">TixSwap</span>
+        <div className="flex min-w-0 items-center">
+          <Link href="/" className="brand-focus rounded-md" aria-label="TixSwap — inicio">
+            <Image
+              src="/brand/tixswap-logo-color.png"
+              alt="TixSwap"
+              width={2064}
+              height={543}
+              priority
+              sizes="(max-width: 640px) 112px, 132px"
+              className="h-auto w-28 sm:w-[132px]"
+            />
           </Link>
-          <span className="hidden sm:inline text-xs text-slate-500">
-            Reventa segura, en un clic
-          </span>
         </div>
 
         {/* Navegación */}
@@ -128,21 +134,21 @@ export default function Header() {
           <button
             type="button"
             onClick={handleBuyClick}
-            className="px-1 py-1 rounded-md hover:text-blue-600 transition-colors"
+            className="brand-focus px-1 py-1 rounded-md hover:text-[#7B3FF2] transition-colors"
           >
             Comprar
           </button>
           <button
             type="button"
             onClick={handleSellClick}
-            className="px-1 py-1 rounded-md hover:text-blue-600 transition-colors"
+            className="brand-focus px-1 py-1 rounded-md hover:text-[#7B3FF2] transition-colors"
           >
             Vender
           </button>
           <button
             type="button"
             onClick={handleHowItWorksClick}
-            className="px-1 py-1 rounded-md hover:text-blue-600 transition-colors"
+            className="brand-focus px-1 py-1 rounded-md hover:text-[#7B3FF2] transition-colors"
           >
             Cómo funciona
           </button>
@@ -160,26 +166,34 @@ export default function Header() {
 
                   <NotificationBell userId={user?.id} />
 
-                  <Link href="/dashboard" className="tix-btn-secondary hidden md:inline-flex">
-                    Ver mi cuenta
-                  </Link>
+                  <span className="hidden md:inline-flex">
+                    <Link href="/dashboard" className="tix-btn-secondary">
+                      Ver mi cuenta
+                    </Link>
+                  </span>
 
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="tix-btn-primary hidden sm:inline-block"
-                  >
-                    Cerrar sesión
-                  </button>
+                  <span className="hidden sm:inline-flex">
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="tix-btn-primary"
+                    >
+                      Cerrar sesión
+                    </button>
+                  </span>
                 </>
               ) : (
                 <>
-                  <Link href="/login" className="tix-btn-secondary hidden sm:inline-block">
-                    Iniciar sesión
-                  </Link>
-                  <Link href="/register" className="tix-btn-primary hidden sm:inline-block">
-                    Crear cuenta
-                  </Link>
+                  <span className="hidden sm:inline-flex">
+                    <Link href="/login" className="tix-btn-secondary">
+                      Iniciar sesión
+                    </Link>
+                  </span>
+                  <span className="hidden sm:inline-flex">
+                    <Link href="/register" className="tix-btn-primary">
+                      Crear cuenta
+                    </Link>
+                  </span>
                 </>
               )}
             </>

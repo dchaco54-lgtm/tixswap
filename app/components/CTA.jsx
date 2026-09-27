@@ -26,19 +26,20 @@ export default function CTA() {
   };
 
   return (
-    <section className="bg-blue-600">
+    <section className="bg-[#4A1E9E]">
       <div className="max-w-6xl mx-auto px-4 py-14 text-center text-white">
-        <h2 className="text-3xl md:text-4xl font-bold">¿Tienes entradas para vender?</h2>
+        <h2 className="font-display text-3xl md:text-4xl font-bold">¿Cambió tu plan?</h2>
         <p className="mt-3 text-white/90">
-          Únete a miles que confían en TixSwap para intercambiar entradas.
+          Publica tu entrada en TixSwap y encuentra a alguien que quiera vivir ese evento.
         </p>
 
         <div className="mt-8">
           <button
+            type="button"
             onClick={handleClick}
-            className="bg-white text-blue-600 font-semibold px-10 py-4 rounded-2xl shadow-sm hover:opacity-95"
+            className="brand-focus bg-white text-[#4A1E9E] font-semibold px-10 py-4 rounded-2xl shadow-sm hover:bg-[#F2ECFF]"
           >
-            Comenzar ahora
+            Publicar una entrada
           </button>
         </div>
       </div>
