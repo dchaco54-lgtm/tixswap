@@ -30,15 +30,20 @@ export default function Hero({
   const hasResults = useMemo(() => (suggestions || []).length > 0, [suggestions]);
 
   return (
-    <section className="bg-gradient-to-b from-blue-50 to-white">
-      <div className="max-w-6xl mx-auto px-4 py-16 text-center">
-        <h2 className="text-4xl md:text-5xl font-bold text-gray-900">
-          Intercambia entradas
-          <span className="block text-blue-600 mt-2">de forma segura</span>
-        </h2>
-        <p className="mt-6 text-gray-600 max-w-2xl mx-auto text-lg">
-          El marketplace más confiable de Chile para comprar y vender entradas.
-          Sistema de garantía, validación de tickets y pago protegido.
+    <section className="relative overflow-hidden bg-gradient-to-b from-[#F2ECFF] to-white">
+      <div className="pointer-events-none absolute -right-24 -top-32 h-72 w-72 rounded-full bg-[#D83CFF]/15 blur-3xl" />
+      <div className="pointer-events-none absolute -left-24 bottom-0 h-64 w-64 rounded-full bg-[#FF4D5E]/10 blur-3xl" />
+      <div className="relative max-w-6xl mx-auto px-4 py-16 text-center md:py-20">
+        <p className="font-display text-sm font-semibold uppercase tracking-[0.18em] text-[#4A1E9E]">
+          Tu entrada. Tu evento. Tu lugar.
+        </p>
+        <h1 className="font-display mt-4 text-4xl font-bold text-[#1A1333] md:text-6xl">
+          Encuentra tu próxima entrada
+          <span className="brand-gradient-text mt-2 block">o dale un nuevo destino</span>
+        </h1>
+        <p className="mt-6 text-gray-600 max-w-2xl mx-auto text-lg leading-relaxed">
+          Compra y vende entradas entre personas, con información clara, soporte
+          y trazabilidad durante el proceso.
         </p>
 
         <div className="mt-10 flex justify-center">
@@ -48,7 +53,8 @@ export default function Hero({
               onChange={(e) => onQueryChange(e.target.value)}
               onFocus={() => query?.trim() && setOpen(true)}
               placeholder="Busca eventos, artistas, lugares..."
-              className="w-full px-6 py-4 rounded-xl border shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              aria-label="Buscar eventos"
+              className="brand-focus w-full rounded-2xl border border-[#D8C8FF] bg-white px-6 py-4 text-[#1A1333] shadow-[0_18px_50px_rgba(74,30,158,0.12)] focus:border-[#7B3FF2] focus:outline-none"
             />
 
             {open && (
@@ -67,7 +73,7 @@ export default function Hero({
                             setOpen(false);
                             onSelectSuggestion?.(ev);
                           }}
-                          className="w-full px-4 py-3 hover:bg-blue-50 flex flex-col"
+                          className="brand-focus w-full px-4 py-3 hover:bg-[#F2ECFF] flex flex-col"
                         >
                           <span className="font-semibold text-gray-900">
                             {ev.title}

@@ -8,12 +8,12 @@ export default function EventGrid({ title = "Eventos destacados", events = [] })
   return (
     <section className="max-w-6xl mx-auto px-4 py-12">
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
+        <h2 className="font-display text-2xl font-bold text-[#1A1333] md:text-3xl">{title}</h2>
 
         {/* (Imagen 3) En rojo: link a todos los eventos */}
         <Link
           href="/events"
-          className="text-sm font-semibold text-blue-600 hover:underline"
+          className="brand-focus rounded text-sm font-semibold text-[#4A1E9E] hover:underline"
         >
           Todos los eventos →
         </Link>

@@ -8,6 +8,12 @@
   --text: #0f172a;
   --brand: #2563eb;
   --brand2: #7c3aed;
+  --tix-deep: #4a1e9e;
+  --tix-purple: #7b3ff2;
+  --tix-magenta: #d83cff;
+  --tix-red: #ff4d5e;
+  --tix-soft: #f2ecff;
+  --tix-night: #1a1333;
 }
 
 html,
@@ -15,6 +21,27 @@ body {
   height: 100%;
   max-width: 100%;
   overflow-x: hidden;
+}
+
+.font-display {
+  letter-spacing: -0.025em;
+}
+
+.brand-gradient-text {
+  color: var(--tix-deep);
+}
+
+@supports (background-clip: text) {
+  .brand-gradient-text {
+    background: linear-gradient(100deg, var(--tix-deep), var(--tix-purple), var(--tix-red));
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+.brand-focus:focus-visible {
+  outline: 3px solid rgba(123, 63, 242, 0.35);
+  outline-offset: 3px;
 }
 
 body {

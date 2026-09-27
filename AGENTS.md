@@ -1,17 +1,19 @@
-# Entribe / TixSwap - Reglas de trabajo del agente (AGENTS)
+# Entribe — Reglas de trabajo del agente
 
-## Fuente base
-- Lee `docs/ENTRIBE_AGENT_SEED.md` como contexto principal de negocio, producto, rebranding y forma de trabajo.
-- Usa `AGENTS.md` como capa bloqueante local: si hay conflicto, estas reglas mandan para este repo.
+## Fuente canónica y lectura obligatoria
+
+- `docs/ENGINEERING_CONSTITUTION.md` es la fuente canónica de principios de ingeniería.
+- Antes de cambiar algo, lee este archivo y, cuando existan, `docs/APP_OVERVIEW.md`, `docs/AI_WORKFLOW.md`, `docs/API_CONTRACTS.md`, `docs/DB_MAP.md`, `docs/db/schema.json` y `docs/ENTRIBE_AGENT_SEED.md`.
+- Aplica también cualquier `AGENTS.md` más cercano al archivo que se modifica. Una regla local puede ser más estricta, no contradecir la constitución.
 
 ## Idioma / tono
 - Español (Chile), directo, sin humo.
 
 ## Objetivo Nº1 (anti-rupturas)
-- NO romper endpoints existentes (misma forma del JSON).
-- Cambios mínimos: editar líneas puntuales, NO reescrituras masivas.
-- Si hay duda, primero INSPECCIÓN (queries, grep, revisar schema) antes de codear.
-- Nunca inventar campos/tablas: si no existe en schema.json, se pregunta o se inspecciona.
+- No romper endpoints existentes ni su shape JSON.
+- Hacer cambios mínimos; no reescrituras masivas.
+- Ante dudas, inspeccionar código, consumidores, schema y migraciones antes de modificar.
+- Nunca inventar campos o tablas: confirmar en `docs/db/schema.json` y migraciones.
 
 ## Quality gate (bloqueante)
 - CERO errores ESLint/TS en build de Vercel.
@@ -22,7 +24,7 @@
 - Solo .env.local.example con nombres de variables, sin valores.
 
 ## Zonas intocables (salvo orden explícita)
-- app/api/payments/** y todo Webpay/BancoChile: NO tocar si funciona.
+- `app/api/payments/**` y todo Webpay/BancoChile: NO tocar si funciona.
 - Si hay que tocarlo: cambios mínimos y con checklist de regresión.
 
 ## Regla especial: “Mis publicaciones”
@@ -39,6 +41,7 @@
   - ticket_upload?.is_nominated ?? ticket_upload?.is_nominada ?? false
 
 ## Formato obligatorio de entrega cuando se implementa algo
+
 1) Archivos exactos a tocar
 2) Qué cambia (bullets)
 3) Patch/diff preciso

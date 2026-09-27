@@ -9,7 +9,7 @@ export const metadata = {
 function SectionTitle({ title, subtitle }) {
   return (
     <div className="mb-6">
-      <h2 className="text-2xl md:text-3xl font-bold text-slate-900">{title}</h2>
+      <h2 className="font-display text-2xl md:text-3xl font-bold text-[#1A1333]">{title}</h2>
       {subtitle ? (
         <p className="mt-2 text-slate-600 leading-relaxed">{subtitle}</p>
       ) : null}
@@ -19,7 +19,7 @@ function SectionTitle({ title, subtitle }) {
 
 function Card({ title, children }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+    <div className="rounded-3xl border border-[#E4D9FF] bg-white p-6 shadow-sm">
       {title ? (
         <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
       ) : null}
@@ -33,7 +33,7 @@ function Card({ title, children }) {
 function Bullet({ children }) {
   return (
     <li className="flex gap-2">
-      <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-600" />
+      <span className="mt-2 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#7B3FF2]" />
       <span className="leading-relaxed">{children}</span>
     </li>
   );
@@ -43,7 +43,7 @@ export default function HowItWorksPage() {
   return (
     <div className="tix-container tix-section">
       <div className="max-w-4xl">
-        <h1 className="text-3xl md:text-4xl font-bold text-slate-900">
+        <h1 className="font-display text-3xl md:text-4xl font-bold text-[#1A1333]">
           Cómo funciona TixSwap
         </h1>
         <p className="mt-3 text-slate-600 leading-relaxed">

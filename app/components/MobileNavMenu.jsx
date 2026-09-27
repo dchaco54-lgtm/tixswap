@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -89,14 +90,16 @@ export default function MobileNavMenu({ user, displayName, onLogout }) {
       <div className="fixed right-0 top-0 bottom-0 h-[100dvh] w-[310px] max-w-[88vw] bg-white z-50 md:hidden shadow-2xl overflow-y-auto overscroll-contain rounded-l-3xl border-l border-slate-100 pb-[env(safe-area-inset-bottom)]">
         {/* Header del drawer */}
         <div className="flex items-center justify-between p-4 border-b border-slate-200">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold">
-              T
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-slate-900">TixSwap</div>
-              <div className="text-xs text-slate-500">Menú rápido</div>
-            </div>
+          <div>
+            <Image
+              src="/brand/tixswap-logo-color.png"
+              alt="TixSwap"
+              width={2064}
+              height={543}
+              sizes="120px"
+              className="h-auto w-[120px]"
+            />
+            <div className="mt-1 text-xs text-slate-500">Menú rápido</div>
           </div>
           <button
             onClick={() => setIsOpen(false)}
