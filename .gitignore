@@ -27,3 +27,5 @@ supabase/.temp/
 
 # Allow explicit tracking
 !src/types/database.types.ts
+.vercel
+.env*
