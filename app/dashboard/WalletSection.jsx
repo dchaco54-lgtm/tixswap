@@ -236,7 +236,10 @@ export default function WalletSection({ user: userProp = null }) {
 
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json?.error || json?.details || "No se pudo guardar Wallet.");
+        const validationErrors = res.status === 400 && json?.details && typeof json.details === "object"
+          ? Object.values(json.details).filter((message) => typeof message === "string")
+          : [];
+        setError(validationErrors.join(" ") || json?.error || "No se pudo guardar Wallet.");
         return;
       }
 
